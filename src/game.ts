@@ -7,13 +7,13 @@
 import * as THREE from 'three';
 import { AudioKit } from './core/audio';
 import { AnimalWorld } from './core/animals';
-import { blockDef, isSolidBlock, ROCK } from './core/blocks';
+import { blockDef, isSolidBlock, ROCK, WATER } from './core/blocks';
 import { StarField } from './core/collectibles';
 import { ParticleSystem } from './core/particles';
 import { RayHit } from './core/raycast';
 import { blockAabb, boxesOverlap, playerAabb } from './core/physics';
-import { DEFAULT_SEED, generateTerrain } from './core/terrain';
-import { idx as worldIdx, World, WorldSaveData, WORLD_SY, WORLD_SZ } from './core/world';
+import { DEFAULT_SEED, generateTerrain, themeOf, WORLD_THEMES } from './core/terrain';
+import { idx as worldIdx, World, WorldSaveData, WORLD_SX, WORLD_SY, WORLD_SZ } from './core/world';
 import { InputManager } from './input/inputManager';
 import { KeyboardSource } from './input/keyboard';
 import { InputSource, FrameControls, emptyFrame } from './input/types';
@@ -26,7 +26,7 @@ import { createSky, SkyEnv } from './render/sky';
 import { SplitLayout, ViewportManager } from './render/viewportManager';
 import { Hud } from './ui/hud';
 import {
-  GrownUpsMenu, HelpOverlay, JoinCard, Overlay, PaletteOverlay, PlayerMenu, ReconnectOverlay,
+  GrownUpsMenu, HelpOverlay, JoinCard, Overlay, PaletteOverlay, PlayerMenu, ReconnectOverlay, WorldSelectOverlay,
 } from './ui/overlays';
 import { UiManager } from './ui/uiManager';
 
@@ -64,8 +64,14 @@ export class Game {
   reservedSeats = new Map<number, ReservedSeat>();
   layout: SplitLayout = 'auto';
   frozen = false;
+  seed = DEFAULT_SEED;
+  theme = 0;
 
-  private spawnPoint = new THREE.Vector3(32, 12, 32);
+  private spawnPoint = new THREE.Vector3(WORLD_SX / 2, 12, WORLD_SZ / 2);
+  private welcomePicker: { sid: string; overlay: WorldSelectOverlay } | null = null;
+  private idleAngle = 0;
+  /** slow orbit camera used while nobody has joined (welcome + world picker backdrop) */
+  private idleCamera = new THREE.PerspectiveCamera(70, 16 / 9, 0.1, 400);
   private overlays = new Map<number, Overlay>(); // playerId -> overlay
   private sourceToPlayer = new Map<string, LocalPlayer>();
   private lastRevision = 0;
@@ -82,13 +88,15 @@ export class Game {
   private rafId = 0;
 
   async init(): Promise<void> {
-    // ---- world ----
+    // ---- world (seed + theme, overridable via ?seed=..&world=0..N) ----
     const params = new URLSearchParams(location.search);
-    const seed = Number(params.get('seed')) || DEFAULT_SEED;
-    this.world = new World(seed);
+    this.seed = Number(params.get('seed')) || DEFAULT_SEED;
+    const themeParam = Number(params.get('world'));
+    this.theme = Number.isInteger(themeParam) && themeParam >= 0 && themeParam < WORLD_THEMES.length ? themeParam : 0;
+    this.world = new World(this.seed, this.theme);
     const save = await this.loadSave();
     const gen = generateTerrain(this.world);
-    if (save && save.seed === seed) this.world.applySave(save);
+    if (save && save.seed === this.seed && (save.theme ?? 0) === this.theme) this.world.applySave(save);
     this.spawnPoint.set(gen.spawnX, gen.spawnY, gen.spawnZ);
 
     // ---- renderer & scene ----
@@ -173,6 +181,16 @@ export class Game {
   private handleUnassignedInput(s: InputSource, frame: FrameControls): void {
     if (!frame.anyPressed) return;
     this.audio.resume();
+
+    // At the welcome screen, pressing the palette/world button opens the
+    // world chooser instead of a join card — so families can pick a world
+    // (or roll a seed) before anyone joins.
+    if (this.players.length === 0 && this.pendingJoins.size === 0
+      && frame.pressed.has('palette')) {
+      this.openWelcomeWorldPicker(s);
+      return;
+    }
+
     // fill a disconnected seat first
     for (const [pid, seat] of this.reservedSeats) {
       const p = this.players.find((pp) => pp.entity.id === pid);
@@ -237,6 +255,17 @@ export class Game {
   // ------------------------------------------------------------ routing
 
   private routeInput(dt: number): void {
+    // world picker opened at the welcome screen (nobody joined yet)
+    if (this.welcomePicker) {
+      const frame = this.input.frame(this.welcomePicker.sid);
+      this.welcomePicker.overlay.tick(frame, dt);
+      if (this.welcomePicker.overlay.closed) {
+        this.welcomePicker = null;
+        this.ui.showWelcome(this.players.length === 0);
+        this.resize();
+      }
+    }
+
     for (const [sid, pj] of this.pendingJoins) {
       const frame = this.input.frame(sid);
       pj.card.tick(frame, dt);
@@ -253,7 +282,9 @@ export class Game {
       const overlay = this.overlays.get(p.entity.id);
       if (overlay) {
         overlay.tick(frame, dt);
-        if (overlay.closed) this.overlays.delete(p.entity.id);
+        // only drop the slot if it still holds this (now closed) overlay:
+        // a menu can open a new overlay in the same tick (Help, Grown-Ups, Blocks)
+        if (overlay.closed && this.overlays.get(p.entity.id) === overlay) this.overlays.delete(p.entity.id);
         p.update(dt, emptyFrame(), this.hooks(), true);
       } else {
         if (frame.pressed.has('menu')) {
@@ -262,6 +293,9 @@ export class Game {
         } else if (frame.pressed.has('palette')) {
           this.openPalette(p);
           p.update(dt, emptyFrame(), this.hooks(), true);
+        } else if (this.frozen) {
+          // frozen world: everything stops dead — no walking, jumping or building.
+          // the controller can still open the menu to unfreeze.
         } else {
           if (frame.pressed.has('jump')) this.audio.jump();
           p.update(dt, frame, this.hooks(), false);
@@ -281,6 +315,7 @@ export class Game {
     // unassigned sources (join detection)
     for (const s of this.input.sources.values()) {
       if (this.sourceToPlayer.has(s.id) || this.pendingJoins.has(s.id)) continue;
+      if (this.welcomePicker?.sid === s.id) continue; // the picker owns this pad
       const reserved = [...this.reservedSeats.values()].some((r) => r.sourceId === s.id);
       if (reserved) continue; // handled on reconnect event
       this.handleUnassignedInput(s, this.input.frame(s.id));
@@ -333,14 +368,19 @@ export class Game {
           const g = new GrownUpsMenu(this.audio, this.typeOf(p), {
             toggleFreeze: () => { this.frozen = !this.frozen; this.ui.showFreeze(this.frozen); },
             cycleLayout: () => {
-              const order: SplitLayout[] = ['auto', 'horizontal', 'vertical'];
+              const order: SplitLayout[] = ['auto', 'horizontal', 'vertical', 'grid2x2'];
               this.layout = order[(order.indexOf(this.layout) + 1) % order.length];
               this.resize();
-              return this.layout === 'auto' ? 'Smart' : this.layout === 'horizontal' ? 'Left/Right' : 'Up/Down';
+              return this.layout === 'auto' ? 'Smart'
+                : this.layout === 'horizontal' ? 'Left/Right'
+                : this.layout === 'vertical' ? 'Up/Down' : '2×2 Grid';
             },
             resetWorld: () => void this.resetWorld(),
+            openWorlds: () => { this.openWorldPickerFor(p); },
             frozen: () => this.frozen,
-            layout: () => (this.layout === 'auto' ? 'Smart' : this.layout === 'horizontal' ? 'Left/Right' : 'Up/Down'),
+            layout: () => (this.layout === 'auto' ? 'Smart'
+              : this.layout === 'horizontal' ? 'Left/Right'
+              : this.layout === 'vertical' ? 'Up/Down' : '2×2 Grid'),
           },
           );
           this.overlays.set(p.entity.id, g);
@@ -352,6 +392,39 @@ export class Game {
     );
     this.overlays.set(p.entity.id, menu);
     this.ui.addOverlay(idx, menu);
+  }
+
+  private openWelcomeWorldPicker(s: InputSource): void {
+    this.audio.uiSelect();
+    this.ui.ensurePanes(1);
+    this.ui.clearOverlays(0);
+    const o = new WorldSelectOverlay(
+      this.audio, s.controllerType, this.seed, this.theme,
+      (seed, theme) => {
+        this.applyNewWorld(seed, theme);
+        this.ui.toast(`${themeOf(theme).icon} ${themeOf(theme).name} world — seed ${seed}!`);
+      },
+    );
+    this.welcomePicker = { sid: s.id, overlay: o };
+    this.ui.showWelcome(false);
+    this.ui.addOverlay(0, o);
+    this.resize();
+  }
+
+  private openWorldPickerFor(p: LocalPlayer): void {
+    // opened from the grown-up menu: rides the player's overlay slot
+    const idx = this.players.indexOf(p);
+    this.overlays.get(p.entity.id)?.close();
+    this.ui.clearOverlays(idx);
+    const o = new WorldSelectOverlay(
+      this.audio, this.typeOf(p), this.seed, this.theme,
+      (seed, theme) => {
+        this.applyNewWorld(seed, theme);
+        this.ui.toast(`${themeOf(theme).icon} ${themeOf(theme).name} world — seed ${seed}!`);
+      },
+    );
+    this.overlays.set(p.entity.id, o);
+    this.ui.addOverlay(idx, o);
   }
 
   private openPalette(p: LocalPlayer): void {
@@ -418,14 +491,15 @@ export class Game {
       },
       tryRemove: (lp: LocalPlayer, hit: RayHit): void => {
         const def = blockDef(hit.block);
-        if (def.unbreakable || hit.block === ROCK || hit.y <= 0) {
+        // bedrock, water and anything below y=0 are off limits for the break button
+        if (def.unbreakable || hit.block === ROCK || hit.block === WATER || hit.y <= 0) {
           this.particles.burst(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, 0xff5d5d, 4, 0.4);
           return;
         }
         this.world.set(hit.x, hit.y, hit.z, 0);
         this.audio.remove();
         this.particles.burst(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, new THREE.Color(def.color[0], def.color[1], def.color[2]), 9, 0.9);
-        this.sparkleBlocks.delete((hit.x * 64 + hit.z) * WORLD_SY + hit.y);
+        this.sparkleBlocks.delete(worldIdx(hit.x, hit.y, hit.z));
         void lp;
       },
       interact: (lp: LocalPlayer): void => {
@@ -437,9 +511,10 @@ export class Game {
   // ------------------------------------------------------------ persistence
 
   // ---------------------------------------------------------- GH Pages build
-  // When the game is hosted statically (no local server), /api/world does not
+  // When the game is hosted statically (no local server), the API does not
   // exist: we detect that once and keep all saves in the browser (localStorage)
   // so the game stays fully playable.
+
   private serverBacked = true;
 
   private api(path: string): string {
@@ -447,16 +522,21 @@ export class Game {
     return `api/${path}`;
   }
 
+  /** one save per (seed, theme) world, in browser storage */
+  private storageKey(seed = this.seed, theme = this.theme): string {
+    return `lbw-world-${seed}-${theme}`;
+  }
+
   private async loadSave(): Promise<WorldSaveData | null> {
     try {
-      const r = await fetch(this.api('world'));
+      const r = await fetch(this.api(`world?seed=${this.seed}&theme=${this.theme}`));
       const data = r.ok ? (await r.json()) as WorldSaveData | null : null;
       if (data && data.mods) return data;
       if (!r.ok) throw new Error(String(r.status));
       return null;
     } catch {
       this.serverBacked = false; // static hosting or server down: browser-only mode
-      const cached = localStorage.getItem('lbw-world');
+      const cached = localStorage.getItem(this.storageKey());
       if (cached) {
         try { return JSON.parse(cached) as WorldSaveData; } catch { /* corrupted cache */ }
       }
@@ -472,7 +552,7 @@ export class Game {
   async saveNow(): Promise<void> {
     const save = this.world.toSave();
     try {
-      localStorage.setItem('lbw-world', JSON.stringify(save));
+      localStorage.setItem(this.storageKey(), JSON.stringify(save));
     } catch { /* storage full/unavailable */ }
     if (!this.serverBacked) return; // GH Pages / browser-only mode
     try {
@@ -488,24 +568,32 @@ export class Game {
     }
   }
 
-  async resetWorld(): Promise<void> {
-    try {
-      await fetch(this.api('world/reset'), { method: 'POST' });
-    } catch { /* ignore */ }
-    localStorage.removeItem('lbw-world');
-    const seed = this.world.seed;
-    this.chunks.dispose();
-    this.world = new World(seed);
-    generateTerrain(this.world);
-    this.chunks = new ChunkMeshManager(this.scene, this.world);
+  /** fresh terrain for a (new) seed+theme, reusing the same World object so
+   *  players/chunks keep valid references */
+  applyNewWorld(seed: number, theme: number): void {
+    this.seed = seed;
+    this.theme = theme;
+    this.world.resetFor(seed, theme);
+    const gen = generateTerrain(this.world, themeOf(theme));
+    this.spawnPoint.set(gen.spawnX, gen.spawnY, gen.spawnZ);
     this.chunks.rebuildAll();
     // rebuild stars & animals against the new world
     this.starField.stars.forEach((s) => { s.mesh.removeFromParent(); s.glow.removeFromParent(); });
-    this.starField = new StarField(this.scene, this.world, this.spawnPoint.x, this.spawnPoint.z);
+    this.starField = new StarField(this.scene, this.world, gen.spawnX, gen.spawnZ);
     this.animals.animals.forEach((a) => a.group.removeFromParent());
-    this.animals = new AnimalWorld(this.scene, this.world, this.particles, this.audio, this.spawnPoint.x, this.spawnPoint.z);
+    this.animals = new AnimalWorld(this.scene, this.world, this.particles, this.audio, gen.spawnX, gen.spawnZ);
     this.sparkleBlocks.clear();
     for (const p of this.players) p.respawnAt(this.spawnPoint.clone());
+    this.lastRevision = this.world.revision;
+    void this.saveNow(); // remember the empty new world
+  }
+
+  async resetWorld(): Promise<void> {
+    try {
+      await fetch(this.api(`world/reset?seed=${this.seed}&theme=${this.theme}`), { method: 'POST' });
+    } catch { /* ignore */ }
+    localStorage.removeItem(this.storageKey());
+    this.applyNewWorld(this.seed, this.theme);
     this.ui.toast('Fresh new world! 🌍');
   }
 
@@ -588,6 +676,19 @@ export class Game {
       );
       pj.camera.lookAt(this.spawnPoint);
       cameras.push(pj.camera);
+    }
+    if (cameras.length === 0) {
+      // nobody joined yet: drift over the world so the welcome screen and the
+      // world picker have a live view of the world behind them
+      this.idleAngle += dt * 0.05;
+      const r = 42;
+      this.idleCamera.position.set(
+        this.spawnPoint.x + Math.cos(this.idleAngle) * r,
+        this.spawnPoint.y + 24,
+        this.spawnPoint.z + Math.sin(this.idleAngle) * r,
+      );
+      this.idleCamera.lookAt(this.spawnPoint.x, this.spawnPoint.y, this.spawnPoint.z);
+      cameras.push(this.idleCamera);
     }
     this.viewportMgr.render(this.renderer, this.scene, cameras);
 

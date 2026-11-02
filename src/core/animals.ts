@@ -227,7 +227,7 @@ export class AnimalWorld {
     };
     let placed = 0;
     let tries = 0;
-    while (placed < 14 && tries < 600) {
+    while (placed < 28 && tries < 1400) {
       tries++;
       const x = 4 + rnd() * (WORLD_SX - 8);
       const z = 4 + rnd() * (WORLD_SZ - 8);

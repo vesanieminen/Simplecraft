@@ -1,14 +1,14 @@
 /**
- * Voxel world storage. Fixed-size deterministic world (64 x 64 x 64).
+ * Voxel world storage. Fixed-size deterministic world (128 x 128 x 64).
  * Generated terrain is stored in `data`; player edits live in `mods` so that
- * the base world can always be regenerated from the seed.
+ * the base world can always be regenerated from the seed + theme.
  */
 
 import { AIR, BlockId, ROCK, isSolidBlock, WATER } from './blocks';
 
-export const WORLD_SX = 64;
+export const WORLD_SX = 128;
 export const WORLD_SY = 64; // height
-export const WORLD_SZ = 64;
+export const WORLD_SZ = 128;
 export const WATER_LEVEL = 9;
 export const CHUNK = 16;
 export const CHUNKS_X = WORLD_SX / CHUNK;
@@ -21,6 +21,8 @@ export function idx(x: number, y: number, z: number): number {
 export interface WorldSaveData {
   version: number;
   seed: number;
+  /** world theme index (see WORLD_THEMES); 0 = classic meadow */
+  theme?: number;
   /** map of flat index -> block id (player modifications only) */
   mods: Record<string, number>;
   /** indices of collected star pickups */
@@ -28,7 +30,8 @@ export interface WorldSaveData {
 }
 
 export class World {
-  readonly seed: number;
+  seed: number;
+  theme = 0;
   readonly data: Uint8Array;
   readonly mods = new Map<number, BlockId>();
   /** chunk keys (cx*CHUNKS_X+cz) that need remeshing */
@@ -37,9 +40,20 @@ export class World {
   /** bumped on every change so listeners (autosave) can debounce */
   revision = 0;
 
-  constructor(seed: number) {
+  constructor(seed: number, theme = 0) {
     this.seed = seed;
+    this.theme = theme;
     this.data = new Uint8Array(WORLD_SX * WORLD_SY * WORLD_SZ);
+  }
+
+  /** wipe in place so existing references (players, chunks) stay valid */
+  resetFor(seed: number, theme: number): void {
+    this.seed = seed;
+    this.theme = theme;
+    this.data.fill(0);
+    this.mods.clear();
+    this.collectedStars.clear();
+    this.revision++;
   }
 
   inBounds(x: number, y: number, z: number): boolean {
@@ -115,6 +129,7 @@ export class World {
     return {
       version: 1,
       seed: this.seed,
+      theme: this.theme,
       mods,
       collectedStars: [...this.collectedStars].sort((a, b) => a - b),
     };

@@ -44,6 +44,51 @@ async function joinWithPad(page: Page, confirmDelay = true): Promise<Pad> {
   return pad;
 }
 
+/** waits for n animation frames (a big world can render slowly in headless CI) */
+function frames(page: Page, n = 2): Promise<unknown> {
+  return page.evaluate((k: number) => new Promise<void>((resolve) => {
+    let left = k;
+    const tick = (): void => {
+      left--;
+      if (left <= 0) resolve();
+      else requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }), n);
+}
+
+/** taps one button and lets a couple of frames pass, so taps never merge */
+async function tap(page: Page, action: string): Promise<void> {
+  await page.evaluate((a: string) => (window as any).__testPad.tap(a), action);
+  await frames(page, 2);
+}
+
+/** waits until a player has actually walked `minDist` blocks from `from` */
+async function waitForMove(
+  page: Page, from: { x: number; z: number }, minDist: number, playerIdx = 0,
+): Promise<void> {
+  await page.waitForFunction(
+    (arg: { f: { x: number; z: number }; d: number; i: number }) => {
+      const e = (window as any).__lbw.game.players[arg.i].entity;
+      return Math.hypot(e.pos.x - arg.f.x, e.pos.z - arg.f.z) > arg.d;
+    },
+    { f: from, d: minDist, i: playerIdx },
+    { timeout: 20000 },
+  );
+}
+
+/** waits until a player has decelerated to a standstill */
+async function waitForStop(page: Page, playerIdx = 0): Promise<void> {
+  await page.waitForFunction(
+    (i: number) => {
+      const e = (window as any).__lbw.game.players[i].entity;
+      return Math.hypot(e.vel.x, e.vel.z) < 0.05;
+    },
+    playerIdx,
+    { timeout: 10000 },
+  );
+}
+
 test('game loads without console errors and shows welcome', async ({ page }) => {
   await boot(page);
   await expect(page.locator('.welcome')).toBeVisible();
@@ -76,23 +121,15 @@ test('controller player joins and can move + jump', async ({ page }) => {
     return { x: e.pos.x, z: e.pos.z };
   });
   await page.evaluate(() => (window as any).__testPad.setMove(0, -1));
-  await page.waitForTimeout(900);
-  const pos1 = await page.evaluate(() => {
-    const e = (window as any).__lbw.game.players[0].entity;
-    return { x: e.pos.x, z: e.pos.z };
-  });
+  await waitForMove(page, pos0, 1);
   await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
-  const dist = Math.hypot(pos1.x - pos0.x, pos1.z - pos0.z);
-  expect(dist).toBeGreaterThan(1);
 
   // jump raises the player
   await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 5000 });
   const y0 = await page.evaluate(() => (window as any).__lbw.game.players[0].entity.pos.y);
   await page.evaluate(() => (window as any).__testPad.set('jump', true));
-  await page.waitForTimeout(400);
-  const y1 = await page.evaluate(() => (window as any).__lbw.game.players[0].entity.pos.y);
+  await page.waitForFunction((y: number) => (window as any).__lbw.game.players[0].entity.pos.y > y + 0.5, y0, { timeout: 5000 });
   await page.evaluate(() => (window as any).__testPad.set('jump', false));
-  expect(y1).toBeGreaterThan(y0 + 0.5);
 });
 
 test('second controller joins and split screen activates', async ({ page }) => {
@@ -141,14 +178,8 @@ test('both local players move independently', async ({ page }) => {
     (window as any).__testPad.setMove(0, -1);
     (window as any).__testPad2.setMove(0, 1);
   });
-  await page.waitForTimeout(900);
-  const after = await page.evaluate(() =>
-    (window as any).__lbw.game.players.map((p: any) => ({ x: p.entity.pos.x, z: p.entity.pos.z })),
-  );
-  const d0 = Math.hypot(after[0].x - before[0].x, after[0].z - before[0].z);
-  const d1 = Math.hypot(after[1].x - before[1].x, after[1].z - before[1].z);
-  expect(d0).toBeGreaterThan(0.8);
-  expect(d1).toBeGreaterThan(0.8);
+  await waitForMove(page, before[0], 0.8, 0);
+  await waitForMove(page, before[1], 0.8, 1);
   await page.evaluate(() => {
     (window as any).__testPad.setMove(0, 0);
     (window as any).__testPad2.setMove(0, 0);
@@ -176,11 +207,11 @@ test('RT places a block and LT removes it', async ({ page }) => {
   // remove the block we just placed (search for the first added non-zero mod)
   const removed = await page.evaluate(() => {
     const game = (window as any).__lbw.game;
+    const { sz, sy } = (window as any).__lbw.dims;
     for (const [i, v] of game.world.mods) {
       if (v !== 0 && i > 0) {
-        const SY = 64, SZ = 64;
-        const y = i % SY, xz = Math.floor(i / SY);
-        game.world.set(Math.floor(xz / SZ), y, xz % SZ, 0);
+        const y = i % sy, xz = Math.floor(i / sy);
+        game.world.set(Math.floor(xz / sz), y, xz % sz, 0);
         return true;
       }
     }
@@ -215,22 +246,23 @@ test('right stick turns the view right (and stick up looks up)', async ({ page }
 test('world modifications persist across a page reload', async ({ page }) => {
   await boot(page);
   await joinWithPad(page);
-  await page.evaluate(() => {
+  const want = await page.evaluate(() => {
     const game = (window as any).__lbw.game;
+    const { sz, sy } = (window as any).__lbw.dims;
     game.world.set(33, 30, 33, 21); // a green block high in the air
+    return { key: String((33 * sz + 33) * sy + 30), seed: game.seed, theme: game.theme };
   });
-  const saveKey = String((33 * 64 + 33) * 64 + 30);
-  await page.evaluate(async (key: string) => {
+  await page.evaluate(async (w: { key: string; seed: number; theme: number }) => {
     (window as any).__savedOk = false;
     const iv = setInterval(async () => {
-      const r = await fetch('/api/world');
+      const r = await fetch(`/api/world?seed=${w.seed}&theme=${w.theme}`);
       const d = await r.json();
-      if (d && d.mods && d.mods[key] === 21) {
+      if (d && d.mods && d.mods[w.key] === 21) {
         (window as any).__savedOk = true;
         clearInterval(iv);
       }
     }, 250);
-  }, saveKey);
+  }, want);
   await page.waitForFunction('window.__savedOk === true', null, { timeout: 15000 });
   await page.reload();
   await page.waitForFunction('window.__lbw !== undefined');
@@ -265,13 +297,8 @@ test('block palette opens on Y and picks with dpad+A, without pausing the other 
     const e = (window as any).__lbw.game.players[1].entity;
     return { x: e.pos.x, z: e.pos.z };
   });
-  await page.waitForTimeout(700);
-  const after = await page.evaluate(() => {
-    const e = (window as any).__lbw.game.players[1].entity;
-    return { x: e.pos.x, z: e.pos.z };
-  });
+  await waitForMove(page, before, 0.8, 1);
   await page.evaluate(() => (window as any).__testPad2.setMove(0, 0));
-  expect(Math.hypot(after.x - before.x, after.z - before.z)).toBeGreaterThan(0.8);
 
   // navigate with dpad, pick with A
   await page.evaluate(() => (window as any).__testPad.tap('right'));
@@ -383,4 +410,373 @@ test('controller disconnect shows reconnect UI and any new controller resumes th
   expect(state.name).toBe(name);
   expect(state.pending).toBe(0);
   expect(state.players).toBe(1);
+});
+
+// ------------------------------------------------------- world & menu tests
+
+/** reads which menu row is currently highlighted (0-based) */
+async function selectedRow(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const rows = [...document.querySelectorAll('.overlay-card .menu-item')];
+    return rows.findIndex((r) => r.classList.contains('sel'));
+  });
+}
+
+async function selectRow(page: Page, index: number): Promise<void> {
+  for (let guard = 0; guard < 30; guard++) {
+    const cur = await selectedRow(page);
+    if (cur === index) return;
+    await tap(page, cur === -1 ? 'down' : cur < index ? 'down' : 'up');
+  }
+  throw new Error(`could not highlight menu row ${index}`);
+}
+
+async function openGrownUpsMenu(page: Page): Promise<void> {
+  await tap(page, 'menu');
+  await page.waitForSelector('.menu-list');
+  await selectRow(page, 8); // Grown-Ups
+  await tap(page, 'jump');
+  await page.waitForTimeout(300);
+  expect(await selectedRow(page)).toBe(0);
+}
+
+const posOf = (page: Page) =>
+  page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    return { x: e.pos.x, z: e.pos.z, y: e.pos.y };
+  });
+
+test('plants are textured atlas quads and the break button destroys them', async ({ page }) => {
+  await boot(page);
+  const mat = await page.evaluate(() => {
+    const m = (window as any).__lbw.game.chunks.materials.cross;
+    return { hasMap: !!m.map, alphaTest: m.alphaTest, doubleside: m.side === 2 };
+  });
+  expect(mat.hasMap).toBe(true); // the procedural plant atlas, not flat polygons
+  expect(mat.alphaTest).toBeGreaterThan(0);
+  expect(mat.doubleside).toBe(true);
+
+  await joinWithPad(page);
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 10000 });
+
+  // stand a grass tuft right in the cell the player is aiming at
+  let spot: { x: number; y: number; z: number } | null = null;
+  for (let i = 0; i < 30 && !spot; i++) {
+    spot = await page.evaluate((tuft: number) => {
+      const game = (window as any).__lbw.game;
+      const t = game.players[0].target;
+      if (!t) return null;
+      game.world.set(t.px, t.py, t.pz, tuft);
+      return { x: t.px, y: t.py, z: t.pz };
+    }, ids.TALLGRASS);
+    if (!spot) await page.waitForTimeout(100);
+  }
+  expect(spot).not.toBeNull();
+  const cell = spot!;
+
+  await frames(page, 3);
+  const aim = await page.evaluate(() => {
+    const p = (window as any).__lbw.game.players[0];
+    const r = p.removeTarget, s = p.target;
+    return {
+      removeBlock: r ? r.block : -1, removeY: r ? r.y : -1,
+      placeBlock: s ? s.block : -1,
+    };
+  });
+  // LT aims at the plant, RT still aims through it at the ground
+  expect(aim.removeBlock).toBe(ids.TALLGRASS);
+  expect(aim.removeY).toBe(cell.y);
+  expect(aim.placeBlock).not.toBe(ids.TALLGRASS);
+
+  // hold the break button (LT) — the plant must disappear
+  await page.evaluate(() => (window as any).__testPad.set('remove', true));
+  await page.waitForFunction(
+    (c: { x: number; y: number; z: number }) => (window as any).__lbw.game.world.get(c.x, c.y, c.z) === 0,
+    cell, { timeout: 10000 },
+  );
+  await page.evaluate(() => (window as any).__testPad.set('remove', false));
+});
+
+test('water cannot be destroyed by the break button', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page);
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  const blocked = await page.evaluate((water: number) => {
+    const game = (window as any).__lbw.game;
+    const { sx, sz } = (window as any).__lbw.dims;
+    let found: { x: number; y: number; z: number } | null = null;
+    outer: for (let x = 2; x < sx - 2; x++) {
+      for (let z = 2; z < sz - 2; z++) {
+        for (let y = 1; y < 20; y++) {
+          if (game.world.get(x, y, z) === water) {
+            found = { x, y, z };
+            break outer;
+          }
+        }
+      }
+    }
+    if (!found) return null;
+    const before = game.world.get(found.x, found.y, found.z);
+    const hit = { block: before, x: found.x, y: found.y, z: found.z, px: found.x, py: found.y + 1, pz: found.z, dist: 1 };
+    game.hooks().tryRemove(game.players[0], hit);
+    return { after: game.world.get(found.x, found.y, found.z), water };
+  }, ids.WATER);
+  test.skip(blocked === null, 'no water found in this world');
+  expect(blocked!.after).toBe(blocked!.water);
+});
+
+test('kids can jump out of the water onto the shore', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+
+  // a deep pond right in front of the player, its shore one block above the
+  // water surface. Paddling tops out just under the surface, so climbing out
+  // needs a real push-off jump.
+  const lake = await page.evaluate((b: { water: number; grass: number; air: number }) => {
+    const game = (window as any).__lbw.game;
+    const S = game.world;
+    const e = game.players[0].entity;
+    const cx = Math.round(e.pos.x), cz = Math.round(e.pos.z);
+    const base = S.surfaceY(cx, cz); // the pond's water surface ends at y = base
+    const deep = 6;
+    for (let dx = -3; dx <= 3; dx++) {
+      for (let dz = -4; dz <= 4; dz++) {
+        for (let y = base - deep; y <= base + 3; y++) S.set(cx + dx, y, cz + dz, b.air);
+        if (dz <= -2) {
+          for (let y = base - deep; y <= base; y++) S.set(cx + dx, y, cz + dz, b.grass); // shore
+        } else {
+          for (let y = base - deep; y <= base - 1; y++) S.set(cx + dx, y, cz + dz, b.water); // pond
+        }
+      }
+    }
+    e.pos.set(cx + 0.5, base + 1, cz - 2.5); // standing on the shore, pond just north
+    e.vel.set(0, 0, 0);
+    e.yaw = 0; // face the pond
+    return { cx, cz, base, shoreFeetY: base + 1, waterAtSurface: S.get(cx, base - 1, cz) };
+  }, { water: ids.WATER, grass: ids.GRASS, air: ids.AIR });
+  expect(lake.waterAtSurface).toBe(ids.WATER);
+
+  // the kid walks in and paddles for a moment without pressing jump
+  await page.evaluate(() => (window as any).__testPad.setMove(0, -1));
+  await page.waitForFunction('window.__lbw.game.players[0].entity.inWaterNow === true', null, { timeout: 15000 });
+  await frames(page, 10);
+
+  // turn around, then hold jump and paddle for the shore
+  await page.evaluate(() => {
+    (window as any).__lbw.game.players[0].entity.yaw = Math.PI;
+    (window as any).__testPad.set('jump', true);
+    (window as any).__testPad.setMove(0, -1);
+  });
+  const escaped = await page.waitForFunction(
+    (l: { shoreFeetY: number; cz: number }) => {
+      const e = (window as any).__lbw.game.players[0].entity;
+      if (!(e.grounded && !e.inWaterNow && e.pos.y >= l.shoreFeetY - 0.05 && e.pos.z <= l.cz - 1.5)) return false;
+      return { y: e.pos.y, z: e.pos.z }; // snapshot the exact frame they get out
+    },
+    lake, { timeout: 30000 },
+  );
+  const out = (await escaped.jsonValue()) as { y: number; z: number };
+  await page.evaluate(() => {
+    (window as any).__testPad.set('jump', false);
+    (window as any).__testPad.setMove(0, 0);
+  });
+
+  expect(out.y).toBeGreaterThanOrEqual(lake.shoreFeetY - 0.05); // dry land, above the water
+  expect(out.z).toBeLessThanOrEqual(lake.cz - 1.5); // and ashore, not back in the pond
+
+  // fill the pond in so it cannot confuse later tests
+  await page.evaluate((arg: { cx: number; cz: number; base: number; grass: number; air: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let dx = -4; dx <= 4; dx++) {
+      for (let dz = -5; dz <= 5; dz++) {
+        for (let y = arg.base - 6; y <= arg.base + 3; y++) {
+          S.set(arg.cx + dx, y, arg.cz + dz, y <= arg.base ? arg.grass : arg.air);
+        }
+      }
+    }
+  }, { ...lake, grass: ids.GRASS, air: ids.AIR });
+});
+/** opens Grown-Up Settings, switches Freeze, and closes the menu again */
+async function setFreeze(page: Page, on: boolean): Promise<void> {
+  await tap(page, 'menu');
+  await page.waitForSelector('.menu-list');
+  await selectRow(page, 8); // Grown-Ups
+  await tap(page, 'jump');
+  await selectRow(page, 0); // Freeze Game
+  if ((await page.evaluate(() => (window as any).__lbw.game.frozen)) !== on) await tap(page, 'jump');
+  await tap(page, 'back'); // close the menu so the player can walk again
+  await page.waitForFunction((v: boolean) => (window as any).__lbw.game.frozen === v, on, { timeout: 10000 });
+}
+
+test('grown-up menu: freeze pauses the world, split screen cycles, reset clears edits', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 10000 });
+
+  // a world edit to lose later + a baseline walk to prove movement works first
+  await page.evaluate(() => (window as any).__lbw.game.world.set(10, 40, 10, 21));
+  expect(await page.evaluate(() => (window as any).__lbw.game.world.mods.size)).toBeGreaterThan(0);
+  const start = await posOf(page);
+  await page.evaluate(() => (window as any).__testPad.setMove(0, -1));
+  await waitForMove(page, start, 0.8);
+  const walked = await posOf(page);
+  expect(Math.hypot(walked.x - start.x, walked.z - start.z)).toBeGreaterThan(0.8);
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+  await waitForStop(page);
+
+  // --- Freeze: walking must stop, unfreezing must bring it back
+  await setFreeze(page, true);
+  const frozenAt = await posOf(page);
+  await page.evaluate(() => (window as any).__testPad.setMove(0, -1));
+  await page.waitForTimeout(900);
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+  await frames(page, 2);
+  const stuck = await posOf(page);
+  expect(Math.hypot(stuck.x - frozenAt.x, stuck.z - frozenAt.z)).toBeLessThan(0.05);
+
+  await setFreeze(page, false);
+  await page.evaluate(() => (window as any).__testPad.setMove(0, -1));
+  await waitForMove(page, stuck, 0.8);
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+  await frames(page, 2);
+
+  // --- Split Screen cycles through every layout, Reset World wipes edits
+  await tap(page, 'menu');
+  await page.waitForSelector('.menu-list');
+  await selectRow(page, 8);
+  await tap(page, 'jump');
+
+  await selectRow(page, 1); // Split Screen
+  const layouts: string[] = [];
+  for (let i = 0; i < 4; i++) {
+    await tap(page, 'jump');
+    layouts.push(await page.evaluate(() => (window as any).__lbw.game.layout));
+  }
+  expect(new Set(layouts).size).toBe(4);
+  expect(layouts).toContain('grid2x2');
+
+  await selectRow(page, 3); // Reset World: first tap arms, second wipes
+  await tap(page, 'jump');
+  await page.waitForTimeout(200);
+  expect(await page.evaluate(() => (window as any).__lbw.game.world.mods.size)).toBeGreaterThan(0);
+  await tap(page, 'jump');
+  await page.waitForFunction('window.__lbw.game.world.mods.size === 0', null, { timeout: 20000 });
+  const after = await page.evaluate(() => ({
+    block: (window as any).__lbw.game.world.get(10, 40, 10),
+    players: (window as any).__lbw.game.players.length,
+  }));
+  expect(after.block).toBe(0);
+  expect(after.players).toBe(1);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 12000 });
+});
+
+test('grown-up menu: Choose World opens the preview picker and starts a new world', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 5000 });
+  await openGrownUpsMenu(page);
+
+  await selectRow(page, 2); // Choose World
+  await tap(page, 'jump');
+  await page.waitForSelector('.world-preview');
+
+  // the preview canvas really renders a map (many distinct colours)
+  const variety = await page.evaluate(() => {
+    const c = document.querySelector('.world-preview') as HTMLCanvasElement;
+    const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+    const seen = new Set<string>();
+    for (let i = 0; i < d.length; i += 4) seen.add(`${d[i] >> 3},${d[i + 1] >> 3},${d[i + 2] >> 3}`);
+    return seen.size;
+  });
+  expect(variety).toBeGreaterThan(12);
+
+  await tap(page, 'right'); // next theme
+  await selectRow(page, 3); // Start this world
+  await tap(page, 'jump');
+  await page.waitForSelector('.world-preview', { state: 'detached' });
+
+  const state = await page.evaluate(() => ({
+    theme: (window as any).__lbw.game.theme,
+    worldTheme: (window as any).__lbw.game.world.theme,
+    seed: (window as any).__lbw.game.seed,
+    mods: (window as any).__lbw.game.world.mods.size,
+    animals: (window as any).__lbw.game.animals.animals.length,
+    players: (window as any).__lbw.game.players.length,
+  }));
+  expect(state.theme).toBe(1);
+  expect(state.worldTheme).toBe(1);
+  expect(state.mods).toBe(0);
+  expect(state.animals).toBeGreaterThan(0);
+  expect(state.players).toBe(1);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 12000 });
+});
+
+test('world picker at the welcome screen picks a theme, a surprise seed and starts it', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await page.evaluate(() => {
+    const pad = (window as any).__lbw.addVirtualPad();
+    (window as any).__testPad = pad;
+    pad.tap('palette');
+  });
+  await page.waitForSelector('.world-preview');
+  expect(await page.evaluate(() => (window as any).__lbw.game.players.length)).toBe(0);
+
+  await tap(page, 'right'); // theme -> Islands
+  await selectRow(page, 2); // Surprise me!
+  await tap(page, 'jump');
+  const rows = await page.evaluate(() =>
+    [...document.querySelectorAll('.overlay-card .menu-item .mi-body')].map((e) => e.textContent ?? ''),
+  );
+  const shownSeed = Number((rows[1] ?? '').match(/\d+/)?.[0]);
+  expect(Number.isInteger(shownSeed)).toBe(true);
+  expect(shownSeed).toBeGreaterThan(0);
+
+  await selectRow(page, 3); // Start
+  await tap(page, 'jump');
+  await page.waitForSelector('.world-preview', { state: 'detached' });
+  const state = await page.evaluate(() => ({
+    seed: (window as any).__lbw.game.seed,
+    theme: (window as any).__lbw.game.theme,
+    worldTheme: (window as any).__lbw.game.world.theme,
+  }));
+  expect(state.seed).toBe(shownSeed);
+  expect(state.theme).toBe(1);
+  expect(state.worldTheme).toBe(1);
+  // back to the welcome screen, ready to join
+  await expect(page.locator('.welcome')).toBeVisible();
+});
+
+test('menu sub-screens receive controller input (Help screen opens and closes on the pad)', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page);
+  await tap(page, 'menu');
+  await page.waitForSelector('.menu-list');
+  await selectRow(page, 6); // Help
+  await tap(page, 'jump');
+  await page.waitForSelector('.pad-help');
+  expect(await page.evaluate(() => (window as any).__lbw.game.overlays.size)).toBe(1);
+  await tap(page, 'back');
+  await page.waitForSelector('.pad-help', { state: 'detached' });
+  await page.waitForFunction('window.__lbw.game.overlays.size === 0');
+});
+
+test('the ?seed= and ?world= url params choose the starting world', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto('/?seed=4242&world=2');
+  await page.waitForFunction('window.__lbw !== undefined', null, { timeout: 20000 });
+  expect(errors, `page errors: ${errors.join('\n')}`).toEqual([]);
+  const state = await page.evaluate(() => ({
+    seed: (window as any).__lbw.game.seed,
+    theme: (window as any).__lbw.game.theme,
+    worldTheme: (window as any).__lbw.game.world.theme,
+  }));
+  expect(state).toEqual({ seed: 4242, theme: 2, worldTheme: 2 });
 });

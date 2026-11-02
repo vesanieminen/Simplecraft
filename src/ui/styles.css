@@ -145,6 +145,14 @@ html, body {
 .menu-item .mi-icon { font-size: calc(20px * var(--ui-scale, 1)); width: 30px; text-align: center; }
 .menu-item.sel { background: #ffe14d; box-shadow: 0 0 0 4px rgba(38, 48, 61, 0.35); transform: scale(1.04); }
 .menu-item .mi-val { margin-left: auto; }
+.menu-item .mi-arrow { opacity: 0.5; padding: 0 6px; }
+.menu-item.sel .mi-arrow { opacity: 1; }
+.menu-item .mi-body { flex: 1; text-align: center; }
+.world-preview {
+  display: block; margin: 0 auto 4px; width: min(320px, 74%, 38vh); height: auto;
+  image-rendering: pixelated; border-radius: 14px;
+  box-shadow: 0 4px 0 rgba(38, 48, 61, 0.25);
+}
 
 /* help diagram */
 .pad-help { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 18px; font-size: calc(14px * var(--ui-scale, 1)); }

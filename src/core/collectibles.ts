@@ -5,7 +5,7 @@
 
 import * as THREE from 'three';
 import { WATER } from './blocks';
-import { WORLD_SX, WORLD_SZ, World } from './world';
+import { WORLD_SX, WORLD_SY, WORLD_SZ, World } from './world';
 
 export interface Star {
   index: number;
@@ -35,7 +35,7 @@ export class StarField {
 
     let placed = 0;
     let tries = 0;
-    while (placed < 24 && tries < 800) {
+    while (placed < 52 && tries < 1800) {
       tries++;
       const x = 3 + rnd() * (WORLD_SX - 6);
       const z = 3 + rnd() * (WORLD_SZ - 6);
@@ -45,7 +45,7 @@ export class StarField {
       if (top < 0 || world.get(bx, top, bz) === WATER) continue;
       const heightBoost = rnd() < 0.3 ? 2 + Math.floor(rnd() * 3) : 1;
       const y = top + 0.5 + heightBoost;
-      if (y >= 62) continue;
+      if (y >= WORLD_SY - 2) continue;
       const index = placed;
       if (world.collectedStars.has(index)) {
         placed++;

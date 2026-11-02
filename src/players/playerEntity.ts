@@ -5,7 +5,7 @@
 
 import * as THREE from 'three';
 import { blockDef } from '../core/blocks';
-import { inWater, moveAabb, playerAabb, grounded as groundedTest, MoveResult } from '../core/physics';
+import { inWater, moveAabb, playerAabb, grounded as groundedTest, headClearOfWater, MoveResult } from '../core/physics';
 import { World, WORLD_SX, WORLD_SZ, WORLD_SY } from '../core/world';
 import { AvatarParts, animateAvatar, createAvatar } from './avatar';
 
@@ -14,6 +14,12 @@ export const JUMP_V = 8.9;
 export const WALK_SPEED = 5.0;
 export const FLY_SPEED = 7.2;
 export const FLY_VERT = 4.6;
+
+const JUMP_BUFFER = 0.16; // a jump pressed just before landing still counts
+const SWIM_UP_V = 3.2; // hold jump to kick up through the water
+const SWIM_SINK_V = -2.2; // sink gently when nobody holds jump
+export const WATER_JUMP_V = 8.4; // push-off at the surface: clears a one-block shore
+const WATER_JUMP_TIME = 0.45; // buoyancy stays off while that leap carries them out
 
 export interface StepInput {
   moveX: number; // strafe (-1..1)
@@ -46,6 +52,8 @@ export class PlayerEntity {
 
   jumpBuffer = 0;
   coyote = 0;
+  /** > 0 while a push-off jump out of the water carries the player up */
+  waterJump = 0;
   private wasInAir = false;
   private wasInWater = false;
 
@@ -69,6 +77,9 @@ export class PlayerEntity {
   step(world: World, input: StepInput, events: StepEvents): void {
     const dt = Math.min(input.dt, 0.05);
     this.inWaterNow = inWater(world, this.aabb);
+    this.waterJump = Math.max(0, this.waterJump - dt);
+    // a push-off leap is a real jump: buoyancy is off while it lasts
+    const swimming = this.inWaterNow && this.waterJump <= 0;
 
     // horizontal target velocity in yaw space.
     // forward F = (sin yaw, 0, cos yaw) matches the avatar facing (+Z at yaw 0).
@@ -77,7 +88,7 @@ export class PlayerEntity {
     const fwd = -input.moveY; // stick up (-1) means forward
     const fx = sin * fwd - cos * input.moveX;
     const fz = cos * fwd + sin * input.moveX;
-    const speed = this.flying ? FLY_SPEED : this.inWaterNow ? WALK_SPEED * 0.55 : WALK_SPEED;
+    const speed = this.flying ? FLY_SPEED : swimming ? WALK_SPEED * 0.55 : WALK_SPEED;
     const tvx = fx * speed, tvz = fz * speed;
     const accel = 1 - Math.exp(-(this.grounded || this.flying ? 14 : 6) * dt);
     this.vel.x += (tvx - this.vel.x) * accel;
@@ -89,15 +100,26 @@ export class PlayerEntity {
       if (input.jump || input.flyUp) vy += FLY_VERT;
       if (input.flyDown) vy -= FLY_VERT;
       this.vel.y += (vy - this.vel.y) * (1 - Math.exp(-12 * dt));
-    } else if (this.inWaterNow) {
+    } else if (swimming) {
       // gentle buoyancy: hold jump to swim up, sink slowly otherwise
-      const targetVy = input.jump ? 3.2 : -2.2;
+      const targetVy = input.jump ? SWIM_UP_V : SWIM_SINK_V;
       this.vel.y += (targetVy - this.vel.y) * (1 - Math.exp(-6 * dt));
+      // climbing out of a lake: buoyancy alone can never lift a whole block, so
+      // once the head is clear of the surface the jump button becomes a real
+      // jump that carries them up onto the shore.
+      if (input.jump) this.jumpBuffer = JUMP_BUFFER;
+      this.coyote = 0; // no stale land-jump while paddling
+      if (this.jumpBuffer > 0 && headClearOfWater(world, this.aabb)) {
+        this.vel.y = WATER_JUMP_V;
+        this.jumpBuffer = 0;
+        this.waterJump = WATER_JUMP_TIME;
+        events.splashed = true; // a splash on the way out
+      }
     } else {
       this.vel.y -= GRAVITY * dt;
       if (this.vel.y < -30) this.vel.y = -30;
       // forgiving jumping
-      if (input.jump) this.jumpBuffer = 0.16;
+      if (input.jump) this.jumpBuffer = JUMP_BUFFER;
       this.jumpBuffer = Math.max(0, this.jumpBuffer - dt);
       this.coyote = this.grounded ? 0.12 : Math.max(0, this.coyote - dt);
       if (this.jumpBuffer > 0 && this.coyote > 0) {
