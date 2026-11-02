@@ -412,6 +412,128 @@ test('controller disconnect shows reconnect UI and any new controller resumes th
   expect(state.players).toBe(1);
 });
 
+/** joins a second controller, reachable in tests as __testPad2 */
+async function joinSecondPad(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    const pad = game.addVirtualPad('xbox');
+    (window as any).__testPad2 = pad;
+    pad.tap('jump');
+  });
+  await page.waitForFunction('window.__lbw.game.pendingJoins.size === 1');
+  await page.evaluate(() => (window as any).__testPad2.tap('jump'));
+  await page.waitForFunction('window.__lbw.game.players.length === 2');
+}
+
+test('a player can leave and their half of the split screen closes', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await joinSecondPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  expect(await page.evaluate(() => document.querySelectorAll('.pane').length)).toBe(2);
+
+  // the first press on Leave only arms it — kids press everything
+  await tap(page, 'menu');
+  await page.waitForSelector('.menu-list');
+  await selectRow(page, 9); // Leave
+  await tap(page, 'jump');
+  expect(await page.evaluate(() => (window as any).__lbw.game.players.length)).toBe(2);
+  expect(await page.evaluate(() => [...document.querySelectorAll('.menu-item')][9].textContent)).toContain('SURE');
+
+  // the second press lets them go
+  await tap(page, 'jump');
+  await page.waitForFunction('window.__lbw.game.players.length === 1', null, { timeout: 10000 });
+  const after = await page.evaluate(() => ({
+    rects: (window as any).__lbw.game.viewportMgr.rects,
+    panes: document.querySelectorAll('.pane').length,
+    huds: document.querySelectorAll('.hud').length,
+    cards: document.querySelectorAll('.overlay-card').length,
+    pending: (window as any).__lbw.game.pendingJoins.size,
+    width: window.innerWidth,
+  }));
+  expect(after.panes).toBe(1); // the freed pane is gone, not just empty
+  expect(after.rects).toHaveLength(1);
+  expect(after.rects[0].w).toBe(after.width); // the other player gets the whole screen
+  expect(after.huds).toBe(1);
+  expect(after.pending).toBe(0); // and the pad that left does not demand a new player
+  expect(after.cards).toBe(0);
+
+  // the player who stayed keeps playing, now full screen
+  const before = await posOf(page);
+  await page.evaluate(() => (window as any).__testPad2.setMove(0, -1));
+  await waitForMove(page, before, 0.8, 0);
+  await page.evaluate(() => (window as any).__testPad2.setMove(0, 0));
+
+  // ...and the controller that left can bring a new friend in a moment later
+  await page.waitForTimeout(1300); // rejoin pause
+  await tap(page, 'jump');
+  await page.waitForFunction('window.__lbw.game.pendingJoins.size === 1', null, { timeout: 15000 });
+  expect(await page.evaluate(() => document.querySelectorAll('.pane').length)).toBe(2);
+  await tap(page, 'jump'); // confirm the join card
+  await page.waitForFunction('window.__lbw.game.players.length === 2', null, { timeout: 15000 });
+});
+
+test('grown-ups can send controller-asleep players home', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await joinSecondPad(page);
+
+  // player 2's controller falls asleep: their seat waits, pane and all
+  await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    const p = game.players[1];
+    game.input.removeSource(game.input.sources.get(p.sourceId));
+  });
+  await page.waitForFunction('window.__lbw.game.reservedSeats.size === 1');
+  expect(await page.evaluate(() => document.querySelectorAll('.pane').length)).toBe(2);
+
+  await openGrownUpsMenu(page);
+  await selectRow(page, 4); // Waiting Players
+  expect(await page.evaluate(() => [...document.querySelectorAll('.menu-item')][4].textContent)).toContain('asleep');
+  await tap(page, 'jump'); // first press only arms it
+  expect(await page.evaluate(() => (window as any).__lbw.game.players.length)).toBe(2);
+  await tap(page, 'jump'); // second press sends them home
+  await page.waitForFunction('window.__lbw.game.players.length === 1', null, { timeout: 10000 });
+  const after = await page.evaluate(() => ({
+    reserved: (window as any).__lbw.game.reservedSeats.size,
+    panes: document.querySelectorAll('.pane').length,
+    rects: (window as any).__lbw.game.viewportMgr.rects.length,
+    asleepCards: [...document.querySelectorAll('.overlay-card')]
+      .filter((c) => c.textContent?.includes('Controller asleep')).length,
+  }));
+  expect(after.reserved).toBe(0);
+  expect(after.panes).toBe(1);
+  expect(after.rects).toBe(1);
+  expect(after.asleepCards).toBe(0); // their "controller asleep" card is gone too
+});
+
+test('when the last player leaves, the welcome screen comes back', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players.length === 1');
+
+  await tap(page, 'menu');
+  await page.waitForSelector('.menu-list');
+  await selectRow(page, 9); // Leave
+  await tap(page, 'jump');
+  await tap(page, 'jump');
+  await page.waitForFunction('window.__lbw.game.players.length === 0', null, { timeout: 10000 });
+  await frames(page, 3);
+  const state = await page.evaluate(() => ({
+    panes: document.querySelectorAll('.pane').length,
+    huds: document.querySelectorAll('.hud').length,
+    cards: document.querySelectorAll('.overlay-card').length,
+    welcome: getComputedStyle(document.querySelector('.welcome')!.parentElement!).display,
+  }));
+  expect(state.huds).toBe(0);
+  expect(state.cards).toBe(0);
+  expect(state.panes).toBe(1); // one full-screen view of the world
+  expect(state.welcome).toBe('flex'); // "press any button on a controller to join!"
+});
+
 // ------------------------------------------------------- world & menu tests
 
 /** reads which menu row is currently highlighted (0-based) */

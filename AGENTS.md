@@ -24,6 +24,10 @@
 - `scripts/hero-shot.ts` and `scripts/feature-shots.ts` regenerate the README
   screenshots against a :3100 server; headless Chromium has no emoji font, so
   both scripts swap/strip emoji in the DOM before shooting.
-- Physical gamepad behaviour is verified manually (checklist in the README);
-  virtual pads in tests exercise the same input abstraction, which is not a
-  substitute for hardware QA.
+- Physical gamepads **have** been tested on real hardware by the family
+  (Xbox One + PS5 DualSense, 2026-11-02: join, sticks, build, palette, menus,
+  split screen, waking a sleeping pad). Virtual pads in tests drive the same
+  input abstraction, so they are a good regression net — but re-check the
+  README's manual checklist with real pads after any input change (newly added
+  Leave / Waiting-Players rows and the water-jump fix still owe the couch a
+  turn).
