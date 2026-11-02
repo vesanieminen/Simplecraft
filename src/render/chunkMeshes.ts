@@ -5,7 +5,7 @@
 
 import * as THREE from 'three';
 import { buildChunkGeometry } from '../core/mesher';
-import { CHUNK, CHUNKS_X, World } from '../core/world';
+import { CHUNKS_X, World } from '../core/world';
 
 interface ChunkMeshes {
   opaque?: THREE.Mesh;
@@ -60,9 +60,9 @@ export class ChunkMeshManager {
     const geo = buildChunkGeometry(this.world, cx, cz);
     const slot = (this.meshes[key] ??= {});
 
-    this.swap(slot, 'opaque', geo.opaque, this.materials.opaque, cx, cz);
-    this.swap(slot, 'transp', geo.translucent, this.materials.translucent, cx, cz);
-    this.swap(slot, 'cross', geo.cross, this.materials.cross, cx, cz);
+    this.swap(slot, 'opaque', geo.opaque, this.materials.opaque);
+    this.swap(slot, 'transp', geo.translucent, this.materials.translucent);
+    this.swap(slot, 'cross', geo.cross, this.materials.cross);
   }
 
   private swap(
@@ -70,8 +70,6 @@ export class ChunkMeshManager {
     which: 'opaque' | 'transp' | 'cross',
     geo: THREE.BufferGeometry | null,
     mat: THREE.Material,
-    cx: number,
-    cz: number,
   ): void {
     const old = slot[which];
     if (old) {
@@ -81,7 +79,7 @@ export class ChunkMeshManager {
     }
     if (geo) {
       const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(cx * CHUNK, 0, cz * CHUNK);
+      // geometry vertices are in world space; keep mesh at origin
       mesh.frustumCulled = true;
       mesh.matrixAutoUpdate = false;
       mesh.updateMatrix();

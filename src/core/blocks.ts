@@ -68,8 +68,8 @@ const rgb = (r: number, g: number, b: number): [number, number, number] => [r / 
 const DEFS: BlockDef[] = [
   { id: AIR, name: 'Air', icon: '', color: [0, 0, 0], solid: false, opaque: false },
   {
-    id: GRASS, name: 'Grass', icon: '🌱', color: rgb(146, 200, 97),
-    topColor: rgb(126, 200, 80), sideColor: rgb(158, 150, 96),
+    id: GRASS, name: 'Grass', icon: '🌱', color: rgb(110, 187, 78),
+    topColor: rgb(104, 190, 66), sideColor: rgb(150, 145, 92),
     solid: true, opaque: true,
   },
   { id: DIRT, name: 'Dirt', icon: '🟫', color: rgb(155, 107, 67), solid: true, opaque: true },
@@ -90,7 +90,7 @@ const DEFS: BlockDef[] = [
     id: WATER, name: 'Water', icon: '💧', color: rgb(79, 179, 232),
     solid: false, opaque: false, translucent: true,
   },
-  { id: FLOWER_RED, name: 'Flower', icon: '🌷', color: rgb(255, 105, 120), solid: false, opaque: false, cross: true },
+  { id: FLOWER_RED, name: 'Flower', icon: '🌷', color: rgb(255, 122, 108), solid: false, opaque: false, cross: true },
   { id: FLOWER_YELLOW, name: 'Sunflower', icon: '🌼', color: rgb(255, 214, 94), solid: false, opaque: false, cross: true },
   { id: TALLGRASS, name: 'Grass Tuft', icon: '🌿', color: rgb(110, 190, 90), solid: false, opaque: false, cross: true },
   { id: GLOW, name: 'Glow Block', icon: '💡', color: rgb(255, 226, 138), solid: true, opaque: true, emissive: true },

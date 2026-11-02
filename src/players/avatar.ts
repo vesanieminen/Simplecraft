@@ -114,6 +114,7 @@ export function createAvatar(colorHex: string): AvatarParts {
   );
   ring.rotation.x = -Math.PI / 2;
   ring.position.y = 0.04;
+  ring.userData.noFade = true;
   group.add(ring);
 
   // blob shadow
@@ -123,6 +124,7 @@ export function createAvatar(colorHex: string): AvatarParts {
   );
   shadow.rotation.x = -Math.PI / 2;
   shadow.position.y = 0.02;
+  shadow.userData.noFade = true;
   group.add(shadow);
 
   return { group, body, leftArm, rightArm, leftLeg, rightLeg, ring, shadow };

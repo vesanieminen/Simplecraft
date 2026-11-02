@@ -83,7 +83,7 @@ export function generateTerrain(world: World): GeneratedWorld {
 
   // starting meadow center (flat, open, welcoming)
   const cx = WORLD_SX / 2, cz = WORLD_SZ / 2;
-  const meadowR = 13;
+  const meadowR = 15;
 
   // 1. heightmap
   const heights = new Int16Array(WORLD_SX * WORLD_SZ);
@@ -96,11 +96,11 @@ export function generateTerrain(world: World): GeneratedWorld {
       // gentle bowl near borders so edges dip into water (nicer horizon)
       const edge = Math.min(x, z, WORLD_SX - 1 - x, WORLD_SZ - 1 - z);
       if (edge < 8) h -= (8 - edge) * 0.55;
-      // flatten the starting meadow
+      // flatten the starting meadow with a gentle approach slope
       const d = Math.hypot(x - cx, z - cz);
-      if (d < meadowR + 6) {
-        const t = Math.min(1, Math.max(0, (meadowR + 6 - d) / 6));
-        h = h * (1 - t) + (WATER_LEVEL + 2) * t;
+      if (d < meadowR + 12) {
+        const t = Math.min(1, Math.max(0, (meadowR + 12 - d) / 12));
+        h = h * (1 - t) + (WATER_LEVEL + 3) * t;
       }
       heights[x * WORLD_SZ + z] = Math.max(2, Math.min(WORLD_SY - 20, Math.round(h)));
     }
@@ -177,7 +177,7 @@ export function generateTerrain(world: World): GeneratedWorld {
       if (data[above] !== AIR) continue;
       const d = Math.hypot(x - cx, z - cz);
       const r = hash2(x, z, seedA + 4242);
-      const dens = d < meadowR ? 0.16 : 0.05;
+      const dens = d < meadowR ? 0.07 : 0.03;
       if (r < dens) data[above] = r < dens * 0.35 ? FLOWER_RED : r < dens * 0.7 ? FLOWER_YELLOW : TALLGRASS;
     }
   }

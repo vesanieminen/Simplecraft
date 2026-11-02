@@ -68,6 +68,9 @@ test('keyboard player can join with Enter only', async ({ page }) => {
 test('controller player joins and can move + jump', async ({ page }) => {
   await boot(page);
   await joinWithPad(page);
+  // let the join-confirm jump finish and the player settle on the ground
+  await page.evaluate(() => (window as any).__testPad.set('jump', false));
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 5000 });
   const pos0 = await page.evaluate(() => {
     const e = (window as any).__lbw.game.players[0].entity;
     return { x: e.pos.x, z: e.pos.z };
@@ -83,12 +86,13 @@ test('controller player joins and can move + jump', async ({ page }) => {
   expect(dist).toBeGreaterThan(1);
 
   // jump raises the player
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 5000 });
   const y0 = await page.evaluate(() => (window as any).__lbw.game.players[0].entity.pos.y);
   await page.evaluate(() => (window as any).__testPad.set('jump', true));
   await page.waitForTimeout(400);
   const y1 = await page.evaluate(() => (window as any).__lbw.game.players[0].entity.pos.y);
   await page.evaluate(() => (window as any).__testPad.set('jump', false));
-  expect(y1).toBeGreaterThan(y0);
+  expect(y1).toBeGreaterThan(y0 + 0.5);
 });
 
 test('second controller joins and split screen activates', async ({ page }) => {
@@ -302,6 +306,31 @@ test('split-screen layout recomputes on window resize without errors', async ({ 
   const r2 = await page.evaluate(() => (window as any).__lbw.game.viewportMgr.rects.map((r: any) => r.w));
   expect(r1).not.toEqual(r2);
   expect(r2[0]).toBe(450);
+});
+
+test('four controllers join and get a 2x2 grid', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page); // 1
+  for (let i = 0; i < 3; i++) {
+    await page.evaluate(() => {
+      const game = (window as any).__lbw.game;
+      const src = game.addVirtualPad('xbox');
+      src.tap('jump');
+    });
+    await page.waitForFunction('window.__lbw.game.pendingJoins.size === 1');
+    await page.evaluate(() => {
+      const game = (window as any).__lbw.game;
+      const src = [...game.pendingJoins.keys()].map((k) => game.input.sources.get(k))[0];
+      src.tap('jump');
+    });
+    await page.waitForFunction(`window.__lbw.game.players.length === ${i + 2}`);
+  }
+  const state = await page.evaluate(() => ({
+    rects: window.__lbw.game.viewportMgr.rects.length,
+    panes: document.querySelectorAll('.pane').length,
+  }));
+  expect(state.rects).toBe(4);
+  expect(state.panes).toBe(4);
 });
 
 test('controller disconnect shows reconnect UI and any new controller resumes the player', async ({ page }) => {

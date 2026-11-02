@@ -180,9 +180,27 @@ export class LocalPlayer {
       const want = head.clone().addScaledVector(dir, -this.cameraDist);
       // smooth camera position
       this.camPos.lerp(want, k);
-      // never below floor of the aim
       this.camera.position.copy(this.camPos);
       e.avatar.group.visible = true;
+      // fade our own body away when the camera hugs us (inside builds)
+      const fade = this.cameraDist < 2.4;
+      e.avatar.group.traverse((o) => {
+        if (o.userData.noFade) return;
+        const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+        if (!m) return;
+        const mats = Array.isArray(m) ? m : [m];
+        for (const mm of mats) {
+          if (fade) {
+            mm.transparent = true;
+            mm.opacity = 0.45;
+            mm.depthWrite = false;
+          } else {
+            mm.transparent = false;
+            mm.opacity = 1;
+            mm.depthWrite = true;
+          }
+        }
+      });
     }
     this.camera.quaternion.setFromRotationMatrix(
       new THREE.Matrix4().lookAt(this.camera.position, head.clone().addScaledVector(dir, 2), new THREE.Vector3(0, 1, 0)),

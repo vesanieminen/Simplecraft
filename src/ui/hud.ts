@@ -8,7 +8,7 @@ import { ControllerType } from '../input/types';
 import { LocalPlayer } from '../players/localPlayer';
 
 const BTN_LABELS: Record<ControllerType, Record<string, string>> = {
-  xbox: { a: 'A', b: 'B', x: 'X', y: 'Y', lb: 'LB', rb: 'RB', lt: 'LT', rt: 'RT', start: 'Menu' },
+  xbox: { a: 'A', b: 'B', x: 'X', y: 'Y', lb: 'LB', rb: 'RB', lt: 'LT', rt: 'RT', start: 'Start' },
   playstation: { a: '✕', b: '◯', x: '☐', y: '△', lb: 'L1', rb: 'R1', lt: 'L2', rt: 'R2', start: 'Options' },
   generic: { a: 'A', b: 'B', x: 'X', y: 'Y', lb: 'L1', rb: 'R1', lt: 'L2', rt: 'R2', start: 'Menu' },
   keyboard: { a: 'Space', b: 'Esc', x: 'E', y: 'F', lb: 'Q', rb: 'R', lt: 'R-Click', rt: 'L-Click', start: 'Esc' },
