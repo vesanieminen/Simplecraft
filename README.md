@@ -1,5 +1,7 @@
 # 🧱 Little Block World
 
+![Little Block World — a kid's house in the meadow at golden hour](docs/screenshots/hero.jpg)
+
 A colorful, controller-first voxel sandbox for kids — inspired by Minecraft
 Creative mode, built for a 5-year-old and a parent on one couch.
 
@@ -29,6 +31,8 @@ npm start
 ## Playing together
 
 ### Two controllers, one computer (split screen)
+
+![Two players sharing one world, each with their own camera and HUD](docs/screenshots/split.jpg)
 
 1. Plug in two controllers (Xbox, PlayStation, or any standard pad).
 2. Open the game in a browser.
