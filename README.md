@@ -72,6 +72,19 @@ Up to **four players** can join on one computer (2×2 grid). Just press a
 button on each additional controller. You can also mix: player 1 on
 keyboard + player 2 on a controller.
 
+### Someone is finished playing
+
+- **Start → 🚪 Leave** (press **A** twice — kids press everything, so it asks):
+  that player goes home, *their part of the split screen closes* and the others
+  get the space back. Their builds stay in the world.
+- Press any button on that controller a moment later and a fresh join card
+  appears, so a sibling can take the seat over.
+- If the **last** player leaves, the welcome screen comes back.
+- A controller that merely *falls asleep* keeps its seat and shows a wake-up
+  card. A grown-up can clear those with
+  *Start → 🧑 Grown-Ups → 💤 Waiting Players* (two presses again) — the
+  sleeping players go home and the screen closes up.
+
 ### Other computers on the home network (LAN)
 
 The dev server binds to `0.0.0.0`, so other computers on the same Wi-Fi
@@ -172,7 +185,7 @@ a block above the water, place a block or dig a step to make a stair.
 
 ## Testing status (honest)
 
-Automated (Playwright, real Chromium, 22 tests): game loads error-free,
+Automated (Playwright, real Chromium, 25 tests): game loads error-free,
 keyboard-only join, controller join/move/jump/build/cycle, palette with
 D-pad, per-player menu + fly toggle, split-screen activation, 2×2
 four-player grid, independent movement, one player's palette not pausing
@@ -184,18 +197,26 @@ really work (Freeze stops the whole world dead, split-screen layouts cycle
 through Smart/Left-Right/Up-Down/2×2, Reset World wipes edits, Choose World
 starts a new theme+seed and the preview canvas actually paints a map), the
 welcome-screen world picker (theme, surprise seed, start), menu
-sub-screens receiving controller input, `?seed=…&world=…` handling, and
-walking into a pond then **hopping back out** with the jump button held.
+sub-screens receiving controller input, `?seed=…&world=…` handling,
+walking into a pond then **hopping back out** with the jump button held, a
+player **leaving** so their half of the split screen really closes (pane, HUD
+and card removed, the others go full screen, the freed controller can invite a
+new player, and the welcome screen returns when the last one leaves), and
+clearing controller-asleep players from Grown-Up Settings.
 
 ```bash
 npm test          # e2e suite (starts its own server on :3100)
 npm run typecheck
 ```
 
-**Physical controllers have NOT been hardware-tested yet.** Virtual pads
-drive the exact same input abstraction (dead zones, edge detection,
-button mapping all shared), but you should verify with real pads. A
-10-minute parent checklist:
+**Physical controllers: tested on real hardware.** The family played it with an
+**Xbox One** pad and a **PS5 DualSense** — both worked fine: joining, both
+sticks, building, palette, menus, split screen and waking a sleeping
+controller. The items below are what to re-check after any input change; the
+brand-new **Leave / Waiting Players** rows and the **jump out of water** fix
+have not had their couch turn yet. Virtual pads in the automated tests drive
+the exact same input abstraction (dead zones, edge detection, button mapping
+all shared) — a good regression net, still not a substitute for hardware QA.
 
 1. Press **Y / △** on a pad at the welcome screen → the world chooser opens
    on that pad: D-pad moves, left/right switch world and seed, **✨ Surprise
@@ -216,7 +237,11 @@ button mapping all shared), but you should verify with real pads. A
    opens the picker, **Reset World** asks twice.
 9. Unplug a controller mid-game → "controller asleep" appears → plug in
    (or press another pad) → same character resumes.
-10. Analog: gentle stick tilts walk slowly; menus don't machine-gun.
+10. Start → 🚪 **Leave** → press **A** twice: that half of the screen closes,
+    the other player goes full screen, and the sleeping seat is cleared by
+    Start → 🧑 Grown-Ups → 💤 **Waiting Players** (also two presses). A moment
+    later, a button on the left controller should open a fresh join card.
+11. Analog: gentle stick tilts walk slowly; menus don't machine-gun.
 
 ## Roadmap
 

@@ -226,6 +226,7 @@ export class PlayerMenu extends Overlay {
   private items: { icon: string; label: string; val?: () => string; fn: () => void }[];
   private sel = 0;
   private rows: HTMLElement[] = [];
+  private leaveArmed = false;
 
   constructor(
     audio: AudioKit,
@@ -253,7 +254,16 @@ export class PlayerMenu extends Overlay {
       { icon: '🎮', label: 'Help', fn: () => { this.close(); actions.openHelp(); } },
       { icon: '🔊', label: 'Sound', val: () => (this.soundOn() ? 'ON' : 'OFF'), fn: () => actions.toggleSound() },
       { icon: '🧑', label: 'Grown-Ups', fn: () => { this.close(); actions.openGrownUps(); } },
-      { icon: '🚪', label: 'Leave', fn: () => { actions.leave(); this.close(); } },
+      {
+        icon: '🚪',
+        label: 'Leave',
+        val: () => (this.leaveArmed ? 'SURE?' : ''),
+        fn: () => {
+          // kids press everything, so leaving needs a second press
+          if (this.leaveArmed) { actions.leave(); this.close(); }
+          else { this.leaveArmed = true; this.audio.uiSelect(); }
+        },
+      },
     ];
     const list = document.createElement('div');
     list.className = 'menu-list';
@@ -295,6 +305,10 @@ export interface GrownUpActions {
   cycleLayout(): string;
   resetWorld(): void;
   openWorlds(): void;
+  /** sends every controller-asleep player home and closes their part of the screen */
+  sendWaitingHome(): void;
+  /** what the waiting-players row shows */
+  waiting: () => string;
   frozen: () => boolean;
   layout: () => string;
 }
@@ -304,6 +318,7 @@ export class GrownUpsMenu extends Overlay {
   private sel = 0;
   private rows: HTMLElement[] = [];
   private resetArmed = false;
+  private waitingArmed = false;
 
   constructor(audio: AudioKit, type: ControllerType, actions: GrownUpActions) {
     super(audio, type);
@@ -319,6 +334,16 @@ export class GrownUpsMenu extends Overlay {
         fn: () => {
           if (this.resetArmed) { actions.resetWorld(); this.resetArmed = false; }
           else { this.resetArmed = true; }
+        },
+      },
+      {
+        icon: '💤',
+        label: 'Waiting Players',
+        val: () => actions.waiting(),
+        fn: () => {
+          // another double press: this one sends other people's players home
+          if (this.waitingArmed) { actions.sendWaitingHome(); this.waitingArmed = false; }
+          else this.waitingArmed = true;
         },
       },
       { icon: '◀️', label: 'Back', fn: () => this.close() },

@@ -53,6 +53,21 @@ export class UiManager {
     }
   }
 
+  /**
+   * Removes panes nobody is looking at any more (a player left), together with
+   * whatever HUD or card was still inside them, so the split screen really
+   * closes up instead of leaving an empty half on screen.
+   */
+  trimPanes(n: number): void {
+    const keep = Math.max(1, n);
+    while (this.panes.length > keep) {
+      const p = this.panes.pop();
+      this.hudEls.pop();
+      this.overlayEls.pop();
+      p?.remove();
+    }
+  }
+
   setPaneRect(i: number, r: ViewportRect): void {
     const p = this.panes[i];
     if (!p) return;
