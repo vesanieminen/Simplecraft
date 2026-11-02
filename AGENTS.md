@@ -26,14 +26,24 @@
   both scripts swap/strip emoji in the DOM before shooting.
 - Block artwork lives in `src/render/textures.ts`: `blockAtlasTexture()` is a
   row of 32-px cells and `blocks.ts` points a block at them with
-  `sideAtlasCell` / `capAtlasCell`. The mesher routes those blocks into a
-  separate `textured` geometry channel (`ChunkGeometry.textured`) drawn with
-  `materials.textured`, so a textured block never touches the flat-tint path.
-  Keep `ATLAS_CELL_COUNT` in `mesher.ts` equal to `BLOCK_CELLS` there.
-  Two traps: the atlas uses `THREE.NoColorSpace` (block tints in this game are
-  plain linear values — an sRGB-decoded canvas reads far darker than the flat
-  blocks next to it), and side faces lose about half their brightness to
-  `FACE_SHADE` × AO × Lambert, so author the art bright and chunky.
+  `sideAtlasCell` / `capAtlasCell` / `bottomAtlasCell` (grass needs dirt on its
+  underside, logs need rings on the ends). Cell ids and `ATLAS_CELL_COUNT`
+  live in `core/blocks.ts` — `core` must not import from `render`. Adding a
+  cell without drawing it throws on the first atlas build, which is deliberate.
+  The mesher routes painted blocks into separate geometry channels
+  (`ChunkGeometry.textured` and `.texturedTranslucent`) drawn with
+  `materials.textured` / `materials.texturedTranslucent`, so the flat-tint
+  path stays untouched. Two traps: the atlas uses `THREE.NoColorSpace`
+  (block tints in this game are plain linear values — an sRGB-decoded canvas
+  reads far darker than the flat blocks next to it), and side faces lose
+  about half their brightness to `FACE_SHADE` × AO × Lambert, so author the
+  art bright and chunky. Near-white cells (the candy-colour weave) set
+  `tintTexture: true` so the block's own colour multiplies through.
+- Avatars are dressed the same way (`players/avatar.ts`): cloth, denim and
+  the jumper front are near-white canvases multiplied by the per-player
+  colour, so a player's colour survives. The torso is a six-material box —
+  BoxGeometry face order is +x −x +y −y +z −z, and +z is the front that gets
+  the collar/pocket/buttons.
 - Dynamite: the stick is a real voxel (`DYNAMITE`), so it saves, blocks things
   and can be carved by another blast; `DynamiteManager` only owns the animated
   fuse rig (tagged `group.userData.fuse` for leak checks), the blast and the

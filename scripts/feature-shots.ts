@@ -118,5 +118,57 @@ await page.evaluate(() => {
 await page.waitForTimeout(3000); // chunk remeshes + camera settle
 await page.screenshot({ path: `${outDir}/plants.jpg`, type: 'jpeg', quality: 92 });
 
+// ---- 3. every block, painted from the atlas (cleared glade, so sky is the backdrop) ----
+await page.evaluate(() => {
+  const game = (window as any).__lbw.game;
+  const S = game.world;
+  const mid = Math.floor(((window as any).__lbw.dims.sx) / 2);
+  const wall: number[][] = [
+    [1, 2, 3, 4, 5, 6, 7, 8], // grass dirt stone sand wood planks bricks glass
+    [9, 10, 14, 15, 16, 17, 18, 27], // leaves water glow bouncy sparkle music red dynamite
+  ];
+  const bx = mid + 9;
+  const by = S.surfaceY(bx, mid) + 1;
+  // clear the air between the camera and the wall, and the wall's own cells
+  for (let x = mid - 1; x <= bx + 1; x++) {
+    for (let z = mid - 6; z <= mid + 6; z++) {
+      for (let y = S.surfaceY(x, z) + 1; y <= by + 3; y++) if (S.get(x, y, z) !== 0) S.set(x, y, z, 0);
+    }
+  }
+  wall.forEach((row, r) => row.forEach((id, c) => S.set(bx, by + r, mid + c - 4, id)));
+  const p = game.players[0];
+  p.firstPerson = true;
+  p.entity.pos.set(bx - 9, S.surfaceY(bx - 9, mid) + 1.02, mid + 0.5);
+  p.entity.yaw = Math.PI / 2; // face +X, at the wall
+  p.entity.pitch = 0.02;
+  p.entity.vel.set(0, 0, 0);
+});
+await page.waitForTimeout(2500);
+await page.screenshot({ path: `${outDir}/blocks.jpg`, type: 'jpeg', quality: 92 });
+
+// ---- 4. dynamite, fuse well underway ----
+await page.evaluate(() => {
+  const game = (window as any).__lbw.game;
+  const S = game.world;
+  const mid = Math.floor(((window as any).__lbw.dims.sx) / 2);
+  const fx = mid - 1, fz = mid + 3;
+  const top = S.surfaceY(fx, fz) + 1;
+  S.set(fx, top, fz, 27);
+  game.dynamite.clear();
+  game.dynamite.light(fx, top, fz, 12); // a long fuse, so the shot catches it mid-burn
+  const p = game.players[0];
+  p.firstPerson = true;
+  // the aim helpers re-show themselves every frame, so pin them off for the photo
+  for (const obj of [p.ghost, p.outline]) {
+    Object.defineProperty(obj, 'visible', { get: () => false, set: () => undefined });
+  }
+  p.entity.pos.set(fx - 2.7, S.surfaceY(fx - 3, fz) + 1.02, fz + 0.4);
+  p.entity.yaw = Math.PI / 2;
+  p.entity.pitch = -0.12; // the stick, its fuse and the "!" all in one frame
+  p.entity.vel.set(0, 0, 0);
+});
+await page.waitForTimeout(2600);
+await page.screenshot({ path: `${outDir}/dynamite.jpg`, type: 'jpeg', quality: 92 });
+
 console.log('saved', fs.readdirSync(outDir).join(', '));
 await browser.close();

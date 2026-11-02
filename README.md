@@ -116,6 +116,30 @@ things that aren't solid. Water and bedrock stay indestructible, and plants
 never get in the way when you place a block (the two aim at slightly
 different things so both just work).
 
+## Everything is painted, blocks and kids alike
+
+![Every block type, painted from the atlas](docs/screenshots/blocks.jpg)
+
+There are no flat-coloured cubes in Little Block World: every block is drawn
+into one procedural 32-px atlas at startup — grass with a fringe over dirt,
+dirt clods, stone boulders with cracks, sand grain, bark and growth rings on
+log ends, planks with nails, offset bricks over mortar, leaves with twigs,
+water with waves, the glow-block sun, bouncy springs, sparkle stars, a music
+note, bedrock boulders, scorched crater rims and the dynamite bundle. The
+eight candy colours keep their own bright tint and multiply a near-white
+weave through it, so a Red block still reads as Red — it just looks like
+painted building brick instead of solid plastic. Glass and water are painted
+too, through the same see-through material.
+
+The children are dressed the same way: a knitted jumper (collar, a stitched
+pocket and two buttons on the front), denim trousers with a seam down the
+leg, and the same little face as always. All of it is near-white weave, so
+each player's chosen colour tints straight through — Strawberry stays
+Strawberry, it is just knitted now.
+
+Still no image files: every pixel above is drawn in code, exactly like the
+flowers and the sky.
+
 ## Swimming — and how to get out
 
 Lakes, rivers and the Islands world are properly swimmable: you bob at the
@@ -126,6 +150,8 @@ circles. Fully submerged, kick up to the surface first. If a bank is more than
 a block above the water, place a block or dig a step to make a stair.
 
 ## Dynamite 🧨
+
+![A stick of dynamite with its fuse burning down](docs/screenshots/dynamite.jpg)
 
 Dynamite sits in the block palette **and** on the shoulder-button favourites,
 so a five-year-old finds it in two presses. Set one down and **it lights
@@ -199,7 +225,7 @@ running out, so children learn to run clear without anyone having to tell them.
 
 ## Testing status (honest)
 
-Automated (Playwright, real Chromium, 27 tests): game loads error-free,
+Automated (Playwright, real Chromium, 29 tests): game loads error-free,
 keyboard-only join, controller join/move/jump/build/cycle, palette with
 D-pad, per-player menu + fly toggle, split-screen activation, 2×2
 four-player grid, independent movement, one player's palette not pausing
@@ -217,7 +243,11 @@ Dynamite is covered too: placing a stick lights it, the blast carves a crater
 and scorches the rim while bedrock and water shrug it off and the fuse meshes
 are cleaned up, LT re-lights a burning stick instead of removing it, one blast
 lights its neighbours (chain reaction), and a stick you left in the world is
-still there — still burning — after a reload.
+still there — still burning — after a reload. The new art is checked too: the
+atlas is decoded in the page and every cell must be drawn and different from
+all the others, painted blocks must really reach the textured mesh channels
+(including see-through glass and water), and the avatars must be wearing
+cloth, denim and a jumper front.
 
 ```bash
 npm test          # e2e suite (starts its own server on :3100)

@@ -13,6 +13,7 @@ interface ChunkMeshes {
   transp?: THREE.Mesh;
   cross?: THREE.Mesh;
   tex?: THREE.Mesh;
+  texT?: THREE.Mesh;
 }
 
 export class ChunkMeshManager {
@@ -29,10 +30,16 @@ export class ChunkMeshManager {
       alphaTest: 0.5,
       side: THREE.DoubleSide,
     }),
-    /** cubes that want artwork instead of a flat tint (dynamite) */
+    /** cubes that want artwork instead of a flat tint (dynamite, grass, stone…) */
     textured: new THREE.MeshLambertMaterial({
       vertexColors: true,
       map: blockAtlasTexture(),
+    }),
+    /** the same artwork, see through: glass and water */
+    texturedTranslucent: new THREE.MeshLambertMaterial({
+      vertexColors: true,
+      map: blockAtlasTexture(),
+      transparent: true, opacity: 0.72, depthWrite: false,
     }),
   };
 
@@ -76,11 +83,12 @@ export class ChunkMeshManager {
     this.swap(slot, 'transp', geo.translucent, this.materials.translucent);
     this.swap(slot, 'cross', geo.cross, this.materials.cross);
     this.swap(slot, 'tex', geo.textured, this.materials.textured);
+    this.swap(slot, 'texT', geo.texturedTranslucent, this.materials.texturedTranslucent);
   }
 
   private swap(
     slot: ChunkMeshes,
-    which: 'opaque' | 'transp' | 'cross' | 'tex',
+    which: 'opaque' | 'transp' | 'cross' | 'tex' | 'texT',
     geo: THREE.BufferGeometry | null,
     mat: THREE.Material,
   ): void {

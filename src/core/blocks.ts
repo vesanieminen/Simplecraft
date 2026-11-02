@@ -36,9 +36,34 @@ export const ROCK: BlockId = 26; // indestructible floor at y=0
 export const DYNAMITE: BlockId = 27; // lit fuse, then it blows a hole in things
 export const SCORCH: BlockId = 28; // what grass looks like after a blast
 
-/** cells of the procedural *block* texture atlas (see render/textures.ts) */
+/**
+ * Cells of the procedural *block* texture atlas (see render/textures.ts).
+ * One 32x32 cell per block face style, laid out in a single row; the mesher
+ * divides u by ATLAS_CELL_COUNT, so keep it in step with BLOCK_CELLS there.
+ */
+export const ATLAS_CELL_COUNT = 21;
 export const ATLAS_DYNAMITE_SIDE = 0;
 export const ATLAS_DYNAMITE_CAP = 1;
+export const ATLAS_GRASS_TOP = 2;
+export const ATLAS_GRASS_SIDE = 3;
+export const ATLAS_DIRT = 4;
+export const ATLAS_STONE = 5;
+export const ATLAS_SAND = 6;
+export const ATLAS_LOG_SIDE = 7;
+export const ATLAS_LOG_END = 8;
+export const ATLAS_PLANKS = 9;
+export const ATLAS_BRICKS = 10;
+export const ATLAS_GLASS = 11;
+export const ATLAS_LEAVES = 12;
+export const ATLAS_WATER = 13;
+export const ATLAS_GLOW = 14;
+export const ATLAS_BOUNCY = 15;
+export const ATLAS_SPARKLE = 16;
+export const ATLAS_MUSIC = 17;
+export const ATLAS_ROCK = 18;
+export const ATLAS_SCORCH = 19;
+/** near-white weave: the flat candy colours multiply through it */
+export const ATLAS_WEAVE = 20;
 
 export interface BlockDef {
   id: BlockId;
@@ -61,8 +86,12 @@ export interface BlockDef {
   atlasCell?: number;
   /** paint the four sides from this cell of the *block* texture atlas */
   sideAtlasCell?: number;
-  /** paint the top and bottom from this cell of the block texture atlas */
+  /** paint the top face from this cell of the block texture atlas */
   capAtlasCell?: number;
+  /** paint the bottom face from this cell (defaults to the top cell) */
+  bottomAtlasCell?: number;
+  /** the atlas art is near-white: multiply it by this block's colour instead */
+  tintTexture?: boolean;
   /** full-brightness emissive look */
   emissive?: boolean;
   /** launches players who land on it */
@@ -86,42 +115,65 @@ const DEFS: BlockDef[] = [
   {
     id: GRASS, name: 'Grass', icon: '🌱', color: rgb(110, 187, 78),
     topColor: rgb(104, 190, 66), sideColor: rgb(150, 145, 92),
+    sideAtlasCell: ATLAS_GRASS_SIDE, capAtlasCell: ATLAS_GRASS_TOP, bottomAtlasCell: ATLAS_DIRT,
     solid: true, opaque: true,
   },
-  { id: DIRT, name: 'Dirt', icon: '🟫', color: rgb(155, 107, 67), solid: true, opaque: true },
-  { id: STONE, name: 'Stone', icon: '🪨', color: rgb(154, 160, 168), solid: true, opaque: true },
-  { id: SAND, name: 'Sand', icon: '🏖️', color: rgb(242, 223, 165), solid: true, opaque: true },
+  {
+    id: DIRT, name: 'Dirt', icon: '🟫', color: rgb(155, 107, 67),
+    sideAtlasCell: ATLAS_DIRT, solid: true, opaque: true,
+  },
+  {
+    id: STONE, name: 'Stone', icon: '🪨', color: rgb(154, 160, 168),
+    sideAtlasCell: ATLAS_STONE, solid: true, opaque: true,
+  },
+  {
+    id: SAND, name: 'Sand', icon: '🏖️', color: rgb(242, 223, 165),
+    sideAtlasCell: ATLAS_SAND, solid: true, opaque: true,
+  },
   {
     id: WOOD, name: 'Wood', icon: '🪵', color: rgb(122, 90, 55),
-    topColor: rgb(171, 138, 92), solid: true, opaque: true,
+    topColor: rgb(171, 138, 92),
+    sideAtlasCell: ATLAS_LOG_SIDE, capAtlasCell: ATLAS_LOG_END,
+    solid: true, opaque: true,
   },
-  { id: PLANKS, name: 'Planks', icon: '🟨', color: rgb(200, 154, 95), solid: true, opaque: true },
-  { id: BRICKS, name: 'Bricks', icon: '🧱', color: rgb(217, 105, 79), solid: true, opaque: true },
+  {
+    id: PLANKS, name: 'Planks', icon: '🟨', color: rgb(200, 154, 95),
+    sideAtlasCell: ATLAS_PLANKS, solid: true, opaque: true,
+  },
+  {
+    id: BRICKS, name: 'Bricks', icon: '🧱', color: rgb(217, 105, 79),
+    sideAtlasCell: ATLAS_BRICKS, solid: true, opaque: true,
+  },
   {
     id: GLASS, name: 'Glass', icon: '🪟', color: rgb(198, 232, 255),
-    solid: true, opaque: false, translucent: true,
+    sideAtlasCell: ATLAS_GLASS, solid: true, opaque: false, translucent: true,
   },
-  { id: LEAVES, name: 'Leaves', icon: '🍃', color: rgb(88, 176, 80), solid: true, opaque: true },
+  {
+    id: LEAVES, name: 'Leaves', icon: '🍃', color: rgb(88, 176, 80),
+    sideAtlasCell: ATLAS_LEAVES, solid: true, opaque: true,
+  },
   {
     id: WATER, name: 'Water', icon: '💧', color: rgb(79, 179, 232),
-    solid: false, opaque: false, translucent: true,
+    sideAtlasCell: ATLAS_WATER, solid: false, opaque: false, translucent: true,
   },
   { id: FLOWER_RED, name: 'Flower', icon: '🌷', color: rgb(255, 122, 108), solid: false, opaque: false, cross: true, atlasCell: 0 },
   { id: FLOWER_YELLOW, name: 'Sunflower', icon: '🌼', color: rgb(255, 214, 94), solid: false, opaque: false, cross: true, atlasCell: 1 },
   { id: TALLGRASS, name: 'Grass Tuft', icon: '🌿', color: rgb(110, 190, 90), solid: false, opaque: false, cross: true, atlasCell: 2 },
-  { id: GLOW, name: 'Glow Block', icon: '💡', color: rgb(255, 226, 138), solid: true, opaque: true, emissive: true },
-  { id: BOUNCY, name: 'Bouncy Block', icon: '🍬', color: rgb(255, 123, 213), solid: true, opaque: true, bounce: 11.5 },
-  { id: SPARKLE, name: 'Sparkle Block', icon: '✨', color: rgb(185, 231, 255), solid: true, opaque: true, sparkle: true },
-  { id: MUSIC, name: 'Music Block', icon: '🎵', color: rgb(179, 157, 219), solid: true, opaque: true, note: 0 },
-  { id: C_RED, name: 'Red', icon: '🟥', color: rgb(255, 93, 93), solid: true, opaque: true },
-  { id: C_ORANGE, name: 'Orange', icon: '🟧', color: rgb(255, 159, 69), solid: true, opaque: true },
-  { id: C_YELLOW, name: 'Yellow', icon: '🟨', color: rgb(255, 215, 94), solid: true, opaque: true },
-  { id: C_GREEN, name: 'Green', icon: '🟩', color: rgb(93, 208, 107), solid: true, opaque: true },
-  { id: C_BLUE, name: 'Blue', icon: '🟦', color: rgb(93, 155, 255), solid: true, opaque: true },
-  { id: C_PURPLE, name: 'Purple', icon: '🟪', color: rgb(176, 107, 255), solid: true, opaque: true },
-  { id: C_PINK, name: 'Pink', icon: '🟪', color: rgb(255, 138, 212), solid: true, opaque: true },
-  { id: C_WHITE, name: 'White', icon: '⬜', color: rgb(245, 245, 245), solid: true, opaque: true },
-  { id: ROCK, name: 'Rock', icon: '⛰️', color: rgb(90, 96, 108), solid: true, opaque: true, unbreakable: true },
+  { id: GLOW, name: 'Glow Block', icon: '💡', color: rgb(255, 226, 138), solid: true, opaque: true, emissive: true, sideAtlasCell: ATLAS_GLOW },
+  { id: BOUNCY, name: 'Bouncy Block', icon: '🍬', color: rgb(255, 123, 213), solid: true, opaque: true, bounce: 11.5, sideAtlasCell: ATLAS_BOUNCY },
+  { id: SPARKLE, name: 'Sparkle Block', icon: '✨', color: rgb(185, 231, 255), solid: true, opaque: true, sparkle: true, sideAtlasCell: ATLAS_SPARKLE },
+  { id: MUSIC, name: 'Music Block', icon: '🎵', color: rgb(179, 157, 219), solid: true, opaque: true, note: 0, sideAtlasCell: ATLAS_MUSIC },
+  // The candy colours keep their own tint and multiply a near-white weave, so
+  // they read as painted building bricks rather than solid plastic.
+  { id: C_RED, name: 'Red', icon: '🟥', color: rgb(255, 93, 93), solid: true, opaque: true, sideAtlasCell: ATLAS_WEAVE, tintTexture: true },
+  { id: C_ORANGE, name: 'Orange', icon: '🟧', color: rgb(255, 159, 69), solid: true, opaque: true, sideAtlasCell: ATLAS_WEAVE, tintTexture: true },
+  { id: C_YELLOW, name: 'Yellow', icon: '🟨', color: rgb(255, 215, 94), solid: true, opaque: true, sideAtlasCell: ATLAS_WEAVE, tintTexture: true },
+  { id: C_GREEN, name: 'Green', icon: '🟩', color: rgb(93, 208, 107), solid: true, opaque: true, sideAtlasCell: ATLAS_WEAVE, tintTexture: true },
+  { id: C_BLUE, name: 'Blue', icon: '🟦', color: rgb(93, 155, 255), solid: true, opaque: true, sideAtlasCell: ATLAS_WEAVE, tintTexture: true },
+  { id: C_PURPLE, name: 'Purple', icon: '🟪', color: rgb(176, 107, 255), solid: true, opaque: true, sideAtlasCell: ATLAS_WEAVE, tintTexture: true },
+  { id: C_PINK, name: 'Pink', icon: '🟪', color: rgb(255, 138, 212), solid: true, opaque: true, sideAtlasCell: ATLAS_WEAVE, tintTexture: true },
+  { id: C_WHITE, name: 'White', icon: '⬜', color: rgb(245, 245, 245), solid: true, opaque: true, sideAtlasCell: ATLAS_WEAVE, tintTexture: true },
+  { id: ROCK, name: 'Rock', icon: '⛰️', color: rgb(90, 96, 108), solid: true, opaque: true, unbreakable: true, sideAtlasCell: ATLAS_ROCK },
   {
     id: DYNAMITE, name: 'Dynamite', icon: '🧨', color: rgb(236, 110, 84),
     sideAtlasCell: ATLAS_DYNAMITE_SIDE, capAtlasCell: ATLAS_DYNAMITE_CAP,
@@ -130,7 +182,7 @@ const DEFS: BlockDef[] = [
   {
     id: SCORCH, name: 'Scorched Ground', icon: '🕳️', color: rgb(97, 76, 57),
     topColor: rgb(84, 66, 49), sideColor: rgb(104, 82, 61),
-    solid: true, opaque: true,
+    sideAtlasCell: ATLAS_SCORCH, solid: true, opaque: true,
   },
 ];
 
