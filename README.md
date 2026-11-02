@@ -185,7 +185,7 @@ a block above the water, place a block or dig a step to make a stair.
 
 ## Testing status (honest)
 
-Automated (Playwright, real Chromium, 25 tests): game loads error-free,
+Automated (Playwright, real Chromium, 26 tests): game loads error-free,
 keyboard-only join, controller join/move/jump/build/cycle, palette with
 D-pad, per-player menu + fly toggle, split-screen activation, 2×2
 four-player grid, independent movement, one player's palette not pausing

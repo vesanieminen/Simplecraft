@@ -22,7 +22,7 @@ import { LocalPlayer } from './players/localPlayer';
 import { PlayerEntity } from './players/playerEntity';
 import { AVATAR_COLORS, NICKNAMES } from './players/avatar';
 import { ChunkMeshManager } from './render/chunkMeshes';
-import { createSky, SkyEnv } from './render/sky';
+import { createSky, SKY_CLEAR, SKY_FAR, SkyEnv } from './render/sky';
 import { SplitLayout, ViewportManager } from './render/viewportManager';
 import { Hud } from './ui/hud';
 import {
@@ -71,7 +71,7 @@ export class Game {
   private welcomePicker: { sid: string; overlay: WorldSelectOverlay } | null = null;
   private idleAngle = 0;
   /** slow orbit camera used while nobody has joined (welcome + world picker backdrop) */
-  private idleCamera = new THREE.PerspectiveCamera(70, 16 / 9, 0.1, 400);
+  private idleCamera = new THREE.PerspectiveCamera(70, 16 / 9, 0.1, SKY_FAR);
   private overlays = new Map<number, Overlay>(); // playerId -> overlay
   private sourceToPlayer = new Map<string, LocalPlayer>();
   /** wall-clock instant from which a just-left controller may join again */
@@ -105,6 +105,9 @@ export class Game {
     const canvas = document.getElementById('gl') as HTMLCanvasElement;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    // whatever the sky does not cover should look like hazy sky, never the black
+    // void behind the canvas (each split-screen pane is cleared to this)
+    this.renderer.setClearColor(SKY_CLEAR, 1);
     this.scene = new THREE.Scene();
     this.chunks = new ChunkMeshManager(this.scene, this.world);
     this.chunks.rebuildAll();
@@ -211,7 +214,7 @@ export class Game {
     if (this.pendingJoins.has(s.id)) return;
     const card = new JoinCard(this.audio, s.controllerType, this.players.length + this.pendingJoins.size + 1,
       (colorIdx, nameIdx) => this.confirmJoin(s, colorIdx, nameIdx));
-    const cam = new THREE.PerspectiveCamera(70, 1, 0.1, 400);
+    const cam = new THREE.PerspectiveCamera(70, 1, 0.1, SKY_FAR);
     const pane = this.players.length + this.pendingJoins.size;
     this.pendingJoins.set(s.id, { source: s, card, camera: cam, angle: Math.random() * 6 });
     this.ui.ensurePanes(pane + 1);
