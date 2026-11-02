@@ -193,3 +193,11 @@ html, body {
   background: rgba(255, 225, 77, 0.95); color: var(--ink); font-weight: 800;
   border: 4px solid var(--ink); border-radius: 18px; padding: 8px 20px; font-size: 22px;
 }
+
+/* the screen punch when dynamite goes off: warm light, no gore */
+.blast-flash {
+  position: absolute; inset: 0; pointer-events: none; z-index: 30;
+  background: radial-gradient(circle at 50% 55%,
+    rgba(255, 250, 226, 0.95) 0%, rgba(255, 190, 96, 0.6) 42%, rgba(255, 140, 60, 0) 76%);
+  transition: opacity 400ms ease-out;
+}

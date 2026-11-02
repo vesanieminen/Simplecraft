@@ -93,6 +93,8 @@ export interface ChunkGeometry {
   opaque: THREE.BufferGeometry | null;
   translucent: THREE.BufferGeometry | null;
   cross: THREE.BufferGeometry | null;
+  /** cubes painted from the block texture atlas (dynamite) */
+  textured: THREE.BufferGeometry | null;
 }
 
 class GeomBuilder {
@@ -147,6 +149,7 @@ export function buildChunkGeometry(world: World, cx: number, cz: number): ChunkG
   const opaque = new GeomBuilder();
   const transp = new GeomBuilder();
   const cross = new GeomBuilder();
+  const tex = new GeomBuilder();
 
   const x0 = cx * CHUNK, z0 = cz * CHUNK;
 
@@ -162,7 +165,9 @@ export function buildChunkGeometry(world: World, cx: number, cz: number): ChunkG
           continue;
         }
 
-        const target = isTranslucentBlock(id) ? transp : opaque;
+        const sideCell = def.sideAtlasCell;
+        const isTextured = sideCell !== undefined;
+        const target = isTextured ? tex : (isTranslucentBlock(id) ? transp : opaque);
 
         for (let fi = 0; fi < 6; fi++) {
           const f = FACES[fi];
@@ -173,7 +178,8 @@ export function buildChunkGeometry(world: World, cx: number, cz: number): ChunkG
 
           // base tint for this face
           let base = def.color;
-          if (def.topColor && fi === 2) base = def.topColor;
+          if (isTextured) base = TEXTURE_TINT; // the atlas artwork carries the colour
+          else if (def.topColor && fi === 2) base = def.topColor;
           else if (def.topColor && fi === 3) base = def.color;
           if (def.sideColor && (fi === 0 || fi === 1 || fi === 4 || fi === 5)) base = def.sideColor;
 
@@ -198,13 +204,42 @@ export function buildChunkGeometry(world: World, cx: number, cz: number): ChunkG
             base[0] * aoVals[ci], base[1] * aoVals[ci], base[2] * aoVals[ci],
           ]);
           const cornerPts = f.corners.map((c) => [x + c[0], y + c[1], z + c[2]] as [number, number, number]);
-          target.quad(cornerPts[0], cornerPts[1], cornerPts[2], cornerPts[3], f.dir, tint);
+          target.quad(
+            cornerPts[0], cornerPts[1], cornerPts[2], cornerPts[3], f.dir, tint,
+            sideCell !== undefined ? faceUvs(fi, sideCell, def.capAtlasCell ?? sideCell) : undefined,
+          );
         }
       }
     }
   }
 
-  return { opaque: opaque.build(), translucent: transp.build(), cross: cross.build() };
+  return {
+    opaque: opaque.build(), translucent: transp.build(), cross: cross.build(), textured: tex.build(),
+  };
+}
+
+/** textured faces sample the atlas at full brightness; shading comes from AO + face angle */
+const TEXTURE_TINT: [number, number, number] = [1, 1, 1];
+
+const ATLAS_CELL_COUNT = 2; // must match render/textures.ts BLOCK_CELLS
+
+/**
+ * UVs for one cube face. The four side faces list their corners bottom, top,
+ * top, bottom, so the bundle stands upright on every side; the caps map the
+ * whole cell across the square.
+ */
+function faceUvs(
+  fi: number, sideCell: number, capCell: number,
+): [number, number][] {
+  const pad = 0.5 / 32; // half-pixel inset to avoid atlas bleed
+  const v0 = pad, v1 = 1 - pad;
+  const cell = fi === 2 || fi === 3 ? capCell : sideCell;
+  const u0 = (cell + pad) / ATLAS_CELL_COUNT;
+  const u1 = (cell + 1 - pad) / ATLAS_CELL_COUNT;
+  if (fi === 2 || fi === 3) {
+    return [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
+  }
+  return [[u0, v0], [u0, v1], [u1, v1], [u1, v0]];
 }
 
 /** two crossed vertical quads for flowers / grass tufts, textured from an atlas */

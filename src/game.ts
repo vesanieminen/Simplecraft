@@ -7,8 +7,9 @@
 import * as THREE from 'three';
 import { AudioKit } from './core/audio';
 import { AnimalWorld } from './core/animals';
-import { blockDef, isSolidBlock, ROCK, WATER } from './core/blocks';
+import { blockDef, isExplosiveBlock, isSolidBlock, ROCK, WATER } from './core/blocks';
 import { StarField } from './core/collectibles';
+import { BlastInfo, DynamiteManager } from './core/dynamite';
 import { ParticleSystem } from './core/particles';
 import { RayHit } from './core/raycast';
 import { blockAabb, boxesOverlap, playerAabb } from './core/physics';
@@ -79,6 +80,7 @@ export class Game {
   private skyEnv!: SkyEnv;
   private time = 0;
   private sparkleBlocks = new Set<number>();
+  dynamite!: DynamiteManager;
   private lastLandSound = new Map<number, number>();
   private stepEvents = {
     landed: false, bounced: null as number | null,
@@ -114,6 +116,12 @@ export class Game {
 
     this.animals = new AnimalWorld(this.scene, this.world, this.particles, this.audio, gen.spawnX, gen.spawnZ);
     this.starField = new StarField(this.scene, this.world, gen.spawnX, gen.spawnZ);
+
+    // dynamite: sticks that came with the save get their fuses back
+    this.dynamite = new DynamiteManager(
+      this.scene, this.world, this.particles, this.audio, (b) => this.onBlast(b),
+    );
+    this.dynamite.restoreFromWorld();
 
     // ---- input ----
     this.input.addSource(new KeyboardSource());
@@ -487,10 +495,22 @@ export class Game {
         const def = blockDef(id);
         this.particles.burst(px + 0.5, py + 0.5, pz + 0.5, new THREE.Color(def.color[0], def.color[1], def.color[2]), 7, 0.7);
         if (def.sparkle) this.sparkleBlocks.add(worldIdx(px, py, pz));
+        if (def.explosive) {
+          // dynamite lights the moment it is set down: grab a stick, run, boom
+          this.dynamite.light(px, py, pz);
+          this.ui.toast('Dynamite is lit — run clear! 🧨', 1700);
+        }
         return true;
       },
       tryRemove: (lp: LocalPlayer, hit: RayHit): void => {
         const def = blockDef(hit.block);
+        if (isExplosiveBlock(hit.block)) {
+          // hitting dynamite never takes it off: you light the stub and it pops
+          this.dynamite.light(hit.x, hit.y, hit.z, 0.35);
+          this.audio.dynamiteStrike();
+          this.particles.burst(hit.x + 0.5, hit.y + 1.1, hit.z + 0.5, 0xffd24a, 7, 0.9);
+          return;
+        }
         // bedrock, water and anything below y=0 are off limits for the break button
         if (def.unbreakable || hit.block === ROCK || hit.block === WATER || hit.y <= 0) {
           this.particles.burst(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, 0xff5d5d, 4, 0.4);
@@ -506,6 +526,43 @@ export class Game {
         this.animals.petNearest(lp.entity.pos.x, lp.entity.pos.y + 0.8, lp.entity.pos.z, 2.4);
       },
     };
+  }
+
+  // ------------------------------------------------------------- explosions
+
+  /**
+   * A stick went off: knock the players about (nobody gets hurt — it is a
+   * cartoon launch), send the animals tumbling, punch the screen and tidy up
+   * bookkeeping for blocks that no longer exist.
+   */
+  private onBlast(b: BlastInfo): void {
+    for (const i of b.removed) this.sparkleBlocks.delete(i);
+
+    const cx = b.x + 0.5, cy = b.y + 0.5, cz = b.z + 0.5;
+    const range = b.radius * 2.4;
+    const launched = this.animals.blastAway(cx, cy, cz, b.radius);
+
+    for (const p of this.players) {
+      const e = p.entity;
+      const dx = e.pos.x - cx, dy = e.pos.y + 0.9 - cy, dz = e.pos.z - cz;
+      const d = Math.hypot(dx, dy, dz);
+      if (d < range) {
+        const power = 1 - d / range;
+        const len = Math.max(0.5, d);
+        e.vel.x += (dx / len) * 9 * power;
+        e.vel.z += (dz / len) * 9 * power;
+        e.vel.y = Math.max(e.vel.y, 4.5 + 7.5 * power);
+        e.grounded = false;
+        p.shake(0.5 + power * 0.7, 1);
+        this.particles.burst(e.pos.x, e.pos.y + 1.1, e.pos.z, 0xffd24a, 6, 0.9);
+      } else {
+        p.shake(0.28, Math.max(0.1, 0.6 - (d - range) * 0.02)); // distant thump
+      }
+    }
+
+    this.ui.flash(0.3 + (b.radius - 3) * 0.12);
+    if (launched === 1) this.ui.toast('One animal went flying! It is fine 🐑', 2200);
+    else if (launched > 1) this.ui.toast(`${launched} animals went flying! All fine 🐑`, 2200);
   }
 
   // ------------------------------------------------------------ persistence
@@ -583,6 +640,7 @@ export class Game {
     this.animals.animals.forEach((a) => a.group.removeFromParent());
     this.animals = new AnimalWorld(this.scene, this.world, this.particles, this.audio, gen.spawnX, gen.spawnZ);
     this.sparkleBlocks.clear();
+    this.dynamite.clear(); // no half-burnt sticks from the old world, please
     for (const p of this.players) p.respawnAt(this.spawnPoint.clone());
     this.lastRevision = this.world.revision;
     void this.saveNow(); // remember the empty new world
@@ -634,6 +692,7 @@ export class Game {
     if (!this.frozen) {
       this.animals.update(dt);
       this.starField.update(this.time);
+      this.dynamite.update(dt);
 
       // ambient sparkles from placed sparkle blocks
       if (Math.random() < dt * 3) {

@@ -35,6 +35,10 @@ export class Animal {
   private homeZ: number;
   private walkPhase = 0;
   private hopT = 0; // >0 while doing a happy hop
+  private tumbleT = 0; // >0 while blown head over heels
+  private tumbleTotal = 1;
+  private tvx = 0;
+  private tvz = 0;
   group: THREE.Group;
   private legs: THREE.Object3D[] = [];
   private bodyMesh: THREE.Mesh;
@@ -132,6 +136,23 @@ export class Animal {
     this.hopT = 0.6;
   }
 
+  /**
+   * Sent head over heels by a blast: cartoonish tumbling, never any harm —
+   * they land, shake it off and go back to wandering.
+   */
+  blast(dx: number, dz: number, power: number): void {
+    this.tumbleT = 0.7 + power * 0.3;
+    this.tumbleTotal = this.tumbleT;
+    this.tvx = dx * (3.5 + power * 4);
+    this.tvz = dz * (3.5 + power * 4);
+    this.state = 'idle';
+    this.timer = 1.5 + Math.random() * 2;
+  }
+
+  get isTumbling(): boolean {
+    return this.tumbleT > 0;
+  }
+
   get isHopping(): boolean {
     return this.hopT > 0;
   }
@@ -157,7 +178,7 @@ export class Animal {
       }
     }
 
-    if (this.state === 'walk') {
+    if (this.state === 'walk' && this.tumbleT <= 0) {
       // turn toward target
       let d = this.targetYaw - this.yaw;
       while (d > Math.PI) d -= Math.PI * 2;
@@ -187,8 +208,29 @@ export class Animal {
       this.yaw += dt * 6;
     }
 
-    this.group.position.set(this.pos.x, this.pos.y + hopY, this.pos.z);
+    // being blown along: a big silly arc, spinning, then they land and stand up
+    let tumbleY = 0;
+    let roll = 0;
+    if (this.tumbleT > 0) {
+      this.tumbleT -= dt;
+      const k = Math.max(0, this.tumbleT / this.tumbleTotal);
+      const nx = this.pos.x + this.tvx * dt;
+      const nz = this.pos.z + this.tvz * dt;
+      if (nx > 2 && nz > 2 && nx < WORLD_SX - 2 && nz < WORLD_SZ - 2) {
+        this.pos.x = nx;
+        this.pos.z = nz;
+      }
+      const drag = 1 - Math.min(1, dt * 2.4);
+      this.tvx *= drag;
+      this.tvz *= drag;
+      this.yaw += dt * 13;
+      tumbleY = Math.sin(Math.min(1, 1 - this.tumbleT / this.tumbleTotal) * Math.PI) * (1.1 + k * 1.6);
+      roll = Math.sin(this.yaw * 2.2) * 0.55 * k;
+    }
+
+    this.group.position.set(this.pos.x, this.pos.y + hopY + tumbleY, this.pos.z);
     this.group.rotation.y = this.yaw;
+    this.group.rotation.z = roll;
     const swing = this.state === 'walk' ? Math.sin(this.walkPhase) * 0.6 : 0;
     this.legs[0].rotation.x = swing;
     this.legs[1].rotation.x = -swing;
@@ -266,5 +308,25 @@ export class AnimalWorld {
       this.particles.burst(best.pos.x, best.pos.y + 1.2, best.pos.z, 0xff8ab4, 6, 0.6);
     }
     return best;
+  }
+
+  /**
+   * A blast went off nearby: everyone in range goes flying, legs and all. They
+   * are completely fine — it is a cartoon tumble, and the bleating is the fun
+   * part. Returns how many animals were launched.
+   */
+  blastAway(x: number, y: number, z: number, radius: number): number {
+    const range = radius * 2.2;
+    let hit = 0;
+    for (const a of this.animals) {
+      const dx = a.pos.x - x, dy = a.pos.y - y, dz = a.pos.z - z;
+      const d = Math.hypot(dx, dy, dz);
+      if (d > range) continue;
+      const len = Math.max(0.001, Math.hypot(dx, dz));
+      a.blast(dx / len, dz / len, 1 - d / range);
+      if (hit < 3) this.audio.animal(a.kind); // a few surprised noises, not a chorus
+      hit++;
+    }
+    return hit;
   }
 }

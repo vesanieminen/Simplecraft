@@ -125,6 +125,33 @@ jump, so you hop onto the bank or the rim of a pool instead of paddling in
 circles. Fully submerged, kick up to the surface first. If a bank is more than
 a block above the water, place a block or dig a step to make a stair.
 
+## Dynamite 🧨
+
+Dynamite sits in the block palette **and** on the shoulder-button favourites,
+so a five-year-old finds it in two presses. Set one down and **it lights
+immediately**: the fuse spits sparks and shrinks, the stick rattles, a chunky
+yellow "!" bobs over it, and it hisses — the ticks get faster and louder until
+it goes **BOOM** about two and a half seconds later. You *hear* the fuse
+running out, so children learn to run clear without anyone having to tell them.
+
+- **The blast really moves the world.** A sphere about three and a half blocks
+  across of dirt, stone, wood, bricks, glass and plants is carved out, chunky
+  debris flies off in the colours of whatever went, smoke drifts up, the sky
+  flashes and the crater rim stays scorched. Bedrock and water always win, so
+  the floor never collapses under anybody.
+- **Everybody is fine.** Players and animals are launched into the air,
+  completely unharmed, and land on their feet — a cartoon tumble, no health
+  bar, no game over. The screen gives one warm little punch and each nearby
+  camera shakes, so the kick is felt as well as seen.
+- **Chain reactions.** Sticks near a blast catch light too, so a line of them
+  goes off one after another.
+- **Hitting a burning stick with LT / L2 does not take it off** — you bonk the
+  stub and it pops almost at once, which is the fun way to hurry one along.
+- Sticks are ordinary blocks: they live in the save, other blasts can carve
+  them away, and one you left lying around is still burning when you come
+  back. **Reset World** in the Grown-Ups menu (or a fresh world) tidies the
+  mess, and every block a blast removed is undone the same way.
+
 ## How the world saves
 
 - **On the GitHub Pages site** the game runs entirely in your browser: the
@@ -172,7 +199,7 @@ a block above the water, place a block or dig a step to make a stair.
 
 ## Testing status (honest)
 
-Automated (Playwright, real Chromium, 22 tests): game loads error-free,
+Automated (Playwright, real Chromium, 27 tests): game loads error-free,
 keyboard-only join, controller join/move/jump/build/cycle, palette with
 D-pad, per-player menu + fly toggle, split-screen activation, 2×2
 four-player grid, independent movement, one player's palette not pausing
@@ -186,6 +213,11 @@ starts a new theme+seed and the preview canvas actually paints a map), the
 welcome-screen world picker (theme, surprise seed, start), menu
 sub-screens receiving controller input, `?seed=…&world=…` handling, and
 walking into a pond then **hopping back out** with the jump button held.
+Dynamite is covered too: placing a stick lights it, the blast carves a crater
+and scorches the rim while bedrock and water shrug it off and the fuse meshes
+are cleaned up, LT re-lights a burning stick instead of removing it, one blast
+lights its neighbours (chain reaction), and a stick you left in the world is
+still there — still burning — after a reload.
 
 ```bash
 npm test          # e2e suite (starts its own server on :3100)

@@ -107,4 +107,16 @@ export class UiManager {
     clearTimeout(this.toastTimer);
     this.toastTimer = window.setTimeout(() => t.remove(), ms);
   }
+
+  /** screen punch when something big goes off */
+  flash(strength = 0.35): void {
+    const el = document.createElement('div');
+    el.className = 'blast-flash';
+    el.style.opacity = String(Math.max(0.12, Math.min(0.75, strength)));
+    this.root.appendChild(el);
+    requestAnimationFrame(() => {
+      el.style.opacity = '0';
+    });
+    window.setTimeout(() => el.remove(), 460);
+  }
 }

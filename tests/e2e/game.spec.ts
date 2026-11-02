@@ -780,3 +780,270 @@ test('the ?seed= and ?world= url params choose the starting world', async ({ pag
   }));
   expect(state).toEqual({ seed: 4242, theme: 2, worldTheme: 2 });
 });
+
+// ------------------------------------------------------------------- dynamite
+
+type Cell = { x: number; y: number; z: number };
+
+/**
+ * Puts a stick of dynamite in the cell the player is aiming at (through the
+ * same placement hook a controller press uses) and sets how long its fuse is.
+ */
+async function plantStick(page: Page, fuse: number): Promise<Cell> {
+  await page.waitForFunction('window.__lbw.game.players[0].target !== null', null, { timeout: 15000 });
+  const cell = await page.evaluate((f: number) => {
+    const game = (window as any).__lbw.game;
+    const lp = game.players[0];
+    const hit = lp.target;
+    lp.selected = (window as any).__lbw.ids.DYNAMITE;
+    if (!game.hooks().tryPlace(lp, hit)) return null;
+    const cell = { x: hit.px, y: hit.py, z: hit.pz };
+    game.dynamite.light(cell.x, cell.y, cell.z, f); // long fuse: the test decides when it pops
+    return cell;
+  }, fuse);
+  expect(cell).not.toBeNull();
+  return cell!;
+}
+
+/** how many burning-fuse rigs are still hanging in the scene (catches leaks) */
+function fuseRigs(page: Page): Promise<number> {
+  return page.evaluate(() => (window as any).__lbw.game.scene.children
+    .filter((o: any) => o.userData?.fuse).length);
+}
+
+test('dynamite is in the palette, painted from an atlas, and lights when placed', async ({ page }) => {
+  await boot(page);
+  const atlas = await page.evaluate(() => ({
+    hasMap: !!(window as any).__lbw.game.chunks.materials.textured.map,
+  }));
+  expect(atlas.hasMap).toBe(true); // the stick is drawn, not tinted
+
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 10000 });
+
+  // a child can find it in the block palette
+  await page.evaluate(() => (window as any).__testPad.tap('palette'));
+  await page.waitForSelector('.palette-grid');
+  const labels = await page.evaluate(() =>
+    [...document.querySelectorAll('.palette-cell')].map((c) => c.textContent || ''));
+  expect(labels.some((t) => t.includes('Dynamite'))).toBe(true);
+  await page.evaluate(() => (window as any).__testPad.tap('back'));
+
+  // place it with the build button
+  await page.evaluate(() => {
+    (window as any).__lbw.game.players[0].selected = (window as any).__lbw.ids.DYNAMITE;
+  });
+  await page.waitForFunction('window.__lbw.game.players[0].target !== null', null, { timeout: 15000 });
+  const target = await page.evaluate(() => {
+    const t = (window as any).__lbw.game.players[0].target;
+    return { x: t.px, y: t.py, z: t.pz };
+  });
+  await page.evaluate(() => (window as any).__testPad.set('place', true));
+  await page.waitForTimeout(600);
+  const placed = await page.evaluate((c: Cell) => {
+    const game = (window as any).__lbw.game;
+    return {
+      block: game.world.get(c.x, c.y, c.z),
+      lit: game.dynamite.isLit(c.x, c.y, c.z),
+      active: game.dynamite.active,
+      textured: game.scene.children
+        .filter((o: any) => o.isMesh && o.material === game.chunks.materials.textured).length,
+      toast: document.querySelector('.toast')?.textContent ?? '',
+    };
+  }, target);
+  await page.evaluate(() => (window as any).__testPad.set('place', false));
+
+  expect(placed.block).toBe((await page.evaluate(() => (window as any).__lbw.ids)).DYNAMITE);
+  expect(placed.lit).toBe(true);   // burning from the moment it is set down
+  expect(placed.active).toBe(1);
+  expect(placed.textured).toBeGreaterThan(0); // a chunk face is using the block atlas
+  expect(placed.toast).toMatch(/Dynamite/i);
+
+  // and the fuse really does run out
+  await page.waitForFunction('window.__lbw.game.dynamite.blastCount > 0', null, { timeout: 30000 });
+});
+
+test('a blast carves a crater, marks the rim, and everybody walks away', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 10000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  const cell = await plantStick(page, 30);
+
+  const before = await page.evaluate((c: Cell) => {
+    const game = (window as any).__lbw.game;
+    const w = window as any;
+    // watch the "kick" and the animal launch without needing hardware
+    const lp = game.players[0];
+    w.__shakes = [];
+    const shake = lp.shake.bind(lp);
+    lp.shake = (s: number, m: number) => { w.__shakes.push([s, m]); shake(s, m); };
+    const away = game.animals.blastAway.bind(game.animals);
+    w.__launched = [];
+    game.animals.blastAway = (x: number, y: number, z: number, r: number) => {
+      w.__launched.push(r);
+      return away(x, y, z, r);
+    };
+    // a bucket of water right beside the stick, to prove water always wins
+    game.world.set(c.x + 2, c.y, c.z, w.__lbw.ids.WATER);
+    let solid = 0;
+    for (let dx = -2; dx <= 2; dx++)
+      for (let dz = -2; dz <= 2; dz++)
+        for (let dy = -2; dy <= 2; dy++)
+          if (game.world.get(c.x + dx, c.y + dy, c.z + dz) !== 0) solid++;
+    const rigs = game.scene.children.filter((o: any) => o.userData?.fuse).length;
+    return { solid, rigs };
+  }, cell);
+  expect(before.solid).toBeGreaterThan(20);
+  expect(before.rigs).toBe(1); // the stick is burning away while we set this up
+
+  await page.evaluate((c: Cell) => (window as any).__lbw.game.dynamite.light(c.x, c.y, c.z, 0.05), cell);
+  await page.waitForFunction('window.__lbw.game.dynamite.blastCount > 0', null, { timeout: 30000 });
+
+  const after = await page.evaluate((c: Cell) => {
+    const game = (window as any).__lbw.game;
+    const ids = (window as any).__lbw.ids;
+    const w = window as any;
+    let solid = 0;
+    for (let dx = -2; dx <= 2; dx++)
+      for (let dz = -2; dz <= 2; dz++)
+        for (let dy = -2; dy <= 2; dy++)
+          if (game.world.get(c.x + dx, c.y + dy, c.z + dz) !== 0) solid++;
+    return {
+      centre: game.world.get(c.x, c.y, c.z),
+      solid,
+      bedrock: game.world.get(c.x, 0, c.z),
+      water: game.world.get(c.x + 2, c.y, c.z),
+      scorch: [...game.world.mods.values()].filter((v: number) => v === ids.SCORCH).length,
+      active: game.dynamite.active,
+      rigs: game.scene.children.filter((o: any) => o.userData?.fuse).length,
+      shakes: w.__shakes.length,
+      launched: w.__launched.length,
+      flash: !!document.querySelector('.blast-flash'),
+    };
+  }, cell);
+
+  expect(after.centre).toBe(0);                     // the stick's own cell is gone
+  expect(after.solid).toBeLessThan(before.solid);   // and so is a lump of the world
+  expect(after.bedrock).not.toBe(0);                // the floor always holds
+  expect(after.water).toBe(ids.WATER);              // water always wins
+  expect(after.scorch).toBeGreaterThan(0);          // the blast leaves a mark
+  expect(after.active).toBe(0);
+  expect(after.rigs).toBe(0);                       // the burning-fuse meshes are cleaned up
+  expect(after.shakes).toBeGreaterThan(0);          // the player feels it
+  expect(after.launched).toBeGreaterThan(0);        // the animals get told
+  expect(after.flash).toBe(true);                   // and the screen punches
+});
+
+test('hitting a stick with the break button re-lights the stub, it does not come off', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 10000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  const cell = await plantStick(page, 30);
+
+  await frames(page, 3);
+  const aim = await page.evaluate(() => {
+    const p = (window as any).__lbw.game.players[0];
+    return p.removeTarget ? { block: p.removeTarget.block, y: p.removeTarget.y } : null;
+  });
+  expect(aim?.block).toBe(ids.DYNAMITE); // LT is aiming at the stick
+
+  await page.evaluate(() => (window as any).__testPad.set('remove', true));
+  await frames(page, 4);
+  await page.evaluate(() => (window as any).__testPad.set('remove', false));
+
+  const now = await page.evaluate((c: Cell) => {
+    const game = (window as any).__lbw.game;
+    const fuse = [...game.dynamite.lit.values()]
+      .find((l: any) => l.x === c.x && l.y === c.y && l.z === c.z);
+    return {
+      block: game.world.get(c.x, c.y, c.z),
+      fuse: fuse ? fuse.fuse : null,
+    };
+  }, cell);
+  expect(now.block).toBe(ids.DYNAMITE); // it is still a stick...
+  expect(now.fuse).not.toBeNull();      // ...now burning down fast
+  expect(now.fuse!).toBeLessThan(1);
+
+  await page.waitForFunction('window.__lbw.game.dynamite.blastCount > 0', null, { timeout: 30000 });
+  const gone = await page.evaluate(
+    (c: Cell) => (window as any).__lbw.game.world.get(c.x, c.y, c.z), cell);
+  expect(gone).toBe(0);
+});
+
+test('one stick lights the sticks around it too (chain reactions)', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 10000 });
+  const cell = await plantStick(page, 30);
+  expect(await fuseRigs(page)).toBe(1);
+
+  // a second stick well outside the crater but close enough to hear it
+  await page.evaluate(({ c, dyn }: { c: Cell; dyn: number }) => {
+    const game = (window as any).__lbw.game;
+    game.world.set(c.x + 6, c.y, c.z, dyn);
+    game.dynamite.light(c.x + 6, c.y, c.z, 30);
+  }, { c: cell, dyn: (await page.evaluate(() => (window as any).__lbw.ids)).DYNAMITE });
+  expect(await fuseRigs(page)).toBe(2); // two sticks, two burning fuses
+
+  await page.evaluate((c: Cell) => (window as any).__lbw.game.dynamite.light(c.x, c.y, c.z, 0.05), cell);
+  await page.waitForFunction('window.__lbw.game.dynamite.blastCount >= 2', null, { timeout: 45000 });
+
+  const both = await page.evaluate((c: Cell) => {
+    const game = (window as any).__lbw.game;
+    return {
+      first: game.world.get(c.x, c.y, c.z),
+      second: game.world.get(c.x + 6, c.y, c.z),
+      active: game.dynamite.active,
+    };
+  }, cell);
+  expect(both.first).toBe(0);
+  expect(both.second).toBe(0); // the neighbour went off by itself, it was not carved away
+  expect(both.active).toBe(0);
+  expect(await fuseRigs(page)).toBe(0); // both fuse rigs are gone again
+});
+
+test('a stick you left lying around is still there after a reload, fuse and all', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 10000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  const cell = await plantStick(page, 60);
+
+  const want = await page.evaluate((c: Cell) => {
+    const { sz, sy } = (window as any).__lbw.dims;
+    return {
+      key: String((c.x * sz + c.z) * sy + c.y),
+      dyn: (window as any).__lbw.ids.DYNAMITE,
+      seed: (window as any).__lbw.game.seed,
+      theme: (window as any).__lbw.game.theme,
+    };
+  }, cell);
+  await page.evaluate(async (w: { key: string; dyn: number; seed: number; theme: number }) => {
+    (window as any).__savedStick = false;
+    const iv = setInterval(async () => {
+      const r = await fetch(`/api/world?seed=${w.seed}&theme=${w.theme}`);
+      const d = await r.json();
+      if (d && d.mods && d.mods[w.key] === w.dyn) {
+        (window as any).__savedStick = true;
+        clearInterval(iv);
+      }
+    }, 250);
+  }, want);
+  await page.waitForFunction('window.__savedStick === true', null, { timeout: 20000 });
+
+  await page.reload();
+  await page.waitForFunction('window.__lbw !== undefined', null, { timeout: 20000 });
+  const after = await page.evaluate((c: Cell) => {
+    const game = (window as any).__lbw.game;
+    return {
+      block: game.world.get(c.x, c.y, c.z),
+      lit: game.dynamite.isLit(c.x, c.y, c.z),
+      active: game.dynamite.active,
+    };
+  }, cell);
+  expect(after.block).toBe(ids.DYNAMITE);
+  expect(after.lit).toBe(true);   // and it starts burning again
+  expect(after.active).toBeGreaterThan(0);
+});

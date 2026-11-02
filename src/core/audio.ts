@@ -56,13 +56,17 @@ export class AudioKit {
     osc.stop(t + dur + 0.02);
   }
 
-  private noise(dur: number, vol: number, filterFreq: number, delay = 0): void {
+  private noise(
+    dur: number, vol: number, filterFreq: number, delay = 0,
+    type: BiquadFilterType = 'lowpass',
+  ): void {
     if (!this.ctx || !this.master || !this.noiseBuf || this.muted) return;
     const t = this.ctx.currentTime + delay;
     const src = this.ctx.createBufferSource();
     src.buffer = this.noiseBuf;
+    src.loop = true; // the buffer is short; longer sounds just ride around it
     const filter = this.ctx.createBiquadFilter();
-    filter.type = 'lowpass';
+    filter.type = type;
     filter.frequency.value = filterFreq;
     const g = this.ctx.createGain();
     g.gain.setValueAtTime(vol, t);
@@ -102,6 +106,41 @@ export class AudioKit {
 
   sparkle(): void {
     this.tone('sine', 1800, 1400, 0.25, 0.08);
+  }
+
+  // ------------------------------------------------------------- dynamite
+
+  /** the fuse catching: paper thud, then a long hiss */
+  dynamiteLight(): void {
+    this.tone('triangle', 250, 170, 0.09, 0.18);
+    this.noise(0.55, 0.16, 6200, 0.03, 'bandpass');
+  }
+
+  /** the fuse spitting — short high ticks, faster and louder as it burns down */
+  fuseTick(strength = 1): void {
+    this.noise(0.05, 0.05 * strength, 5200, 0, 'highpass');
+    this.tone('square', 1800 + Math.random() * 1200, 1100, 0.035, 0.025 * strength);
+  }
+
+  /** last half second: a rising panic so kids know to run */
+  fuseRush(): void {
+    this.tone('square', 620, 1150, 0.09, 0.08);
+    this.tone('square', 880, 1500, 0.09, 0.06, 0.11);
+  }
+
+  /** hitting dynamite with the break button: clank, then it hisses */
+  dynamiteStrike(): void {
+    this.tone('square', 540, 300, 0.07, 0.13);
+    this.noise(0.14, 0.15, 2600, 0, 'bandpass');
+  }
+
+  /** the big one: low thump, bright crack, rolling rumble */
+  boom(power = 1): void {
+    this.tone('sine', 175, 34, 0.5, 0.55 * power);
+    this.tone('sawtooth', 96, 30, 0.34, 0.22 * power, 0.01);
+    this.noise(0.42, 0.45 * power, 900);
+    this.noise(0.09, 0.38 * power, 9000, 0, 'highpass');
+    this.noise(0.95, 0.13 * power, 420, 0.05);
   }
 
   uiMove(): void {

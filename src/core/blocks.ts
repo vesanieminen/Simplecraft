@@ -33,6 +33,12 @@ export const C_PURPLE: BlockId = 23;
 export const C_PINK: BlockId = 24;
 export const C_WHITE: BlockId = 25;
 export const ROCK: BlockId = 26; // indestructible floor at y=0
+export const DYNAMITE: BlockId = 27; // lit fuse, then it blows a hole in things
+export const SCORCH: BlockId = 28; // what grass looks like after a blast
+
+/** cells of the procedural *block* texture atlas (see render/textures.ts) */
+export const ATLAS_DYNAMITE_SIDE = 0;
+export const ATLAS_DYNAMITE_CAP = 1;
 
 export interface BlockDef {
   id: BlockId;
@@ -53,6 +59,10 @@ export interface BlockDef {
   cross?: boolean;
   /** which 32x32 cell of the plant texture atlas to use (cross blocks) */
   atlasCell?: number;
+  /** paint the four sides from this cell of the *block* texture atlas */
+  sideAtlasCell?: number;
+  /** paint the top and bottom from this cell of the block texture atlas */
+  capAtlasCell?: number;
   /** full-brightness emissive look */
   emissive?: boolean;
   /** launches players who land on it */
@@ -63,6 +73,10 @@ export interface BlockDef {
   note?: number;
   /** cannot be removed by players */
   unbreakable?: boolean;
+  /** blows the surroundings away; sizzles and shakes before it goes */
+  explosive?: boolean;
+  /** seconds of fuse once it is lit (explosive blocks only) */
+  fuse?: number;
 }
 
 const rgb = (r: number, g: number, b: number): [number, number, number] => [r / 255, g / 255, b / 255];
@@ -108,6 +122,16 @@ const DEFS: BlockDef[] = [
   { id: C_PINK, name: 'Pink', icon: '🟪', color: rgb(255, 138, 212), solid: true, opaque: true },
   { id: C_WHITE, name: 'White', icon: '⬜', color: rgb(245, 245, 245), solid: true, opaque: true },
   { id: ROCK, name: 'Rock', icon: '⛰️', color: rgb(90, 96, 108), solid: true, opaque: true, unbreakable: true },
+  {
+    id: DYNAMITE, name: 'Dynamite', icon: '🧨', color: rgb(236, 110, 84),
+    sideAtlasCell: ATLAS_DYNAMITE_SIDE, capAtlasCell: ATLAS_DYNAMITE_CAP,
+    solid: true, opaque: true, explosive: true, fuse: 2.6,
+  },
+  {
+    id: SCORCH, name: 'Scorched Ground', icon: '🕳️', color: rgb(97, 76, 57),
+    topColor: rgb(84, 66, 49), sideColor: rgb(104, 82, 61),
+    solid: true, opaque: true,
+  },
 ];
 
 export const BLOCK_MAP = new Map<BlockId, BlockDef>(DEFS.map((d) => [d.id, d]));
@@ -133,16 +157,24 @@ export function isCrossBlock(id: BlockId): boolean {
 export function isTranslucentBlock(id: BlockId): boolean {
   return id !== AIR && !!blockDef(id).translucent;
 }
+export function isExplosiveBlock(id: BlockId): boolean {
+  return id !== AIR && !!blockDef(id).explosive;
+}
+/** blocks whose faces get painted from the block texture atlas */
+export function isTexturedBlock(id: BlockId): boolean {
+  return id !== AIR && blockDef(id).sideAtlasCell !== undefined;
+}
 
 /** Blocks offered in the child-friendly creative palette (in order). */
 export const PALETTE: BlockId[] = [
   GRASS, DIRT, STONE, SAND, WOOD, PLANKS, BRICKS, GLASS, LEAVES,
   FLOWER_RED, FLOWER_YELLOW, TALLGRASS,
-  GLOW, BOUNCY, SPARKLE, MUSIC,
+  GLOW, BOUNCY, SPARKLE, MUSIC, DYNAMITE,
   C_RED, C_ORANGE, C_YELLOW, C_GREEN, C_BLUE, C_PURPLE, C_PINK, C_WHITE,
 ];
 
 /** Quick-cycling favorites for shoulder buttons. */
 export const FAVORITES: BlockId[] = [
-  GRASS, PLANKS, BRICKS, GLASS, GLOW, BOUNCY, SPARKLE, MUSIC, C_RED, C_BLUE, C_PINK, C_YELLOW,
+  GRASS, PLANKS, BRICKS, GLASS, GLOW, BOUNCY, SPARKLE, MUSIC, DYNAMITE,
+  C_RED, C_BLUE, C_PINK, C_YELLOW,
 ];
