@@ -1,0 +1,197 @@
+/**
+ * A local player: entity + own camera + own controller + own build state.
+ * This is the object that makes split-screen work: everything a player
+ * needs is per-instance, the world and scene are shared.
+ */
+
+import * as THREE from 'three';
+import { BlockId, blockDef, FAVORITES } from '../core/blocks';
+import { generousTarget, hitAny, RayHit, raycastVoxel } from '../core/raycast';
+import { World } from '../core/world';
+import { FrameControls } from '../input/types';
+import { PlayerEntity, StepEvents } from './playerEntity';
+
+const REACH = 6.5;
+const LOOK_RATE = 2.6;
+
+export interface WorldHooks {
+  tryPlace(lp: LocalPlayer, hit: RayHit): boolean;
+  tryRemove(lp: LocalPlayer, hit: RayHit): void;
+  interact(lp: LocalPlayer): void;
+  events: StepEvents;
+}
+
+export class LocalPlayer {
+  camera: THREE.PerspectiveCamera;
+  selected: BlockId = FAVORITES[0];
+  firstPerson = false;
+  sensitivity = 1;
+  target: RayHit | null = null;
+  sourceId = '';
+  /** set true while this player's own menu is open (movement stops for them) */
+  uiOpen = false;
+
+  private outline: THREE.LineSegments;
+  private ghost: THREE.Mesh;
+  private ghostBlock = -1;
+  private buildCooldown = 0;
+  private cameraDist = 4.8;
+  private camPos = new THREE.Vector3();
+
+  constructor(
+    public entity: PlayerEntity,
+    scene: THREE.Scene,
+    private world: World,
+  ) {
+    this.camera = new THREE.PerspectiveCamera(70, 1, 0.1, 400);
+    this.camPos.copy(entity.pos);
+
+    this.outline = new THREE.LineSegments(
+      new THREE.EdgesGeometry(new THREE.BoxGeometry(1.005, 1.005, 1.005)),
+      new THREE.LineBasicMaterial({ color: 0x1c2430, transparent: true, opacity: 0.9 }),
+    );
+    this.outline.visible = false;
+    this.outline.renderOrder = 10;
+    scene.add(this.outline);
+
+    this.ghost = new THREE.Mesh(
+      new THREE.BoxGeometry(0.94, 0.94, 0.94),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, depthWrite: false }),
+    );
+    this.ghost.visible = false;
+    this.ghost.renderOrder = 9;
+    scene.add(this.ghost);
+  }
+
+  dispose(scene: THREE.Scene): void {
+    scene.remove(this.outline, this.ghost);
+    this.outline.geometry.dispose();
+    this.ghost.geometry.dispose();
+  }
+
+  setSelected(id: BlockId): void {
+    this.selected = id;
+  }
+
+  cycle(dir: number): void {
+    let i = FAVORITES.indexOf(this.selected);
+    if (i < 0) i = 0;
+    i = (i + dir + FAVORITES.length) % FAVORITES.length;
+    this.selected = FAVORITES[i];
+  }
+
+  aimDir(out = new THREE.Vector3()): THREE.Vector3 {
+    const cp = Math.cos(this.entity.pitch);
+    return out.set(
+      Math.sin(this.entity.yaw) * cp,
+      Math.sin(this.entity.pitch),
+      Math.cos(this.entity.yaw) * cp,
+    );
+  }
+
+  update(dt: number, frame: FrameControls, hooks: WorldHooks, worldMenuBlock: boolean): void {
+    // ---- look ----
+    if (!worldMenuBlock) {
+      this.entity.yaw += frame.look.x * LOOK_RATE * this.sensitivity * dt;
+      this.entity.pitch -= frame.look.y * LOOK_RATE * this.sensitivity * dt;
+      const maxPitch = Math.PI / 2 - 0.05;
+      this.entity.pitch = Math.max(-maxPitch, Math.min(maxPitch, this.entity.pitch));
+    }
+
+    // ---- step simulation ----
+    const stepInput = worldMenuBlock
+      ? { moveX: 0, moveY: 0, jump: false, flyUp: false, flyDown: false, dt }
+      : {
+          moveX: frame.move.x,
+          moveY: frame.move.y,
+          jump: frame.held.has('jump') || frame.held.has('up'),
+          flyUp: frame.held.has('jump'),
+          flyDown: frame.held.has('interact') && this.entity.flying,
+          dt,
+        };
+    this.entity.step(this.world, stepInput, hooks.events);
+
+    // ---- targeting & building ----
+    this.updateTarget();
+    this.buildCooldown = Math.max(0, this.buildCooldown - dt);
+
+    if (!worldMenuBlock) {
+      const placePressed = frame.pressed.has('place');
+      const removePressed = frame.pressed.has('remove');
+      const repeat = (frame.held.has('place') || frame.held.has('remove')) && this.buildCooldown <= 0;
+      if ((placePressed || removePressed || repeat) && this.buildCooldown <= 0) {
+        this.buildCooldown = 0.28;
+        if (frame.held.has('place') && this.target) hooks.tryPlace(this, this.target);
+        else if (frame.held.has('remove') && this.target) hooks.tryRemove(this, this.target);
+      }
+      if (frame.pressed.has('interact') && !this.entity.flying) hooks.interact(this);
+      if (frame.pressed.has('nextBlock')) this.cycle(1);
+      if (frame.pressed.has('prevBlock')) this.cycle(-1);
+    }
+
+    this.updateCamera(dt);
+  }
+
+  private updateTarget(): void {
+    const head = new THREE.Vector3(this.entity.pos.x, this.entity.pos.y + 1.45, this.entity.pos.z);
+    const dir = this.aimDir();
+    const right = new THREE.Vector3(Math.cos(this.entity.yaw), 0, -Math.sin(this.entity.yaw));
+    const up = new THREE.Vector3(0, 1, 0);
+
+    // remove targets plants too; place targets solid blocks only
+    const hit = generousTarget(this.world, head, dir, REACH, up, right);
+    this.target = hit;
+
+    if (hit) {
+      this.outline.visible = true;
+      this.outline.position.set(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5);
+    } else {
+      this.outline.visible = false;
+    }
+
+    const placing = true; // ghost follows camera aim
+    if (hit && placing) {
+      const def = blockDef(this.selected);
+      if (this.ghostBlock !== this.selected) {
+        this.ghostBlock = this.selected;
+        (this.ghost.material as THREE.MeshBasicMaterial).color.setRGB(def.color[0], def.color[1], def.color[2]);
+      }
+      this.ghost.visible = true;
+      this.ghost.position.set(hit.px + 0.5, hit.py + 0.5, hit.pz + 0.5);
+    } else {
+      this.ghost.visible = false;
+    }
+  }
+
+  private updateCamera(dt: number): void {
+    const e = this.entity;
+    const head = new THREE.Vector3(e.pos.x, e.pos.y + 1.45, e.pos.z);
+    const dir = this.aimDir();
+    const k = 1 - Math.exp(-22 * dt);
+
+    if (this.firstPerson) {
+      this.camera.position.copy(head);
+      e.avatar.group.visible = false;
+    } else {
+      // third-person with terrain-aware pull-in
+      const probe = raycastVoxel(this.world, head.x, head.y, head.z, -dir.x, -dir.y, -dir.z, 8, hitAny);
+      const wanted = probe ? Math.max(1.1, probe.dist - 0.2) : 4.8;
+      this.cameraDist += (wanted - this.cameraDist) * k;
+      const want = head.clone().addScaledVector(dir, -this.cameraDist);
+      // smooth camera position
+      this.camPos.lerp(want, k);
+      // never below floor of the aim
+      this.camera.position.copy(this.camPos);
+      e.avatar.group.visible = true;
+    }
+    this.camera.quaternion.setFromRotationMatrix(
+      new THREE.Matrix4().lookAt(this.camera.position, head.clone().addScaledVector(dir, 2), new THREE.Vector3(0, 1, 0)),
+    );
+  }
+
+  respawnAt(p: THREE.Vector3): void {
+    this.entity.pos.copy(p);
+    this.entity.vel.set(0, 0, 0);
+    this.entity.flying = false;
+  }
+}
