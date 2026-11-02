@@ -549,6 +549,15 @@ export class Game {
 
     this.chunks.update(4);
 
+    if (!this.frozen && this.players.length > 0) {
+      this.hintTimer -= dt;
+      if (this.hintTimer <= 0) {
+        this.hintTimer = 100 + Math.random() * 80;
+        const hint = Game.HINTS[Math.floor(Math.random() * Game.HINTS.length)];
+        this.ui.toast(hint, 4200);
+      }
+    }
+
     // cameras for render
     const cameras: THREE.Camera[] = [];
     for (const p of this.players) cameras.push(p.camera);
@@ -578,6 +587,18 @@ export class Game {
   };
 
   private lastNow = 0;
+
+  private hintTimer = 25;
+  private static readonly HINTS = [
+    '🏠 Build a house!',
+    '🌉 Build a bridge!',
+    '🌷 Plant a garden!',
+    '🗼 Build a tall tower!',
+    '🐑 Make a home for an animal!',
+    '⭐ Find a glowing star!',
+    '🍬 Land on a bouncy block!',
+    '🎵 Step on a music block!',
+  ];
 
   dispose(): void {
     cancelAnimationFrame(this.rafId);

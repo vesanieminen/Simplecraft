@@ -238,6 +238,14 @@ export class PlayerMenu extends Overlay {
       { icon: '▶️', label: 'Keep Playing', fn: () => this.close() },
       { icon: '🕊️', label: 'Fly', val: () => (player.entity.flying ? 'ON' : 'OFF'), fn: () => { actions.toggleFly(); } },
       { icon: '👀', label: 'Camera', val: () => (player.firstPerson ? 'Eyes' : 'Behind'), fn: () => actions.toggleCamera() },
+      {
+        icon: '🌀',
+        label: 'Look Speed',
+        val: () => (player.sensitivity < 0.8 ? 'Slow' : player.sensitivity > 1.2 ? 'Fast' : 'Normal'),
+        fn: () => {
+          player.sensitivity = player.sensitivity < 0.8 ? 1 : player.sensitivity > 1.2 ? 1.7 : 0.65;
+        },
+      },
       { icon: '🏠', label: 'Go Home', fn: () => { actions.goHome(); this.close(); } },
       { icon: '🎨', label: 'Blocks', fn: () => { this.close(); window.dispatchEvent(new CustomEvent('lbw-open-palette', { detail: this.player.entity.id })); } },
       { icon: '🎮', label: 'Help', fn: () => { this.close(); actions.openHelp(); } },

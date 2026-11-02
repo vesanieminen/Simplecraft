@@ -326,7 +326,7 @@ test('four controllers join and get a 2x2 grid', async ({ page }) => {
     await page.waitForFunction(`window.__lbw.game.players.length === ${i + 2}`);
   }
   const state = await page.evaluate(() => ({
-    rects: window.__lbw.game.viewportMgr.rects.length,
+    rects: (window as any).__lbw.game.viewportMgr.rects.length,
     panes: document.querySelectorAll('.pane').length,
   }));
   expect(state.rects).toBe(4);
