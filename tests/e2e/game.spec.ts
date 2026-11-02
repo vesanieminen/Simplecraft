@@ -526,6 +526,80 @@ test('water cannot be destroyed by the break button', async ({ page }) => {
   expect(blocked!.after).toBe(blocked!.water);
 });
 
+test('kids can jump out of the water onto the shore', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+
+  // a deep pond right in front of the player, its shore one block above the
+  // water surface. Paddling tops out just under the surface, so climbing out
+  // needs a real push-off jump.
+  const lake = await page.evaluate((b: { water: number; grass: number; air: number }) => {
+    const game = (window as any).__lbw.game;
+    const S = game.world;
+    const e = game.players[0].entity;
+    const cx = Math.round(e.pos.x), cz = Math.round(e.pos.z);
+    const base = S.surfaceY(cx, cz); // the pond's water surface ends at y = base
+    const deep = 6;
+    for (let dx = -3; dx <= 3; dx++) {
+      for (let dz = -4; dz <= 4; dz++) {
+        for (let y = base - deep; y <= base + 3; y++) S.set(cx + dx, y, cz + dz, b.air);
+        if (dz <= -2) {
+          for (let y = base - deep; y <= base; y++) S.set(cx + dx, y, cz + dz, b.grass); // shore
+        } else {
+          for (let y = base - deep; y <= base - 1; y++) S.set(cx + dx, y, cz + dz, b.water); // pond
+        }
+      }
+    }
+    e.pos.set(cx + 0.5, base + 1, cz - 2.5); // standing on the shore, pond just north
+    e.vel.set(0, 0, 0);
+    e.yaw = 0; // face the pond
+    return { cx, cz, base, shoreFeetY: base + 1, waterAtSurface: S.get(cx, base - 1, cz) };
+  }, { water: ids.WATER, grass: ids.GRASS, air: ids.AIR });
+  expect(lake.waterAtSurface).toBe(ids.WATER);
+
+  // the kid walks in and paddles for a moment without pressing jump
+  await page.evaluate(() => (window as any).__testPad.setMove(0, -1));
+  await page.waitForFunction('window.__lbw.game.players[0].entity.inWaterNow === true', null, { timeout: 15000 });
+  await frames(page, 10);
+
+  // turn around, then hold jump and paddle for the shore
+  await page.evaluate(() => {
+    (window as any).__lbw.game.players[0].entity.yaw = Math.PI;
+    (window as any).__testPad.set('jump', true);
+    (window as any).__testPad.setMove(0, -1);
+  });
+  const escaped = await page.waitForFunction(
+    (l: { shoreFeetY: number; cz: number }) => {
+      const e = (window as any).__lbw.game.players[0].entity;
+      if (!(e.grounded && !e.inWaterNow && e.pos.y >= l.shoreFeetY - 0.05 && e.pos.z <= l.cz - 1.5)) return false;
+      return { y: e.pos.y, z: e.pos.z }; // snapshot the exact frame they get out
+    },
+    lake, { timeout: 30000 },
+  );
+  const out = (await escaped.jsonValue()) as { y: number; z: number };
+  await page.evaluate(() => {
+    (window as any).__testPad.set('jump', false);
+    (window as any).__testPad.setMove(0, 0);
+  });
+
+  expect(out.y).toBeGreaterThanOrEqual(lake.shoreFeetY - 0.05); // dry land, above the water
+  expect(out.z).toBeLessThanOrEqual(lake.cz - 1.5); // and ashore, not back in the pond
+
+  // fill the pond in so it cannot confuse later tests
+  await page.evaluate((arg: { cx: number; cz: number; base: number; grass: number; air: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let dx = -4; dx <= 4; dx++) {
+      for (let dz = -5; dz <= 5; dz++) {
+        for (let y = arg.base - 6; y <= arg.base + 3; y++) {
+          S.set(arg.cx + dx, y, arg.cz + dz, y <= arg.base ? arg.grass : arg.air);
+        }
+      }
+    }
+  }, { ...lake, grass: ids.GRASS, air: ids.AIR });
+});
 /** opens Grown-Up Settings, switches Freeze, and closes the menu again */
 async function setFreeze(page: Page, on: boolean): Promise<void> {
   await tap(page, 'menu');
@@ -539,7 +613,8 @@ async function setFreeze(page: Page, on: boolean): Promise<void> {
 }
 
 test('grown-up menu: freeze pauses the world, split screen cycles, reset clears edits', async ({ page }) => {
-  test.slow();  await boot(page);
+  test.slow();
+  await boot(page);
   await joinWithPad(page);
   await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 10000 });
 

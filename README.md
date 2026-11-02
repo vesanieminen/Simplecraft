@@ -116,6 +116,15 @@ things that aren't solid. Water and bedrock stay indestructible, and plants
 never get in the way when you place a block (the two aim at slightly
 different things so both just work).
 
+## Swimming — and how to get out
+
+Lakes, rivers and the Islands world are properly swimmable: you bob at the
+surface, paddle with the move stick and hold **A / ✕** to kick upward. Once
+your head is clear of the water, that same button *pushes you out* — a real
+jump, so you hop onto the bank or the rim of a pool instead of paddling in
+circles. Fully submerged, kick up to the surface first. If a bank is more than
+a block above the water, place a block or dig a step to make a stair.
+
 ## How the world saves
 
 - **On the GitHub Pages site** the game runs entirely in your browser: the
@@ -155,12 +164,15 @@ different things so both just work).
   game keeps running for everyone else.
 - **Block won't place** — you can never place a block inside yourself or
   an animal (you'd get stuck); back up half a step.
+- **Paddling in circles in the water** — hold the jump button: at the surface
+  it pushes you out onto the bank. If the bank is higher than that, place a
+  block or dig a step to make a stair out.
 - **Low framerate on an old laptop** — close other tabs; the renderer is
   capped at 1.5× pixel ratio; quarter (4-player) panes cost the most.
 
 ## Testing status (honest)
 
-Automated (Playwright, real Chromium, 21 tests): game loads error-free,
+Automated (Playwright, real Chromium, 22 tests): game loads error-free,
 keyboard-only join, controller join/move/jump/build/cycle, palette with
 D-pad, per-player menu + fly toggle, split-screen activation, 2×2
 four-player grid, independent movement, one player's palette not pausing
@@ -172,7 +184,8 @@ really work (Freeze stops the whole world dead, split-screen layouts cycle
 through Smart/Left-Right/Up-Down/2×2, Reset World wipes edits, Choose World
 starts a new theme+seed and the preview canvas actually paints a map), the
 welcome-screen world picker (theme, surprise seed, start), menu
-sub-screens receiving controller input, and `?seed=…&world=…` handling.
+sub-screens receiving controller input, `?seed=…&world=…` handling, and
+walking into a pond then **hopping back out** with the jump button held.
 
 ```bash
 npm test          # e2e suite (starts its own server on :3100)
@@ -195,13 +208,15 @@ button mapping all shared), but you should verify with real pads. A
    D-pad + A picks a block while the other kid keeps running around.
 5. Walk up to a flower and hold **LT** — it pops into particles (and the
    block behind it survives, so you can also dig the ground under it).
-6. Start menu → Fly ON → A rises, X descends, gentle landing.
-7. Start → Grown-Ups: **Freeze Game** stops players *and* animals dead
+6. Walk into a lake and hold **A** — you kick up to the surface, then hop out
+   onto the bank instead of paddling in circles (works from the Islands sea too).
+7. Start menu → Fly ON → A rises, X descends, gentle landing.
+8. Start → Grown-Ups: **Freeze Game** stops players *and* animals dead
    (menus still work), **Split Screen** cycles the layout, **Choose World**
    opens the picker, **Reset World** asks twice.
-8. Unplug a controller mid-game → "controller asleep" appears → plug in
+9. Unplug a controller mid-game → "controller asleep" appears → plug in
    (or press another pad) → same character resumes.
-9. Analog: gentle stick tilts walk slowly; menus don't machine-gun.
+10. Analog: gentle stick tilts walk slowly; menus don't machine-gun.
 
 ## Roadmap
 

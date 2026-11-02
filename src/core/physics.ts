@@ -122,3 +122,14 @@ export function inWater(world: World, box: Aabb): boolean {
     Math.floor(box.x + box.w / 2), Math.floor(box.y + 0.2), Math.floor(box.z + box.d / 2),
   ) === WATER;
 }
+
+/**
+ * True while the player is in water but their head is out of it — the state
+ * where they can push off the surface and jump out onto the shore. Fully
+ * submerged kids cannot (they have to kick up to the surface first).
+ */
+export function headClearOfWater(world: World, box: Aabb): boolean {
+  return world.get(
+    Math.floor(box.x + box.w / 2), Math.floor(box.y + PLAYER_H - 0.1), Math.floor(box.z + box.d / 2),
+  ) !== WATER;
+}
