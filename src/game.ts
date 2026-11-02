@@ -23,7 +23,7 @@ import { LocalPlayer } from './players/localPlayer';
 import { PlayerEntity } from './players/playerEntity';
 import { AVATAR_COLORS, NICKNAMES } from './players/avatar';
 import { ChunkMeshManager } from './render/chunkMeshes';
-import { createSky, SkyEnv } from './render/sky';
+import { createSky, SKY_CLEAR, SKY_FAR, SkyEnv } from './render/sky';
 import { SplitLayout, ViewportManager } from './render/viewportManager';
 import { Hud } from './ui/hud';
 import {
@@ -72,9 +72,11 @@ export class Game {
   private welcomePicker: { sid: string; overlay: WorldSelectOverlay } | null = null;
   private idleAngle = 0;
   /** slow orbit camera used while nobody has joined (welcome + world picker backdrop) */
-  private idleCamera = new THREE.PerspectiveCamera(70, 16 / 9, 0.1, 400);
+  private idleCamera = new THREE.PerspectiveCamera(70, 16 / 9, 0.1, SKY_FAR);
   private overlays = new Map<number, Overlay>(); // playerId -> overlay
   private sourceToPlayer = new Map<string, LocalPlayer>();
+  /** wall-clock instant from which a just-left controller may join again */
+  private rejoinMute = new Map<string, number>();
   private lastRevision = 0;
   private saveTimer: number | undefined;
   private skyEnv!: SkyEnv;
@@ -105,6 +107,9 @@ export class Game {
     const canvas = document.getElementById('gl') as HTMLCanvasElement;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    // whatever the sky does not cover should look like hazy sky, never the black
+    // void behind the canvas (each split-screen pane is cleared to this)
+    this.renderer.setClearColor(SKY_CLEAR, 1);
     this.scene = new THREE.Scene();
     this.chunks = new ChunkMeshManager(this.scene, this.world);
     this.chunks.rebuildAll();
@@ -217,7 +222,7 @@ export class Game {
     if (this.pendingJoins.has(s.id)) return;
     const card = new JoinCard(this.audio, s.controllerType, this.players.length + this.pendingJoins.size + 1,
       (colorIdx, nameIdx) => this.confirmJoin(s, colorIdx, nameIdx));
-    const cam = new THREE.PerspectiveCamera(70, 1, 0.1, 400);
+    const cam = new THREE.PerspectiveCamera(70, 1, 0.1, SKY_FAR);
     const pane = this.players.length + this.pendingJoins.size;
     this.pendingJoins.set(s.id, { source: s, card, camera: cam, angle: Math.random() * 6 });
     this.ui.ensurePanes(pane + 1);
@@ -283,50 +288,59 @@ export class Game {
       }
     }
 
-    for (let i = 0; i < this.players.length; i++) {
-      const p = this.players[i];
-      const sid = this.sourceIdOf(p);
-      const frame = sid ? this.input.frame(sid) : emptyFrame();
-      const overlay = this.overlays.get(p.entity.id);
-      if (overlay) {
-        overlay.tick(frame, dt);
-        // only drop the slot if it still holds this (now closed) overlay:
-        // a menu can open a new overlay in the same tick (Help, Grown-Ups, Blocks)
-        if (overlay.closed && this.overlays.get(p.entity.id) === overlay) this.overlays.delete(p.entity.id);
-        p.update(dt, emptyFrame(), this.hooks(), true);
-      } else {
-        if (frame.pressed.has('menu')) {
-          this.openMenu(p);
-          p.update(dt, emptyFrame(), this.hooks(), true);
-        } else if (frame.pressed.has('palette')) {
-          this.openPalette(p);
-          p.update(dt, emptyFrame(), this.hooks(), true);
-        } else if (this.frozen) {
-          // frozen world: everything stops dead — no walking, jumping or building.
-          // the controller can still open the menu to unfreeze.
-        } else {
-          if (frame.pressed.has('jump')) this.audio.jump();
-          p.update(dt, frame, this.hooks(), false);
-        }
-      }
-      this.handleStepEvents(p);
-      // star pickups
-      const st = this.starField.checkCollect(p.entity.pos.x, p.entity.pos.y, p.entity.pos.z, 1.1);
-      if (st) {
-        this.starField.take(st);
-        p.entity.starsCount++;
-        this.audio.collect();
-        this.particles.burst(st.pos.x, st.pos.y, st.pos.z, 0xffe14d, 14, 1.2);
-      }
+    // snapshot: "Leave" inside a menu can remove a player mid-frame
+    for (const p of [...this.players]) {
+      if (!this.players.includes(p)) continue; // they left while someone else was handled
+      this.updatePlayer(p, dt);
     }
 
     // unassigned sources (join detection)
     for (const s of this.input.sources.values()) {
       if (this.sourceToPlayer.has(s.id) || this.pendingJoins.has(s.id)) continue;
       if (this.welcomePicker?.sid === s.id) continue; // the picker owns this pad
+      if ((this.rejoinMute.get(s.id) ?? 0) > performance.now()) continue; // just left
       const reserved = [...this.reservedSeats.values()].some((r) => r.sourceId === s.id);
       if (reserved) continue; // handled on reconnect event
       this.handleUnassignedInput(s, this.input.frame(s.id));
+    }
+  }
+
+  /** one player's frame: menu/palette routing, movement, pickups */
+  private updatePlayer(p: LocalPlayer, dt: number): void {
+    const sid = this.sourceIdOf(p);
+    const frame = sid ? this.input.frame(sid) : emptyFrame();
+    const overlay = this.overlays.get(p.entity.id);
+    if (overlay) {
+      overlay.tick(frame, dt);
+      // only drop the slot if it still holds this (now closed) overlay:
+      // a menu can open a new overlay in the same tick (Help, Grown-Ups, Blocks)
+      if (overlay.closed && this.overlays.get(p.entity.id) === overlay) this.overlays.delete(p.entity.id);
+      if (!this.players.includes(p)) return; // the menu's Leave row removed them
+      p.update(dt, emptyFrame(), this.hooks(), true);
+    } else {
+      if (frame.pressed.has('menu')) {
+        this.openMenu(p);
+        p.update(dt, emptyFrame(), this.hooks(), true);
+      } else if (frame.pressed.has('palette')) {
+        this.openPalette(p);
+        p.update(dt, emptyFrame(), this.hooks(), true);
+      } else if (this.frozen) {
+        // frozen world: everything stops dead — no walking, jumping or building.
+        // the controller can still open the menu to unfreeze.
+      } else {
+        if (frame.pressed.has('jump')) this.audio.jump();
+        p.update(dt, frame, this.hooks(), false);
+      }
+    }
+    this.handleStepEvents(p);
+
+    // star pickups
+    const st = this.starField.checkCollect(p.entity.pos.x, p.entity.pos.y, p.entity.pos.z, 1.1);
+    if (st) {
+      this.starField.take(st);
+      p.entity.starsCount++;
+      this.audio.collect();
+      this.particles.burst(st.pos.x, st.pos.y, st.pos.z, 0xffe14d, 14, 1.2);
     }
   }
 
@@ -385,6 +399,8 @@ export class Game {
             },
             resetWorld: () => void this.resetWorld(),
             openWorlds: () => { this.openWorldPickerFor(p); },
+            sendWaitingHome: () => this.sendWaitingHome(),
+            waiting: () => this.waitingLabel(),
             frozen: () => this.frozen,
             layout: () => (this.layout === 'auto' ? 'Smart'
               : this.layout === 'horizontal' ? 'Left/Right'
@@ -450,19 +466,53 @@ export class Game {
 
   private removePlayer(p: LocalPlayer): void {
     const idx = this.players.indexOf(p);
-    if (idx >= 0) {
-      this.ui.clearOverlays(idx);
-      this.ui.detachHud(idx);
-      const sid = this.sourceIdOf(p);
-      this.sourceToPlayer.delete(sid);
-      this.overlays.delete(p.entity.id);
-      p.dispose(this.scene);
-      p.entity.dispose();
-      this.players.splice(idx, 1);
-      this.rebuildHuds();
-      this.resize();
-      this.ui.toast(`${p.entity.name} left`);
+    if (idx < 0) return; // already left
+    const sid = this.sourceIdOf(p);
+
+    this.ui.clearOverlays(idx);
+    this.ui.detachHud(idx);
+    this.sourceToPlayer.delete(sid);
+    this.reservedSeats.delete(p.entity.id);
+    this.overlays.delete(p.entity.id);
+    this.lastLandSound.delete(p.entity.id);
+    // that controller may still be holding (or has queued) the button press that
+    // confirmed leaving: ignore it briefly, otherwise their half of the screen
+    // instantly turns back into a join card instead of closing
+    this.rejoinMute.set(sid, performance.now() + 900);
+
+    p.dispose(this.scene);
+    p.entity.dispose();
+    this.players.splice(idx, 1);
+    this.resize(); // recomputes the split AND throws away the freed pane
+    this.ui.showWelcome(this.players.length === 0 && this.pendingJoins.size === 0);
+    this.audio.uiBack();
+    this.ui.toast(this.players.length === 0
+      ? `${p.entity.name} left — press any button on a controller to join! 👋`
+      : `${p.entity.name} left — their half of the screen is free 🚪`);
+  }
+
+  /** grown-up helper: everyone whose controller fell asleep goes home */
+  private sendWaitingHome(): void {
+    const waiting = [...this.reservedSeats.keys()].map((pid) =>
+      this.players.find((p) => p.entity.id === pid));
+    let sent = 0;
+    for (const [pid] of [...this.reservedSeats]) {
+      this.reservedSeats.delete(pid);
+      const p = waiting.find((w) => w?.entity.id === pid);
+      if (p) {
+        this.removePlayer(p);
+        sent++;
+      }
     }
+    this.resize();
+    this.ui.showWelcome(this.players.length === 0 && this.pendingJoins.size === 0);
+    this.ui.toast(sent === 1 ? '1 waiting player went home 👋'
+      : sent > 1 ? `${sent} waiting players went home 👋` : 'Nobody is waiting 💤');
+  }
+
+  private waitingLabel(): string {
+    const n = this.reservedSeats.size;
+    return n === 1 ? '1 asleep' : n > 1 ? `${n} asleep` : 'none';
   }
 
   // ------------------------------------------------------------ building
@@ -662,7 +712,9 @@ export class Game {
     this.renderer.setSize(w, h);
     const n = this.players.length + this.pendingJoins.size;
     this.viewportMgr.resize(w, h, Math.max(1, n), this.layout);
-    this.ui.ensurePanes(Math.max(this.players.length, n));
+    // panes follow the viewport count exactly, so a freed half really disappears
+    this.ui.ensurePanes(Math.max(1, n));
+    this.ui.trimPanes(Math.max(1, n));
     for (let i = 0; i < this.ui.paneCount; i++) {
       const r = this.viewportMgr.rects[Math.min(i, this.viewportMgr.rects.length - 1)];
       this.ui.setPaneRect(i, r);

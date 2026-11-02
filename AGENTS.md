@@ -51,6 +51,25 @@
   clock in headless Chromium — never `waitForTimeout` for an explosion, poll
   `game.dynamite.blastCount`. Blasts never touch `y <= 0`, `unbreakable`
   blocks or water, and `SCORCH` is deliberately not in the palette.
+- Sky/camera invariant: the sky dome (radius `SKY_RADIUS`) is parented to a group
+  centred on the **middle** of the world — the coordinate origin is a map
+  *corner*, so centring the dome there puts its far side past the far plane and
+  three clips a black hole in the sky (it shows up seconds later, as the welcome
+  camera drifts). Every camera's far plane comes from `SKY_FAR` in
+  `src/render/sky.ts` and must stay bigger than `SKY_RADIUS` + the farthest a
+  camera can be from the world middle; `renderer.setClearColor(SKY_CLEAR)` is the
+  backstop so a gap reads as haze, not the void.
+- Visual regressions can be checked in e2e by decoding `page.screenshot()` into a
+  2D canvas in the page and counting offending pixels (see `blackPixels` in
+  `tests/e2e/game.spec.ts`); `gl.readPixels` is useless there because the
+  drawing buffer is already swapped.
 - Physical gamepad behaviour is verified manually (checklist in the README);
   virtual pads in tests exercise the same input abstraction, which is not a
   substitute for hardware QA.
+- Physical gamepads **have** been tested on real hardware by the family
+  (Xbox One + PS5 DualSense, 2026-11-02: join, sticks, build, palette, menus,
+  split screen, waking a sleeping pad). Virtual pads in tests drive the same
+  input abstraction, so they are a good regression net — but re-check the
+  README's manual checklist with real pads after any input change (newly added
+  Leave / Waiting-Players rows and the water-jump fix still owe the couch a
+  turn).

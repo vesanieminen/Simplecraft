@@ -9,6 +9,7 @@ import { BlockId, blockDef, FAVORITES } from '../core/blocks';
 import { generousTarget, hitRemovable, hitSolid, RayHit, raycastVoxel } from '../core/raycast';
 import { World } from '../core/world';
 import { FrameControls } from '../input/types';
+import { SKY_FAR } from '../render/sky';
 import { PlayerEntity, StepEvents } from './playerEntity';
 
 const REACH = 6.5;
@@ -49,7 +50,7 @@ export class LocalPlayer {
     scene: THREE.Scene,
     private world: World,
   ) {
-    this.camera = new THREE.PerspectiveCamera(70, 1, 0.1, 400);
+    this.camera = new THREE.PerspectiveCamera(70, 1, 0.1, SKY_FAR);
     this.camPos.copy(entity.pos);
 
     this.outline = new THREE.LineSegments(
