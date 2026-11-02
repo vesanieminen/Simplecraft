@@ -10,9 +10,30 @@ Creative mode, built for a 5-year-old and a parent on one couch.
   couch session also works on one machine with two controllers plugged into it)
 - No accounts, no internet needed after install, no external services.
 - Two controllers on one computer = instant split screen (up to 4 players).
-- A world that saves itself and survives restarts.
+- A big world to explore: **128 × 128 × 64** blocks (four times the size of
+  the first build), generated from a seed you choose.
+- **Four worlds to pick from** at the start — Meadow, Islands, Mountains and
+  Deep Forest — plus any seed, with a live map preview.
+- A world that saves itself and survives restarts (one save per world).
 - Friendly animals, glowing stars to collect, bouncy blocks, musical
-  blocks, and a world full of flowers, lakes, and trees.
+  blocks, and a world full of textured flowers, grass tufts, lakes, and trees.
+
+## Choosing your world
+
+![Pick a world and a seed before anyone joins — with a live map preview](docs/screenshots/worlds.jpg)
+
+Before anybody joins, press **Y / △** on a controller (or **F** on the
+keyboard) to open the world chooser:
+
+- 🌍 **World** — Meadow · Islands · Mountains · Deep Forest (left/right).
+- 🎲 **Seed** — step it up and down, or hit **✨ Surprise me!** for a random one.
+- The picture above is drawn from the same heightmap math the generator uses,
+  so what you see is what you get.
+- **▶ Start this world!** — every (world, seed) pair is saved separately, so
+  each family member can keep their own builds.
+- Grown-ups can also switch worlds mid-game from *Start → Grown-Ups → Choose
+  World*, and the URL takes both: `?seed=12345&world=2`
+  (`world` = 0 Meadow, 1 Islands, 2 Mountains, 3 Deep Forest).
 
 ## Launch
 
@@ -38,7 +59,8 @@ npm start
 ![Two players sharing one world, each with their own camera and HUD](docs/screenshots/split.jpg)
 
 1. Plug in two controllers (Xbox, PlayStation, or any standard pad).
-2. Open the game in a browser.
+2. Open the game in a browser. (Optional: press **Y / △** first to pick a
+   world — see [Choosing your world](#choosing-your-world).)
 3. **Player 1 presses any button** on their controller → pick a color and
    name → press **A / ✕** to join.
 4. **Player 2 presses any button** on the *other* controller → join card
@@ -69,7 +91,7 @@ milestone; see Roadmap. Today, each computer gets the same saved world.)
 | LB / L1 | Previous block |
 | RB / R1 | Next block |
 | X / ☐ | Pet animals (hold while flying = down) |
-| Y / △ | Open the block palette |
+| Y / △ | Open the block palette (before anyone joins: choose a world) |
 | D-pad | Navigate menus |
 | Start / Options | Player menu (fly, camera, home, help…) |
 | B / ◯ | Back / close |
@@ -82,24 +104,42 @@ settings, help, everything.
 WASD move · arrow keys look · Space jump · LMB place · RMB break ·
 Q/R cycle blocks · F palette · E pet animals · Esc menu · Enter confirm.
 
+## Flowers you can actually pick
+
+![Textured flowers, sunflowers and grass tufts — breakable with LT](docs/screenshots/plants.jpg)
+
+Flowers, sunflowers and grass tufts are real textured plants: each one is a
+pair of crossed quads painted from a procedural 32-px atlas (drawn in code,
+still no image files). They sway in with the world, you walk straight through
+them — and **LT / L2 breaks them**, because the break button also targets
+things that aren't solid. Water and bedrock stay indestructible, and plants
+never get in the way when you place a block (the two aim at slightly
+different things so both just work).
+
 ## How the world saves
 
 - **On the GitHub Pages site** the game runs entirely in your browser: the
   world is saved in that browser's local storage (per computer, per
   browser). Great for playing instantly; for a shared family world, run
   the game from a computer at home as below.
-- The terrain you start with is generated from a **seed** (default
-  `20261102`). Only player edits (blocks placed/removed, stars collected)
-  are stored — a few KB, not the whole world.
-- Edits are saved through the local server to `world-data/world.json`
-  (atomic write + backup + corruption recovery), with a browser-cache
-  fallback if the server is briefly unreachable.
+- The terrain you start with is generated from a **seed + world theme**
+  (default `20261102`, Meadow). Only player edits (blocks placed/removed,
+  stars collected) are stored — a few KB, not the whole world.
+- Edits are saved through the local server to
+  `world-data/world-<seed>-<world>.json` (atomic write + backup + corruption
+  recovery), with a browser-cache fallback if the server is briefly
+  unreachable. Each world you choose gets its own file, so nobody overwrites
+  anybody else's house.
 - Restart the server any time; your buildings are still there.
 - **Reset the world** deliberately from *Start → Grown-Ups → Reset World*
-  (asks twice). Grown-Ups also has **Freeze Game** (parents can pause
-  everything) and the split-screen layout switch.
-- Use a different world per family with `?seed=12345` in the URL (each
-  seed gets its own saved edits).
+  (asks twice).
+- Grown-Up Settings (Start → 🧑 Grown-Ups) also has **Freeze Game** — the
+  whole world stops dead, animals and players included, so a parent can
+  pause the adventure — **Choose World** to move the family to a new
+  world/theme/seed mid-game, and the **Split Screen** switch
+  (Smart · Left/Right · Up/Down · 2×2 Grid).
+- Use a different world per family with `?seed=12345&world=1` in the URL
+  (each world + seed gets its own saved edits).
 
 ## Troubleshooting
 
@@ -120,12 +160,19 @@ Q/R cycle blocks · F palette · E pet animals · Esc menu · Enter confirm.
 
 ## Testing status (honest)
 
-Automated (Playwright, real Chromium, 13 tests): game loads error-free,
+Automated (Playwright, real Chromium, 21 tests): game loads error-free,
 keyboard-only join, controller join/move/jump/build/cycle, palette with
 D-pad, per-player menu + fly toggle, split-screen activation, 2×2
 four-player grid, independent movement, one player's palette not pausing
 the other, resize re-layout, controller disconnect/resume UI, and world
-persistence across a server-backed reload.
+persistence across a server-backed reload. New this round: plants render
+from the textured atlas and **LT breaks them** (while water and bedrock
+refuse to break and plants never block placement), the Grown-Up menu items
+really work (Freeze stops the whole world dead, split-screen layouts cycle
+through Smart/Left-Right/Up-Down/2×2, Reset World wipes edits, Choose World
+starts a new theme+seed and the preview canvas actually paints a map), the
+welcome-screen world picker (theme, surprise seed, start), menu
+sub-screens receiving controller input, and `?seed=…&world=…` handling.
 
 ```bash
 npm test          # e2e suite (starts its own server on :3100)
@@ -135,23 +182,33 @@ npm run typecheck
 **Physical controllers have NOT been hardware-tested yet.** Virtual pads
 drive the exact same input abstraction (dead zones, edge detection,
 button mapping all shared), but you should verify with real pads. A
-5-minute parent checklist:
+10-minute parent checklist:
 
-1. Press A on each pad at the welcome screen → two join cards appear.
-2. In a card: D-pad changes name/color, A joins, B cancels.
+1. Press **Y / △** on a pad at the welcome screen → the world chooser opens
+   on that pad: D-pad moves, left/right switch world and seed, **✨ Surprise
+   me!** rolls a seed, **A** starts that world. The map picture should match
+   the world you end up in.
+2. Press A on each pad → two join cards appear. In a card: D-pad changes
+   name/color, A joins, B cancels.
 3. Right stick looks around on both pads simultaneously.
-4. RT/LT place and break blocks; LB/RB cycle; Y opens palette;
+4. RT/LT place and break blocks; LB/RB cycle; Y opens the palette;
    D-pad + A picks a block while the other kid keeps running around.
-5. Start menu → Fly ON → A rises, X descends, gentle landing.
-6. Unplug a controller mid-game → "controller asleep" appears → plug in
+5. Walk up to a flower and hold **LT** — it pops into particles (and the
+   block behind it survives, so you can also dig the ground under it).
+6. Start menu → Fly ON → A rises, X descends, gentle landing.
+7. Start → Grown-Ups: **Freeze Game** stops players *and* animals dead
+   (menus still work), **Split Screen** cycles the layout, **Choose World**
+   opens the picker, **Reset World** asks twice.
+8. Unplug a controller mid-game → "controller asleep" appears → plug in
    (or press another pad) → same character resumes.
-7. Analog: gentle stick tilts walk slowly; menus don't machine-gun.
+9. Analog: gentle stick tilts walk slowly; menus don't machine-gun.
 
 ## Roadmap
 
-Implemented: full voxel world + building + animals + stars + special
-blocks + audio + particles, complete controller UX, 2–4 player split
-screen, world persistence.
+Implemented: a 128 × 128 × 64 voxel world (four world themes + any seed,
+picked on a screen with a live map preview), building, textured plants,
+animals, stars, special blocks, audio, particles, complete controller UX,
+2–4 player split screen, per-world persistence.
 
 Next (designed for): LAN multiplayer — the architecture already separates
 *local player*, *remote player*, *controller*, *camera*, and *network

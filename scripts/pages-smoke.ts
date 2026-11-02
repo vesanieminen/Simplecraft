@@ -31,8 +31,10 @@ await page.waitForFunction('window.__lbw.game.players.length === 1');
 // build a block, wait for the debounced save to hit localStorage
 await page.evaluate(() => (window as any).__lbw.game.world.set(33, 30, 33, 21));
 await page.waitForFunction(() => {
-  const raw = localStorage.getItem('lbw-world');
-  return !!raw && JSON.parse(raw).mods[String((33 * 64 + 33) * 64 + 30)] === 21;
+  const game = (window as any).__lbw.game;
+  const { sz, sy } = (window as any).__lbw.dims;
+  const raw = localStorage.getItem(`lbw-world-${game.seed}-${game.theme}`);
+  return !!raw && JSON.parse(raw).mods[String((33 * sz + 33) * sy + 30)] === 21;
 }, null, { timeout: 10000 });
 const mode = await page.evaluate(() => (window as any).__lbw.game.serverBacked);
 console.log('serverBacked (expect false on Pages):', mode);
@@ -43,8 +45,19 @@ await page.waitForFunction('window.__lbw !== undefined', null, { timeout: 20000 
 const found = await page.evaluate(() => (window as any).__lbw.game.world.get(33, 30, 33));
 console.log('block after reload (expect 21):', found);
 
+// a different world (seed + theme via url) is a separate save
+await page.goto(`${url}?seed=777&world=3`);
+await page.waitForFunction('window.__lbw !== undefined', null, { timeout: 20000 });
+const picked = await page.evaluate(() => ({
+  seed: (window as any).__lbw.game.seed,
+  theme: (window as any).__lbw.game.theme,
+  block: (window as any).__lbw.game.world.get(33, 30, 33),
+}));
+console.log('other world (expect 777 / 3 / 0):', JSON.stringify(picked));
+
 console.log('page errors:', errors.length ? errors : 'none');
-const ok = found === 21 && mode === false && errors.length === 0;
+const ok = found === 21 && mode === false && picked.seed === 777 && picked.theme === 3
+  && picked.block === 0 && errors.length === 0;
 console.log(ok ? 'PAGES SMOKE: PASS' : 'PAGES SMOKE: FAIL');
 await browser.close();
 process.exit(ok ? 0 : 1);

@@ -49,13 +49,17 @@ await page.waitForFunction('window.__lbw.game.pendingJoins.size > 0');
 await page.evaluate(() => (window as any).__pad1.tap('jump'));
 await page.waitForFunction('window.__lbw.game.players.length === 1');
 
-// Stage the scene. Sun comes from (+X east, -Z north), so the house's NORTH
-// wall (z = hz side, facing -Z) catches the warm light — that's the front
-// door side, and the camera views it from the north-west yard.
+// Stage the scene. The meadow center is now (64,64), so the whole staged
+// yard (designed around the old 32,32 spawn) is shifted by OX/OZ.
+// Sun comes from (+X east, -Z north), so the house's NORTH wall (z = hz side,
+// facing -Z) catches the warm light — that's the front door side, and the
+// camera views it from the north-west yard.
 await page.evaluate(() => {
   const game = (window as any).__lbw.game;
+  const dims = (window as any).__lbw.dims;
+  const OX = dims.sx / 2 - 32, OZ = dims.sz / 2 - 32;
   const S = game.world;
-  const hx = 31, hz = 26; // footprint x 31..35, z 26..30; door on the north wall (z=26)
+  const hx = 31 + OX, hz = 26 + OZ; // footprint 5 wide; door on the north wall (z=hz)
   const y = S.surfaceY(hx, hz) + 1; // capture BEFORE staging
   function put(x: number, yy: number, z: number, b: number): void {
     S.set(x, y + yy, z, b);
@@ -102,10 +106,11 @@ await page.evaluate(() => {
   // colorful stepping-stone path leading to the north door
   const pathCols = [4, 20, 6, 24, 22, 19];
   for (let i = 0; i < 6; i++) S.set(hx + 2, S.surfaceY(hx + 2, hz - 2 - i) + 1, hz - 2 - i, pathCols[i]);
-  // tidy flower clusters around the yard
+  // tidy flower + tuft clusters around the yard (shows off all three plant textures)
   const spots: [number, number][] = [[hx - 1, hz - 1], [hx - 2, hz - 3], [hx + 6, hz - 4], [hx + 5, hz - 8], [hx - 3, hz - 6], [hx + 8, hz + 1], [hx + 1, hz - 9], [hx + 3, hz - 9]];
+  const PLANTS = [11, 12, 13];
   spots.forEach(function ([fx, fz], i) {
-    S.set(fx, S.surfaceY(fx, fz) + 1, fz, i % 2 ? 12 : 11);
+    S.set(fx, S.surfaceY(fx, fz) + 1, fz, PLANTS[i % PLANTS.length]);
   });
 
   // pose the animals in the north yard; park all others far away out of frame
@@ -121,7 +126,7 @@ await page.evaluate(() => {
   // hang stars around the door; park the rest far behind the camera
   game.starField.stars.forEach(function (s: any, i: number) {
     if (i < 3) s.pos.set(hx + 0.8 + i * 1.5, y + 3.2 + (i % 2) * 0.7, hz - 1.4 - i * 0.3);
-    else s.pos.set(46 + (i % 4) * 3, y + 8 + (i % 3), 46 + Math.floor(i / 4) * 3);
+    else s.pos.set(14 + (i % 4) * 3 + OX, y + 8 + (i % 3), 14 + Math.floor(i / 4) * 3 + OZ);
   });
 });
 await page.waitForTimeout(1200); // let chunk remeshes land
@@ -129,11 +134,13 @@ await page.waitForTimeout(1200); // let chunk remeshes land
 // HERO SHOT: first-person on the path, facing the sunlit front door
 await page.evaluate(() => {
   const game = (window as any).__lbw.game;
+  const dims = (window as any).__lbw.dims;
+  const OX = dims.sx / 2 - 32, OZ = dims.sz / 2 - 32;
   const S = game.world;
   const p1 = game.players[0];
   p1.firstPerson = true;
   p1.selected = 6; // planks in the pod
-  p1.entity.pos.set(30.6, S.surfaceY(30, 20) + 1.02, 19.8);
+  p1.entity.pos.set(30.6 + OX, S.surfaceY(30 + OX, 20 + OZ) + 1.02, 19.8 + OZ);
   p1.entity.yaw = 0.44; // face south-east toward the door + lit corner
   p1.entity.pitch = 0.22;
 });
@@ -153,17 +160,19 @@ await page.evaluate(() => (window as any).__pad2.tap('jump'));
 await page.waitForFunction('window.__lbw.game.players.length === 2');
 await page.evaluate(() => {
   const game = (window as any).__lbw.game;
+  const dims = (window as any).__lbw.dims;
+  const OX = dims.sx / 2 - 32, OZ = dims.sz / 2 - 32;
   const S = game.world;
   const p1 = game.players[0], p2 = game.players[1];
   p1.firstPerson = false;
-  p1.entity.pos.set(31.6, S.surfaceY(31, 17) + 1.02, 17.0);
+  p1.entity.pos.set(31.6 + OX, S.surfaceY(31 + OX, 17 + OZ) + 1.02, 17.0 + OZ);
   p1.entity.yaw = 0.3;
   p1.entity.pitch = 0.12;
-  p1.camPos.set(30.3, S.surfaceY(31, 17) + 3.0, 12.4); // settle the camera early
-  p2.entity.pos.set(26.0, S.surfaceY(26, 21) + 1.02, 21.0);
+  p1.camPos.set(30.3 + OX, S.surfaceY(31 + OX, 17 + OZ) + 3.0, 12.4 + OZ); // settle the camera early
+  p2.entity.pos.set(26.0 + OX, S.surfaceY(26 + OX, 21 + OZ) + 1.02, 21.0 + OZ);
   p2.entity.yaw = 0.79; // look east at the house
   p2.entity.pitch = 0.12;
-  p2.camPos.set(22.6, S.surfaceY(26, 21) + 3.0, 17.6);
+  p2.camPos.set(22.6 + OX, S.surfaceY(26 + OX, 21 + OZ) + 3.0, 17.6 + OZ);
 });
 await page.waitForTimeout(1600); // third-person cameras settle in
 await page.screenshot({ path: `${outDir}/split.jpg`, type: 'jpeg', quality: 92 });
