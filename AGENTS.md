@@ -24,6 +24,33 @@
 - `scripts/hero-shot.ts` and `scripts/feature-shots.ts` regenerate the README
   screenshots against a :3100 server; headless Chromium has no emoji font, so
   both scripts swap/strip emoji in the DOM before shooting.
+- Block artwork lives in `src/render/textures.ts`: `blockAtlasTexture()` is a
+  row of 32-px cells and `blocks.ts` points a block at them with
+  `sideAtlasCell` / `capAtlasCell` / `bottomAtlasCell` (grass needs dirt on its
+  underside, logs need rings on the ends). Cell ids and `ATLAS_CELL_COUNT`
+  live in `core/blocks.ts` — `core` must not import from `render`. Adding a
+  cell without drawing it throws on the first atlas build, which is deliberate.
+  The mesher routes painted blocks into separate geometry channels
+  (`ChunkGeometry.textured` and `.texturedTranslucent`) drawn with
+  `materials.textured` / `materials.texturedTranslucent`, so the flat-tint
+  path stays untouched. Two traps: the atlas uses `THREE.NoColorSpace`
+  (block tints in this game are plain linear values — an sRGB-decoded canvas
+  reads far darker than the flat blocks next to it), and side faces lose
+  about half their brightness to `FACE_SHADE` × AO × Lambert, so author the
+  art bright and chunky. Near-white cells (the candy-colour weave) set
+  `tintTexture: true` so the block's own colour multiplies through.
+- Avatars are dressed the same way (`players/avatar.ts`): cloth, denim and
+  the jumper front are near-white canvases multiplied by the per-player
+  colour, so a player's colour survives. The torso is a six-material box —
+  BoxGeometry face order is +x −x +y −y +z −z, and +z is the front that gets
+  the collar/pocket/buttons.
+- Dynamite: the stick is a real voxel (`DYNAMITE`), so it saves, blocks things
+  and can be carved by another blast; `DynamiteManager` only owns the animated
+  fuse rig (tagged `group.userData.fuse` for leak checks), the blast and the
+  chain reactions. Fuses run on **game** time, which is roughly half wall
+  clock in headless Chromium — never `waitForTimeout` for an explosion, poll
+  `game.dynamite.blastCount`. Blasts never touch `y <= 0`, `unbreakable`
+  blocks or water, and `SCORCH` is deliberately not in the palette.
 - Sky/camera invariant: the sky dome (radius `SKY_RADIUS`) is parented to a group
   centred on the **middle** of the world — the coordinate origin is a map
   *corner*, so centring the dome there puts its far side past the far plane and

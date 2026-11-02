@@ -129,6 +129,30 @@ things that aren't solid. Water and bedrock stay indestructible, and plants
 never get in the way when you place a block (the two aim at slightly
 different things so both just work).
 
+## Everything is painted, blocks and kids alike
+
+![Every block type, painted from the atlas](docs/screenshots/blocks.jpg)
+
+There are no flat-coloured cubes in Little Block World: every block is drawn
+into one procedural 32-px atlas at startup — grass with a fringe over dirt,
+dirt clods, stone boulders with cracks, sand grain, bark and growth rings on
+log ends, planks with nails, offset bricks over mortar, leaves with twigs,
+water with waves, the glow-block sun, bouncy springs, sparkle stars, a music
+note, bedrock boulders, scorched crater rims and the dynamite bundle. The
+eight candy colours keep their own bright tint and multiply a near-white
+weave through it, so a Red block still reads as Red — it just looks like
+painted building brick instead of solid plastic. Glass and water are painted
+too, through the same see-through material.
+
+The children are dressed the same way: a knitted jumper (collar, a stitched
+pocket and two buttons on the front), denim trousers with a seam down the
+leg, and the same little face as always. All of it is near-white weave, so
+each player's chosen colour tints straight through — Strawberry stays
+Strawberry, it is just knitted now.
+
+Still no image files: every pixel above is drawn in code, exactly like the
+flowers and the sky.
+
 ## Swimming — and how to get out
 
 Lakes, rivers and the Islands world are properly swimmable: you bob at the
@@ -137,6 +161,35 @@ your head is clear of the water, that same button *pushes you out* — a real
 jump, so you hop onto the bank or the rim of a pool instead of paddling in
 circles. Fully submerged, kick up to the surface first. If a bank is more than
 a block above the water, place a block or dig a step to make a stair.
+
+## Dynamite 🧨
+
+![A stick of dynamite with its fuse burning down](docs/screenshots/dynamite.jpg)
+
+Dynamite sits in the block palette **and** on the shoulder-button favourites,
+so a five-year-old finds it in two presses. Set one down and **it lights
+immediately**: the fuse spits sparks and shrinks, the stick rattles, a chunky
+yellow "!" bobs over it, and it hisses — the ticks get faster and louder until
+it goes **BOOM** about two and a half seconds later. You *hear* the fuse
+running out, so children learn to run clear without anyone having to tell them.
+
+- **The blast really moves the world.** A sphere about three and a half blocks
+  across of dirt, stone, wood, bricks, glass and plants is carved out, chunky
+  debris flies off in the colours of whatever went, smoke drifts up, the sky
+  flashes and the crater rim stays scorched. Bedrock and water always win, so
+  the floor never collapses under anybody.
+- **Everybody is fine.** Players and animals are launched into the air,
+  completely unharmed, and land on their feet — a cartoon tumble, no health
+  bar, no game over. The screen gives one warm little punch and each nearby
+  camera shakes, so the kick is felt as well as seen.
+- **Chain reactions.** Sticks near a blast catch light too, so a line of them
+  goes off one after another.
+- **Hitting a burning stick with LT / L2 does not take it off** — you bonk the
+  stub and it pops almost at once, which is the fun way to hurry one along.
+- Sticks are ordinary blocks: they live in the save, other blasts can carve
+  them away, and one you left lying around is still burning when you come
+  back. **Reset World** in the Grown-Ups menu (or a fresh world) tidies the
+  mess, and every block a blast removed is undone the same way.
 
 ## How the world saves
 
@@ -185,7 +238,7 @@ a block above the water, place a block or dig a step to make a stair.
 
 ## Testing status (honest)
 
-Automated (Playwright, real Chromium, 26 tests): game loads error-free,
+Automated (Playwright, real Chromium, 33 tests): game loads error-free,
 keyboard-only join, controller join/move/jump/build/cycle, palette with
 D-pad, per-player menu + fly toggle, split-screen activation, 2×2
 four-player grid, independent movement, one player's palette not pausing
@@ -197,12 +250,21 @@ really work (Freeze stops the whole world dead, split-screen layouts cycle
 through Smart/Left-Right/Up-Down/2×2, Reset World wipes edits, Choose World
 starts a new theme+seed and the preview canvas actually paints a map), the
 welcome-screen world picker (theme, surprise seed, start), menu
-sub-screens receiving controller input, `?seed=…&world=…` handling,
-walking into a pond then **hopping back out** with the jump button held, a
+sub-screens receiving controller input, `?seed=…&world=…` handling, and
+walking into a pond then **hopping back out** with the jump button held; a
 player **leaving** so their half of the split screen really closes (pane, HUD
 and card removed, the others go full screen, the freed controller can invite a
-new player, and the welcome screen returns when the last one leaves), and
-clearing controller-asleep players from Grown-Up Settings.
+new player, and the welcome screen returns when the last one leaves), plus
+clearing controller-asleep players from Grown-Up Settings. Dynamite is covered
+too: placing a stick lights it, the blast carves a crater and scorches the rim
+while bedrock and water shrug it off and the fuse meshes are cleaned up, LT
+re-lights a burning stick instead of removing it, one blast lights its
+neighbours (chain reaction), and a stick you left in the world is still
+there — still burning — after a reload. The new art is checked too: the
+atlas is decoded in the page and every cell must be drawn and different from
+all the others, painted blocks must really reach the textured mesh channels
+(including see-through glass and water), and the avatars must be wearing
+cloth, denim and a jumper front. And no black hole in the sky, from any angle.
 
 ```bash
 npm test          # e2e suite (starts its own server on :3100)

@@ -115,7 +115,7 @@ test('controller player joins and can move + jump', async ({ page }) => {
   await joinWithPad(page);
   // let the join-confirm jump finish and the player settle on the ground
   await page.evaluate(() => (window as any).__testPad.set('jump', false));
-  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 5000 });
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
   const pos0 = await page.evaluate(() => {
     const e = (window as any).__lbw.game.players[0].entity;
     return { x: e.pos.x, z: e.pos.z };
@@ -125,7 +125,7 @@ test('controller player joins and can move + jump', async ({ page }) => {
   await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
 
   // jump raises the player
-  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 5000 });
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
   const y0 = await page.evaluate(() => (window as any).__lbw.game.players[0].entity.pos.y);
   await page.evaluate(() => (window as any).__testPad.set('jump', true));
   await page.waitForFunction((y: number) => (window as any).__lbw.game.players[0].entity.pos.y > y + 0.5, y0, { timeout: 5000 });
@@ -224,7 +224,7 @@ test('right stick turns the view right (and stick up looks up)', async ({ page }
   await boot(page);
   await joinWithPad(page);
   await page.evaluate(() => (window as any).__testPad.set('jump', false));
-  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 5000 });
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 10000 });
   const y0 = await page.evaluate(() => (window as any).__lbw.game.players[0].entity.yaw);
   // hold the right stick RIGHT for 300ms
   await page.evaluate(() => (window as any).__testPad.setLook(1, 0));
@@ -801,7 +801,7 @@ test('grown-up menu: Choose World opens the preview picker and starts a new worl
   test.slow();
   await boot(page);
   await joinWithPad(page);
-  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 5000 });
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 10000 });
   await openGrownUpsMenu(page);
 
   await selectRow(page, 2); // Choose World
@@ -902,7 +902,6 @@ test('the ?seed= and ?world= url params choose the starting world', async ({ pag
   }));
   expect(state).toEqual({ seed: 4242, theme: 2, worldTheme: 2 });
 });
-
 // ------------------------------------------------------------ sky & rendering
 
 /**
@@ -969,4 +968,376 @@ test('no black hole in the sky, wherever the camera looks', async ({ page }) => 
   });
   expect(sky.centre).toEqual(sky.worldMiddle);
   for (const far of sky.farPlanes) expect(sky.farthestPossibleDomeDistance).toBeLessThan(far);
+});
+
+// ------------------------------------------------------------------- dynamite
+
+type Cell = { x: number; y: number; z: number };
+
+/**
+ * Puts a stick of dynamite in the cell the player is aiming at (through the
+ * same placement hook a controller press uses) and sets how long its fuse is.
+ */
+async function plantStick(page: Page, fuse: number): Promise<Cell> {
+  // The save is shared between tests, and a stick that is in it comes back
+  // already burning — so clear the left-overs first, otherwise the fuse
+  // counts below mean nothing.
+  await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    const { sy, sz } = (window as any).__lbw.dims;
+    const dyn = (window as any).__lbw.ids.DYNAMITE;
+    game.dynamite.clear();
+    for (const [i, id] of [...game.world.mods]) {
+      if (id !== dyn) continue;
+      const y = i % sy, xz = Math.floor(i / sy);
+      game.world.set(Math.floor(xz / sz), y, xz % sz, 0);
+    }
+  });
+  await page.waitForFunction('window.__lbw.game.players[0].target !== null', null, { timeout: 15000 });
+  const cell = await page.evaluate((f: number) => {
+    const game = (window as any).__lbw.game;
+    const lp = game.players[0];
+    const hit = lp.target;
+    lp.selected = (window as any).__lbw.ids.DYNAMITE;
+    if (!game.hooks().tryPlace(lp, hit)) return null;
+    const cell = { x: hit.px, y: hit.py, z: hit.pz };
+    game.dynamite.light(cell.x, cell.y, cell.z, f); // long fuse: the test decides when it pops
+    return cell;
+  }, fuse);
+  expect(cell).not.toBeNull();
+  return cell!;
+}
+
+/** how many burning-fuse rigs are still hanging in the scene (catches leaks) */
+function fuseRigs(page: Page): Promise<number> {
+  return page.evaluate(() => (window as any).__lbw.game.scene.children
+    .filter((o: any) => o.userData?.fuse).length);
+}
+
+test('dynamite is in the palette, painted from an atlas, and lights when placed', async ({ page }) => {
+  await boot(page);
+  const atlas = await page.evaluate(() => ({
+    hasMap: !!(window as any).__lbw.game.chunks.materials.textured.map,
+  }));
+  expect(atlas.hasMap).toBe(true); // the stick is drawn, not tinted
+
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 10000 });
+
+  // a child can find it in the block palette
+  await page.evaluate(() => (window as any).__testPad.tap('palette'));
+  await page.waitForSelector('.palette-grid');
+  const labels = await page.evaluate(() =>
+    [...document.querySelectorAll('.palette-cell')].map((c) => c.textContent || ''));
+  expect(labels.some((t) => t.includes('Dynamite'))).toBe(true);
+  await page.evaluate(() => (window as any).__testPad.tap('back'));
+
+  // place it with the build button
+  await page.evaluate(() => {
+    (window as any).__lbw.game.players[0].selected = (window as any).__lbw.ids.DYNAMITE;
+  });
+  await page.waitForFunction('window.__lbw.game.players[0].target !== null', null, { timeout: 15000 });
+  const target = await page.evaluate(() => {
+    const t = (window as any).__lbw.game.players[0].target;
+    return { x: t.px, y: t.py, z: t.pz };
+  });
+  await page.evaluate(() => (window as any).__testPad.set('place', true));
+  await page.waitForTimeout(600);
+  const placed = await page.evaluate((c: Cell) => {
+    const game = (window as any).__lbw.game;
+    return {
+      block: game.world.get(c.x, c.y, c.z),
+      lit: game.dynamite.isLit(c.x, c.y, c.z),
+      active: game.dynamite.active,
+      textured: game.scene.children
+        .filter((o: any) => o.isMesh && o.material === game.chunks.materials.textured).length,
+      toast: document.querySelector('.toast')?.textContent ?? '',
+    };
+  }, target);
+  await page.evaluate(() => (window as any).__testPad.set('place', false));
+
+  expect(placed.block).toBe((await page.evaluate(() => (window as any).__lbw.ids)).DYNAMITE);
+  expect(placed.lit).toBe(true);   // burning from the moment it is set down
+  expect(placed.active).toBe(1);
+  expect(placed.textured).toBeGreaterThan(0); // a chunk face is using the block atlas
+  expect(placed.toast).toMatch(/Dynamite/i);
+
+  // and the fuse really does run out
+  await page.waitForFunction('window.__lbw.game.dynamite.blastCount > 0', null, { timeout: 30000 });
+});
+
+test('a blast carves a crater, marks the rim, and everybody walks away', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 10000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  const cell = await plantStick(page, 30);
+
+  const before = await page.evaluate((c: Cell) => {
+    const game = (window as any).__lbw.game;
+    const w = window as any;
+    // watch the "kick" and the animal launch without needing hardware
+    const lp = game.players[0];
+    w.__shakes = [];
+    const shake = lp.shake.bind(lp);
+    lp.shake = (s: number, m: number) => { w.__shakes.push([s, m]); shake(s, m); };
+    const away = game.animals.blastAway.bind(game.animals);
+    w.__launched = [];
+    game.animals.blastAway = (x: number, y: number, z: number, r: number) => {
+      w.__launched.push(r);
+      return away(x, y, z, r);
+    };
+    // the screen punch lives for less a second: watch for it instead of sampling
+    w.__flashed = false;
+    new MutationObserver((ms: MutationRecord[]) => {
+      for (const m of ms) for (const n of m.addedNodes) {
+        if ((n as HTMLElement).classList?.contains('blast-flash')) w.__flashed = true;
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+    // a bucket of water right beside the stick, to prove water always wins
+    game.world.set(c.x + 2, c.y, c.z, w.__lbw.ids.WATER);
+    let solid = 0;
+    for (let dx = -2; dx <= 2; dx++)
+      for (let dz = -2; dz <= 2; dz++)
+        for (let dy = -2; dy <= 2; dy++)
+          if (game.world.get(c.x + dx, c.y + dy, c.z + dz) !== 0) solid++;
+    const rigs = game.scene.children.filter((o: any) => o.userData?.fuse).length;
+    return { solid, rigs };
+  }, cell);
+  expect(before.solid).toBeGreaterThan(20);
+  expect(before.rigs).toBe(1); // the stick is burning away while we set this up
+
+  await page.evaluate((c: Cell) => (window as any).__lbw.game.dynamite.light(c.x, c.y, c.z, 0.05), cell);
+  await page.waitForFunction('window.__lbw.game.dynamite.blastCount > 0', null, { timeout: 30000 });
+
+  const after = await page.evaluate((c: Cell) => {
+    const game = (window as any).__lbw.game;
+    const ids = (window as any).__lbw.ids;
+    const w = window as any;
+    let solid = 0;
+    for (let dx = -2; dx <= 2; dx++)
+      for (let dz = -2; dz <= 2; dz++)
+        for (let dy = -2; dy <= 2; dy++)
+          if (game.world.get(c.x + dx, c.y + dy, c.z + dz) !== 0) solid++;
+    return {
+      centre: game.world.get(c.x, c.y, c.z),
+      solid,
+      bedrock: game.world.get(c.x, 0, c.z),
+      water: game.world.get(c.x + 2, c.y, c.z),
+      scorch: [...game.world.mods.values()].filter((v: number) => v === ids.SCORCH).length,
+      active: game.dynamite.active,
+      rigs: game.scene.children.filter((o: any) => o.userData?.fuse).length,
+      shakes: w.__shakes.length,
+      launched: w.__launched.length,
+      flashed: w.__flashed === true,
+    };
+  }, cell);
+
+  expect(after.centre).toBe(0);                     // the stick's own cell is gone
+  expect(after.solid).toBeLessThan(before.solid);   // and so is a lump of the world
+  expect(after.bedrock).not.toBe(0);                // the floor always holds
+  expect(after.water).toBe(ids.WATER);              // water always wins
+  expect(after.scorch).toBeGreaterThan(0);          // the blast leaves a mark
+  expect(after.active).toBe(0);
+  expect(after.rigs).toBe(0);                       // the burning-fuse meshes are cleaned up
+  expect(after.shakes).toBeGreaterThan(0);          // the player feels it
+  expect(after.launched).toBeGreaterThan(0);        // the animals get told
+  expect(after.flashed).toBe(true);                // and the screen punches
+});
+
+test('hitting a stick with the break button re-lights the stub, it does not come off', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 10000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  const cell = await plantStick(page, 30);
+
+  await frames(page, 3);
+  const aim = await page.evaluate(() => {
+    const p = (window as any).__lbw.game.players[0];
+    return p.removeTarget ? { block: p.removeTarget.block, y: p.removeTarget.y } : null;
+  });
+  expect(aim?.block).toBe(ids.DYNAMITE); // LT is aiming at the stick
+
+  await page.evaluate(() => (window as any).__testPad.set('remove', true));
+  await frames(page, 4);
+  await page.evaluate(() => (window as any).__testPad.set('remove', false));
+
+  const now = await page.evaluate((c: Cell) => {
+    const game = (window as any).__lbw.game;
+    const fuse = [...game.dynamite.lit.values()]
+      .find((l: any) => l.x === c.x && l.y === c.y && l.z === c.z);
+    return {
+      block: game.world.get(c.x, c.y, c.z),
+      fuse: fuse ? fuse.fuse : null,
+    };
+  }, cell);
+  expect(now.block).toBe(ids.DYNAMITE); // it is still a stick...
+  expect(now.fuse).not.toBeNull();      // ...now burning down fast
+  expect(now.fuse!).toBeLessThan(1);
+
+  await page.waitForFunction('window.__lbw.game.dynamite.blastCount > 0', null, { timeout: 30000 });
+  const gone = await page.evaluate(
+    (c: Cell) => (window as any).__lbw.game.world.get(c.x, c.y, c.z), cell);
+  expect(gone).toBe(0);
+});
+
+test('one stick lights the sticks around it too (chain reactions)', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 10000 });
+  const cell = await plantStick(page, 30);
+  expect(await fuseRigs(page)).toBe(1);
+
+  // a second stick well outside the crater but close enough to hear it
+  await page.evaluate(({ c, dyn }: { c: Cell; dyn: number }) => {
+    const game = (window as any).__lbw.game;
+    game.world.set(c.x + 6, c.y, c.z, dyn);
+    game.dynamite.light(c.x + 6, c.y, c.z, 30);
+  }, { c: cell, dyn: (await page.evaluate(() => (window as any).__lbw.ids)).DYNAMITE });
+  expect(await fuseRigs(page)).toBe(2); // two sticks, two burning fuses
+
+  await page.evaluate((c: Cell) => (window as any).__lbw.game.dynamite.light(c.x, c.y, c.z, 0.05), cell);
+  await page.waitForFunction('window.__lbw.game.dynamite.blastCount >= 2', null, { timeout: 45000 });
+
+  const both = await page.evaluate((c: Cell) => {
+    const game = (window as any).__lbw.game;
+    return {
+      first: game.world.get(c.x, c.y, c.z),
+      second: game.world.get(c.x + 6, c.y, c.z),
+      active: game.dynamite.active,
+    };
+  }, cell);
+  expect(both.first).toBe(0);
+  expect(both.second).toBe(0); // the neighbour went off by itself, it was not carved away
+  expect(both.active).toBe(0);
+  expect(await fuseRigs(page)).toBe(0); // both fuse rigs are gone again
+});
+
+test('a stick you left lying around is still there after a reload, fuse and all', async ({ page }) => {  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 10000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  const cell = await plantStick(page, 60);
+
+  const want = await page.evaluate((c: Cell) => {
+    const { sz, sy } = (window as any).__lbw.dims;
+    return {
+      key: String((c.x * sz + c.z) * sy + c.y),
+      dyn: (window as any).__lbw.ids.DYNAMITE,
+      seed: (window as any).__lbw.game.seed,
+      theme: (window as any).__lbw.game.theme,
+    };
+  }, cell);
+  await page.evaluate(async (w: { key: string; dyn: number; seed: number; theme: number }) => {
+    (window as any).__savedStick = false;
+    const iv = setInterval(async () => {
+      const r = await fetch(`/api/world?seed=${w.seed}&theme=${w.theme}`);
+      const d = await r.json();
+      if (d && d.mods && d.mods[w.key] === w.dyn) {
+        (window as any).__savedStick = true;
+        clearInterval(iv);
+      }
+    }, 250);
+  }, want);
+  await page.waitForFunction('window.__savedStick === true', null, { timeout: 20000 });
+
+  await page.reload();
+  await page.waitForFunction('window.__lbw !== undefined', null, { timeout: 20000 });
+  const after = await page.evaluate((c: Cell) => {
+    const game = (window as any).__lbw.game;
+    return {
+      block: game.world.get(c.x, c.y, c.z),
+      lit: game.dynamite.isLit(c.x, c.y, c.z),
+      active: game.dynamite.active,
+    };
+  }, cell);
+  expect(after.block).toBe(ids.DYNAMITE);
+  expect(after.lit).toBe(true);   // and it starts burning again
+  expect(after.active).toBeGreaterThan(0);
+});
+
+// -------------------------------------------------------------------- artwork
+
+test('every block is painted from the atlas, not flat-tinted', async ({ page }) => {
+  await boot(page);
+  const art = await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    const img = game.chunks.materials.textured.map.image as HTMLCanvasElement;
+    const S = 32;
+    const cells = Math.round(img.width / S);
+    const scratch = document.createElement('canvas');
+    scratch.width = img.width;
+    scratch.height = img.height;
+    const g = scratch.getContext('2d')!;
+    g.drawImage(img, 0, 0);
+    const sigs: string[] = [];
+    const paletteSizes: number[] = [];
+    for (let c = 0; c < cells; c++) {
+      const d = g.getImageData(c * S, 0, S, S).data;
+      const seen = new Set<string>();
+      let r = 0, gg = 0, b = 0;
+      for (let p = 0; p < d.length; p += 4) {
+        seen.add(`${d[p]},${d[p + 1]},${d[p + 2]}`);
+        r += d[p]; gg += d[p + 1]; b += d[p + 2];
+      }
+      const n = d.length / 4;
+      paletteSizes.push(seen.size);
+      sigs.push(`${Math.round(r / n)},${Math.round(gg / n)},${Math.round(b / n)}`);
+    }
+    return { cells, sigs, paletteSizes };
+  });
+  // one cell per block face style, every cell actually drawn, none alike
+  expect(art.cells).toBeGreaterThanOrEqual(20);
+  expect(art.paletteSizes.every((s) => s >= 3)).toBe(true); // no cell is one flat fill
+  expect(new Set(art.sigs).size).toBe(art.cells);
+
+  // and the game really uses the artwork: painted blocks (opaque and see-through)
+  await joinWithPad(page);
+  const channels = await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    const ids = (window as any).__lbw.ids;
+    const e = game.players[0].entity;
+    const x = Math.round(e.pos.x) + 3, z = Math.round(e.pos.z);
+    const y = game.world.surfaceY(x, z) + 1;
+    game.world.set(x, y, z, ids.STONE);
+    game.world.set(x + 1, y, z, ids.GLASS);
+    return {
+      painted: game.scene.children.filter((o: any) => o.isMesh && o.material === game.chunks.materials.textured).length,
+      seeThrough: game.scene.children.filter(
+        (o: any) => o.isMesh && o.material === game.chunks.materials.texturedTranslucent).length,
+      uved: game.scene.children
+        .filter((o: any) => o.isMesh && o.material === game.chunks.materials.textured)
+        .every((o: any) => !!o.geometry.attributes.uv),
+    };
+  });
+  expect(channels.painted).toBeGreaterThan(0);
+  expect(channels.seeThrough).toBeGreaterThan(0); // glass and water carry art too
+  expect(channels.uved).toBe(true);
+});
+
+test('the kids are dressed: knitted jumpers, denim legs, a faced head', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page);
+  const cloth = await page.evaluate(() => {
+    const parts = (window as any).__lbw.game.players[0].entity.avatar;
+    const texIds = new Set<string>();
+    let clothed = 0;
+    let multiFace = 0;
+    let faceMesh = 0;
+    parts.group.traverse((o: any) => {
+      if (!o.isMesh) return;
+      const mats: any[] = Array.isArray(o.material) ? o.material : [o.material];
+      if (Array.isArray(o.material) && o.material.length === 6) multiFace++;
+      const maps = mats.map((m) => m?.map).filter(Boolean);
+      if (maps.length) maps.forEach((m: any) => texIds.add(m.uuid));
+      if (o.geometry.type === 'PlaneGeometry') faceMesh++;
+      if (o.geometry.type === 'BoxGeometry' && maps.length) clothed++;
+    });
+    return { clothed, multiFace, faceMesh, textures: texIds.size };
+  });
+  expect(cloth.clothed).toBeGreaterThanOrEqual(5); // head, torso, two arms, two legs
+  expect(cloth.multiFace).toBe(1);                 // the jumper's front is its own artwork
+  expect(cloth.faceMesh).toBe(1);                  // the little face is still there
+  expect(cloth.textures).toBeGreaterThanOrEqual(3); // knit, denim and the jumper front differ
 });

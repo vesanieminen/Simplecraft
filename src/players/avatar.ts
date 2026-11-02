@@ -52,8 +52,112 @@ function getFaceTexture(): THREE.CanvasTexture {
   return faceTexture;
 }
 
-export interface AvatarParts {
-  group: THREE.Group;
+/**
+ * Cloth for the avatar. All of it is near-white weave and stitching, so the
+ * per-player colour multiplies through: Strawberry stays Strawberry, it is
+ * just knitted now.
+ */
+let clothTex: THREE.CanvasTexture | null = null;
+
+function getClothTexture(): THREE.CanvasTexture {
+  if (clothTex) return clothTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 32;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#ffffff';
+  g.fillRect(0, 0, 32, 32);
+  g.fillStyle = '#e3e3e3';
+  for (let x = 0; x < 32; x += 3) g.fillRect(x, 0, 1, 32); // warp
+  g.fillStyle = '#f2f2f2';
+  for (let y = 0; y < 32; y += 3) g.fillRect(0, y, 32, 1); // weft
+  g.fillStyle = '#cfcfcf'; // little knit "v"s
+  for (let y = 1; y < 32; y += 6) {
+    for (let x = 1; x < 32; x += 6) {
+      g.fillRect(x, y, 1, 2);
+      g.fillRect(x + 1, y + 2, 1, 1);
+      g.fillRect(x + 2, y, 1, 2);
+    }
+  }
+  clothTex = new THREE.CanvasTexture(c);
+  clothTex.magFilter = THREE.NearestFilter;
+  clothTex.minFilter = THREE.NearestFilter;
+  clothTex.generateMipmaps = false;
+  clothTex.wrapS = clothTex.wrapT = THREE.RepeatWrapping;
+  clothTex.repeat.set(2, 2);
+  clothTex.colorSpace = THREE.NoColorSpace;
+  return clothTex;
+}
+
+let denimTex: THREE.CanvasTexture | null = null;
+
+/** denim for the trousers: diagonal twill and a seam down the leg */
+function getDenimTexture(): THREE.CanvasTexture {
+  if (denimTex) return denimTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 32;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#ffffff';
+  g.fillRect(0, 0, 32, 32);
+  g.strokeStyle = '#dedede';
+  g.lineWidth = 1.5;
+  for (let i = -32; i < 32; i += 4) {
+    g.beginPath();
+    g.moveTo(i, 0);
+    g.lineTo(i + 32, 32);
+    g.stroke();
+  }
+  g.fillStyle = '#c8c8c8';
+  g.fillRect(15, 0, 2, 32); // seam
+  g.fillStyle = '#f4f4f4';
+  for (let y = 1; y < 32; y += 3) g.fillRect(14, y, 1, 1); // topstitching
+  denimTex = new THREE.CanvasTexture(c);
+  denimTex.magFilter = THREE.NearestFilter;
+  denimTex.minFilter = THREE.NearestFilter;
+  denimTex.generateMipmaps = false;
+  denimTex.wrapS = denimTex.wrapT = THREE.RepeatWrapping;
+  denimTex.repeat.set(2, 3);
+  denimTex.colorSpace = THREE.NoColorSpace;
+  return denimTex;
+}
+
+let shirtTex: THREE.CanvasTexture | null = null;
+
+/** the front of the jumper: collar, a stitched pocket and two buttons */
+function getShirtTexture(): THREE.CanvasTexture {
+  if (shirtTex) return shirtTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#ffffff';
+  g.fillRect(0, 0, 64, 64);
+  g.fillStyle = '#e6e6e6';
+  for (let x = 0; x < 64; x += 3) g.fillRect(x, 0, 1, 64);
+  g.fillStyle = '#f2f2f2';
+  for (let y = 0; y < 64; y += 3) g.fillRect(0, y, 64, 1);
+  g.fillStyle = '#d6d6d6'; // collar band
+  g.fillRect(0, 0, 64, 7);
+  g.fillStyle = '#ffffff';
+  g.fillRect(24, 0, 16, 9); // neck opening
+  g.fillStyle = '#dedede'; // chest pocket…
+  g.fillRect(12, 24, 20, 16);
+  g.fillStyle = '#bdbdbd'; // …with stitching round it
+  for (let x = 12; x <= 32; x += 4) { g.fillRect(x, 23, 2, 1); g.fillRect(x, 40, 2, 1); }
+  for (let y = 24; y <= 40; y += 4) { g.fillRect(11, y, 1, 2); g.fillRect(32, y, 1, 2); }
+  g.fillStyle = '#c4c4c4'; // two buttons
+  g.beginPath(); g.arc(46, 26, 3, 0, 7); g.fill();
+  g.beginPath(); g.arc(46, 42, 3, 0, 7); g.fill();
+  g.fillStyle = '#ffffff';
+  g.fillRect(45, 25, 2, 2);
+  g.fillRect(45, 41, 2, 2);
+  shirtTex = new THREE.CanvasTexture(c);
+  shirtTex.magFilter = THREE.NearestFilter;
+  shirtTex.minFilter = THREE.NearestFilter;
+  shirtTex.generateMipmaps = false;
+  shirtTex.colorSpace = THREE.NoColorSpace;
+  return shirtTex;
+}
+
+export interface AvatarParts {  group: THREE.Group;
   body: THREE.Group;
   leftArm: THREE.Object3D;
   rightArm: THREE.Object3D;
@@ -72,12 +176,19 @@ export function createAvatar(colorHex: string): AvatarParts {
   const body = new THREE.Group();
   group.add(body);
 
-  const skinMat = new THREE.MeshLambertMaterial({ color });
-  const darkMat = new THREE.MeshLambertMaterial({ color: dark });
-  const lightMat = new THREE.MeshLambertMaterial({ color: light });
+  // fabric, tinted per player: jumper, trousers and a soft head
+  const skinMat = new THREE.MeshLambertMaterial({ color, map: getClothTexture() });
+  const darkMat = new THREE.MeshLambertMaterial({ color: dark, map: getClothTexture() });
+  const lightMat = new THREE.MeshLambertMaterial({ color: light, map: getClothTexture() });
+  const denimMat = new THREE.MeshLambertMaterial({ color: dark, map: getDenimTexture() });
+  const shirtMat = new THREE.MeshLambertMaterial({ color: light, map: getShirtTexture() });
 
-  // torso: y 0.45..1.05
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.6, 0.32), lightMat);
+  // torso: y 0.45..1.05 — BoxGeometry faces are +x -x +y -y +z -z, and +z is
+  // the front, so that is the face that gets the collar/pocket/buttons
+  const torso = new THREE.Mesh(
+    new THREE.BoxGeometry(0.52, 0.6, 0.32),
+    [lightMat, lightMat, lightMat, lightMat, shirtMat, lightMat],
+  );
   torso.position.y = 0.75;
   body.add(torso);
 
@@ -104,8 +215,8 @@ export function createAvatar(colorHex: string): AvatarParts {
   };
   const leftArm = mkLimb(0.16, 0.5, darkMat, -0.34, 1.02);
   const rightArm = mkLimb(0.16, 0.5, darkMat, 0.34, 1.02);
-  const leftLeg = mkLimb(0.19, 0.45, darkMat, -0.14, 0.45);
-  const rightLeg = mkLimb(0.19, 0.45, darkMat, 0.14, 0.45);
+  const leftLeg = mkLimb(0.19, 0.45, denimMat, -0.14, 0.45);
+  const rightLeg = mkLimb(0.19, 0.45, denimMat, 0.14, 0.45);
 
   // player ring (helps kids find themselves)
   const ring = new THREE.Mesh(

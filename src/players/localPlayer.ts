@@ -40,6 +40,10 @@ export class LocalPlayer {
   private buildCooldown = 0;
   private cameraDist = 4.8;
   private camPos = new THREE.Vector3();
+  /** camera punch after an explosion nearby */
+  private shakeT = 0;
+  private shakeTotal = 1;
+  private shakeMag = 0;
 
   constructor(
     public entity: PlayerEntity,
@@ -174,7 +178,6 @@ export class LocalPlayer {
     const head = new THREE.Vector3(e.pos.x, e.pos.y + 1.45, e.pos.z);
     const dir = this.aimDir();
     const k = 1 - Math.exp(-22 * dt);
-
     if (this.firstPerson) {
       this.camera.position.copy(head);
       e.avatar.group.visible = false;
@@ -211,6 +214,28 @@ export class LocalPlayer {
     this.camera.quaternion.setFromRotationMatrix(
       new THREE.Matrix4().lookAt(this.camera.position, head.clone().addScaledVector(dir, 2), new THREE.Vector3(0, 1, 0)),
     );
+
+    // a nearby blast rattles this player's view (and the one two panes over
+    // feels a smaller kick), then it settles straight back down
+    if (this.shakeT > 0) {
+      this.shakeT = Math.max(0, this.shakeT - dt);
+      const k = this.shakeT / this.shakeTotal;
+      const m = this.shakeMag * k * 0.3;
+      this.camera.position.x += (Math.random() - 0.5) * m;
+      this.camera.position.y += (Math.random() - 0.5) * m;
+      this.camera.rotateZ((Math.random() - 0.5) * 0.06 * k);
+      if (this.shakeT === 0) this.shakeMag = 0;
+    }
+  }
+
+  /** how much this player's camera should shake for `seconds` */
+  shake(seconds: number, mag = 1): void {
+    if (seconds <= 0 || mag <= 0) return;
+    if (seconds > this.shakeT) {
+      this.shakeT = seconds;
+      this.shakeTotal = seconds;
+    }
+    this.shakeMag = Math.max(this.shakeMag, mag);
   }
 
   respawnAt(p: THREE.Vector3): void {
