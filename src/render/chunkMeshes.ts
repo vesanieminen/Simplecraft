@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { buildChunkGeometry } from '../core/mesher';
 import { CHUNKS_X, World } from '../core/world';
+import { plantAtlasTexture } from './textures';
 
 interface ChunkMeshes {
   opaque?: THREE.Mesh;
@@ -21,7 +22,12 @@ export class ChunkMeshManager {
     translucent: new THREE.MeshLambertMaterial({
       vertexColors: true, transparent: true, opacity: 0.72, depthWrite: false,
     }),
-    cross: new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }),
+    cross: new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      map: plantAtlasTexture(),
+      alphaTest: 0.5,
+      side: THREE.DoubleSide,
+    }),
   };
 
   constructor(

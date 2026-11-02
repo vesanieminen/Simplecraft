@@ -6,7 +6,7 @@
 
 import * as THREE from 'three';
 import { BlockId, blockDef, FAVORITES } from '../core/blocks';
-import { generousTarget, hitAny, RayHit, raycastVoxel } from '../core/raycast';
+import { generousTarget, hitRemovable, hitSolid, RayHit, raycastVoxel } from '../core/raycast';
 import { World } from '../core/world';
 import { FrameControls } from '../input/types';
 import { PlayerEntity, StepEvents } from './playerEntity';
@@ -27,6 +27,8 @@ export class LocalPlayer {
   firstPerson = false;
   sensitivity = 1;
   target: RayHit | null = null;
+  /** separate forgiving-aim target that also matches breakable plants */
+  removeTarget: RayHit | null = null;
   sourceId = '';
   /** set true while this player's own menu is open (movement stops for them) */
   uiOpen = false;
@@ -124,7 +126,7 @@ export class LocalPlayer {
       if ((placePressed || removePressed || repeat) && this.buildCooldown <= 0) {
         this.buildCooldown = 0.28;
         if (frame.held.has('place') && this.target) hooks.tryPlace(this, this.target);
-        else if (frame.held.has('remove') && this.target) hooks.tryRemove(this, this.target);
+        else if (frame.held.has('remove') && this.removeTarget) hooks.tryRemove(this, this.removeTarget);
       }
       if (frame.pressed.has('interact') && !this.entity.flying) hooks.interact(this);
       if (frame.pressed.has('nextBlock')) this.cycle(1);
@@ -140,26 +142,27 @@ export class LocalPlayer {
     const right = new THREE.Vector3(Math.cos(this.entity.yaw), 0, -Math.sin(this.entity.yaw));
     const up = new THREE.Vector3(0, 1, 0);
 
-    // remove targets plants too; place targets solid blocks only
-    const hit = generousTarget(this.world, head, dir, REACH, up, right);
-    this.target = hit;
+    // place targets solid blocks only; remove also targets plants (never water)
+    this.target = generousTarget(this.world, head, dir, REACH, up, right, hitSolid);
+    this.removeTarget = generousTarget(this.world, head, dir, REACH, up, right, hitRemovable);
 
-    if (hit) {
+    const shown = this.removeTarget ?? this.target;
+    if (shown) {
       this.outline.visible = true;
-      this.outline.position.set(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5);
+      this.outline.position.set(shown.x + 0.5, shown.y + 0.5, shown.z + 0.5);
     } else {
       this.outline.visible = false;
     }
 
     const placing = true; // ghost follows camera aim
-    if (hit && placing) {
+    if (this.target && placing) {
       const def = blockDef(this.selected);
       if (this.ghostBlock !== this.selected) {
         this.ghostBlock = this.selected;
         (this.ghost.material as THREE.MeshBasicMaterial).color.setRGB(def.color[0], def.color[1], def.color[2]);
       }
       this.ghost.visible = true;
-      this.ghost.position.set(hit.px + 0.5, hit.py + 0.5, hit.pz + 0.5);
+      this.ghost.position.set(this.target.px + 0.5, this.target.py + 0.5, this.target.pz + 0.5);
     } else {
       this.ghost.visible = false;
     }
@@ -176,7 +179,7 @@ export class LocalPlayer {
       e.avatar.group.visible = false;
     } else {
       // third-person with terrain-aware pull-in
-      const probe = raycastVoxel(this.world, head.x, head.y, head.z, -dir.x, -dir.y, -dir.z, 8, hitAny);
+      const probe = raycastVoxel(this.world, head.x, head.y, head.z, -dir.x, -dir.y, -dir.z, 8, hitSolid);
       const wanted = probe ? Math.max(1.1, probe.dist - 0.2) : 4.8;
       this.cameraDist += (wanted - this.cameraDist) * k;
       const want = head.clone().addScaledVector(dir, -this.cameraDist);

@@ -99,12 +99,14 @@ class GeomBuilder {
   positions: number[] = [];
   normals: number[] = [];
   colors: number[] = [];
+  uvs: number[] = [];
 
   quad(
     a: [number, number, number], b: [number, number, number],
     c: [number, number, number], d: [number, number, number],
     n: [number, number, number],
     tint: [number, number, number][], // per-corner rgb
+    uv?: [number, number][], // optional per-corner (a,b,c,d) UVs
   ): void {
     // triangulate a,b,c,d (two triangles), flip diagonal for better AO
     const flip = this.aoFlip(tint);
@@ -112,6 +114,7 @@ class GeomBuilder {
       this.positions.push(p[0], p[1], p[2]);
       this.normals.push(n[0], n[1], n[2]);
       this.colors.push(tint[i][0], tint[i][1], tint[i][2]);
+      if (uv) this.uvs.push(uv[i][0], uv[i][1]);
     };
     if (!flip) {
       push(a, 0); push(b, 1); push(c, 2);
@@ -134,6 +137,7 @@ class GeomBuilder {
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.positions, 3));
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.normals, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(this.colors, 3));
+    if (this.uvs.length) g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uvs, 2));
     g.computeBoundingSphere();
     return g;
   }
@@ -154,7 +158,7 @@ export function buildChunkGeometry(world: World, cx: number, cz: number): ChunkG
         const def = blockDef(id);
 
         if (isCrossBlock(id)) {
-          addCrossQuads(cross, x, y, z, def.color);
+          addCrossQuads(cross, x, y, z, def.atlasCell ?? 2);
           continue;
         }
 
@@ -203,25 +207,32 @@ export function buildChunkGeometry(world: World, cx: number, cz: number): ChunkG
   return { opaque: opaque.build(), translucent: transp.build(), cross: cross.build() };
 }
 
-/** two crossed vertical quads for flowers / grass tufts */
-function addCrossQuads(g: GeomBuilder, x: number, y: number, z: number, color: [number, number, number]): void {
+/** two crossed vertical quads for flowers / grass tufts, textured from an atlas */
+function addCrossQuads(g: GeomBuilder, x: number, y: number, z: number, cell: number): void {
   const s = 0.9, o = (1 - s) / 2;
+  // near-white tint; the atlas texture carries the colour, AO-ish shading from edges
   const t: [number, number, number][] = [
-    [color[0] * 0.85, color[1] * 0.85, color[2] * 0.85],
-    [color[0], color[1], color[2]],
-    [color[0], color[1], color[2]],
-    [color[0] * 0.85, color[1] * 0.85, color[2] * 0.85],
+    [0.85, 0.85, 0.85],
+    [1, 1, 1],
+    [1, 1, 1],
+    [0.85, 0.85, 0.85],
   ];
+  const CELLS = 3;
+  const pad = 0.5 / 32; // half-pixel inset to avoid atlas bleed
+  const u0 = (cell + pad) / CELLS;
+  const u1 = (cell + 1 - pad) / CELLS;
+  // UV corners matching quad(a,b,c,d): a=bottom-left, b=top-left, c=top-right, d=bottom-right
+  const uv: [number, number][] = [[u0, 0], [u0, 1], [u1, 1], [u1, 0]];
   const n1: [number, number, number] = [0.707, 0, 0.707];
   const n2: [number, number, number] = [0.707, 0, -0.707];
   // diagonal 1
   g.quad(
     [x + o, y, z + o], [x + o, y + 1, z + o], [x + o + s, y + 1, z + o + s], [x + o + s, y, z + o + s],
-    n1, t,
+    n1, t, uv,
   );
   // diagonal 2
   g.quad(
     [x + o + s, y, z + o], [x + o + s, y + 1, z + o], [x + o, y + 1, z + o + s], [x + o, y, z + o + s],
-    n2, t,
+    n2, t, uv,
   );
 }

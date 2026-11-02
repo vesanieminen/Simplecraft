@@ -3,7 +3,7 @@
  * "generous targeting" helper that samples a small cross pattern.
  */
 
-import { AIR, BlockId, blockDef } from './blocks';
+import { AIR, BlockId, blockDef, WATER } from './blocks';
 import { World } from './world';
 
 export interface Vec3 {
@@ -62,8 +62,8 @@ export function raycastVoxel(
 
 /** Target anything except air. */
 export const hitSolid = (id: BlockId) => id !== AIR && !blockDef(id).cross;
-/** For removal: everything placeable counts (including plants). */
-export const hitAny = (id: BlockId) => id !== AIR;
+/** For removal: everything the player could break, including plants — but not water. */
+export const hitRemovable = (id: BlockId) => id !== AIR && id !== WATER;
 
 /**
  * Forgiving aim: try the center ray; if it misses, sample a few offsets.
@@ -76,9 +76,10 @@ export function generousTarget(
   maxDist: number,
   up: Vec3,
   right: Vec3,
+  test: (id: BlockId) => boolean = hitSolid,
 ): RayHit | null {
   const NUDGE = 0.12; // world units offset at ~1 block distance
-  const center = raycastVoxel(world, origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, maxDist, hitSolid);
+  const center = raycastVoxel(world, origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, maxDist, test);
   if (center) return center;
   const samples: [number, number][] = [[NUDGE, 0], [-NUDGE, 0], [0, NUDGE], [0, -NUDGE], [NUDGE, NUDGE], [-NUDGE, -NUDGE]];
   let best: RayHit | null = null;
@@ -87,7 +88,7 @@ export function generousTarget(
     const dy = dir.y + right.y * a + up.y * b;
     const dz = dir.z + right.z * a + up.z * b;
     const len = Math.hypot(dx, dy, dz);
-    const hit = raycastVoxel(world, origin.x, origin.y, origin.z, dx / len, dy / len, dz / len, maxDist, hitSolid);
+    const hit = raycastVoxel(world, origin.x, origin.y, origin.z, dx / len, dy / len, dz / len, maxDist, test);
     if (hit && (!best || hit.dist < best.dist)) best = hit;
   }
   return best;

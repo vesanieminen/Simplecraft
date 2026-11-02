@@ -51,6 +51,8 @@ export interface BlockDef {
   translucent?: boolean;
   /** rendered as crossed quads (flowers, plants) — not collidable */
   cross?: boolean;
+  /** which 32x32 cell of the plant texture atlas to use (cross blocks) */
+  atlasCell?: number;
   /** full-brightness emissive look */
   emissive?: boolean;
   /** launches players who land on it */
@@ -90,9 +92,9 @@ const DEFS: BlockDef[] = [
     id: WATER, name: 'Water', icon: '💧', color: rgb(79, 179, 232),
     solid: false, opaque: false, translucent: true,
   },
-  { id: FLOWER_RED, name: 'Flower', icon: '🌷', color: rgb(255, 122, 108), solid: false, opaque: false, cross: true },
-  { id: FLOWER_YELLOW, name: 'Sunflower', icon: '🌼', color: rgb(255, 214, 94), solid: false, opaque: false, cross: true },
-  { id: TALLGRASS, name: 'Grass Tuft', icon: '🌿', color: rgb(110, 190, 90), solid: false, opaque: false, cross: true },
+  { id: FLOWER_RED, name: 'Flower', icon: '🌷', color: rgb(255, 122, 108), solid: false, opaque: false, cross: true, atlasCell: 0 },
+  { id: FLOWER_YELLOW, name: 'Sunflower', icon: '🌼', color: rgb(255, 214, 94), solid: false, opaque: false, cross: true, atlasCell: 1 },
+  { id: TALLGRASS, name: 'Grass Tuft', icon: '🌿', color: rgb(110, 190, 90), solid: false, opaque: false, cross: true, atlasCell: 2 },
   { id: GLOW, name: 'Glow Block', icon: '💡', color: rgb(255, 226, 138), solid: true, opaque: true, emissive: true },
   { id: BOUNCY, name: 'Bouncy Block', icon: '🍬', color: rgb(255, 123, 213), solid: true, opaque: true, bounce: 11.5 },
   { id: SPARKLE, name: 'Sparkle Block', icon: '✨', color: rgb(185, 231, 255), solid: true, opaque: true, sparkle: true },
