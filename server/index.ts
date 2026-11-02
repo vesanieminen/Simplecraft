@@ -82,7 +82,16 @@ async function main(): Promise<void> {
       return;
     }
     try {
-      writeWorld(req.body);
+      // merge: per-key last write wins, never lose another client's blocks
+      const prev = readWorld();
+      const incoming = req.body;
+      if (!prev || prev.seed !== incoming.seed) {
+        writeWorld(incoming);
+      } else {
+        const mods = { ...prev.mods, ...incoming.mods };
+        const collectedStars = [...new Set([...prev.collectedStars, ...incoming.collectedStars])].sort((a, b) => a - b);
+        writeWorld({ version: 1, seed: incoming.seed, mods, collectedStars });
+      }
       res.json({ ok: true });
     } catch {
       res.status(500).json({ error: 'write failed' });

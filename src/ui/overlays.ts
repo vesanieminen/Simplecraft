@@ -107,7 +107,7 @@ export class JoinCard extends Overlay {
     c.appendChild(row);
 
     const k = btnLabels(type);
-    this.keys(c, [[k.ud, 'change'], [k.a, 'join!']]);
+    this.keys(c, [[k.ud, 'change'], [k.a, 'join!'], [k.b, 'cancel']]);
     this.refresh();
   }
 
@@ -130,6 +130,10 @@ export class JoinCard extends Overlay {
     if (nav.confirm) {
       this.audio.uiSelect();
       this.onConfirm(this.colorIdx, this.nameIdx);
+      this.close();
+    }
+    if (nav.back) {
+      this.audio.uiBack();
       this.close();
     }
   }

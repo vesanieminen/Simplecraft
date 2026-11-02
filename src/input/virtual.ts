@@ -4,7 +4,7 @@
  * hardware — but note this does NOT replace physical-controller QA.
  */
 
-import { Action, ALL_ACTIONS, ControllerType, InputSource, RawFrame, Vec2 } from './types';
+import { Action, ActionGate, ALL_ACTIONS, ControllerType, InputSource, RawFrame, Vec2 } from './types';
 
 let counter = 0;
 
@@ -16,7 +16,8 @@ export class VirtualPadSource implements InputSource {
   private move: Vec2 = { x: 0, y: 0 };
   private look: Vec2 = { x: 0, y: 0 };
   private held = new Set<Action>();
-  private queued = new Set<Action>(); // one-frame taps
+  private queued = new Set<Action>(); // taps awaiting emission
+  private gate = new ActionGate();
 
   constructor(
     readonly id: string,
@@ -43,8 +44,8 @@ export class VirtualPadSource implements InputSource {
   /** press for exactly one frame */
   tap(...actions: Action[]): void {
     for (const a of actions) {
-      this.held.add(a);
       this.queued.add(a);
+      this.gate.flagFresh(a);
     }
   }
 
@@ -61,11 +62,11 @@ export class VirtualPadSource implements InputSource {
   }
 
   poll(): RawFrame {
-    const actions: Partial<Record<Action, boolean>> = {};
-    const all = new Set(this.held);
-    for (const a of this.queued) all.add(a);
-    for (const a of all) actions[a] = true;
+    const candidate = new Set(this.held);
+    for (const a of this.queued) candidate.add(a);
     this.queued.clear();
+    const actions: Partial<Record<Action, boolean>> = {};
+    for (const a of this.gate.filter(candidate)) actions[a] = true;
     return { move: { ...this.move }, look: { ...this.look }, actions };
   }
 

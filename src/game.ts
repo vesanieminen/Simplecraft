@@ -123,6 +123,7 @@ export class Game {
     });
     this.resize();
 
+    this.lastRevision = this.world.revision;
     this.loop(performance.now());
   }
 
@@ -148,6 +149,13 @@ export class Game {
   }
 
   private onSourceRemoved(s: InputSource): void {
+    // a pending join card dies with its controller
+    const pj = this.pendingJoins.get(s.id);
+    if (pj) {
+      pj.card.close();
+      this.pendingJoins.delete(s.id);
+      this.resize();
+    }
     const p = this.sourceToPlayer.get(s.id);
     if (!p) return;
     this.sourceToPlayer.delete(s.id);
@@ -232,7 +240,10 @@ export class Game {
     for (const [sid, pj] of this.pendingJoins) {
       const frame = this.input.frame(sid);
       pj.card.tick(frame, dt);
-      if (pj.card.closed) this.pendingJoins.delete(sid);
+      if (pj.card.closed) {
+        this.pendingJoins.delete(sid);
+        this.resize();
+      }
     }
 
     for (let i = 0; i < this.players.length; i++) {

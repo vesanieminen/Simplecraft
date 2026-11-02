@@ -36,7 +36,7 @@ export class PlayerEntity {
   pos: THREE.Vector3; // feet center
   vel = new THREE.Vector3();
   yaw = 0; // facing / camera yaw
-  pitch = 0.1;
+  pitch = -0.28; // look slightly down by default so kids aim at the ground
   flying = false;
   grounded = false;
   inWaterNow = false;

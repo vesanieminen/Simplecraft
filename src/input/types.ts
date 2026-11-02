@@ -67,3 +67,40 @@ export function applyDeadzone(x: number, y: number, dz: number): Vec2 {
   const k = eased / len;
   return { x: x * k, y: y * k };
 }
+
+/**
+ * Press gate: guarantees a release frame between consecutive presses of
+ * the same action, even when a harness dispatches keydown/keyup faster
+ * than the frame rate. Continuous physical holds pass through untouched.
+ */
+export class ActionGate {
+  private gap = new Map<Action, number>();
+  private fresh: Action[] = [];
+
+  /** mark a brand-new physical press */
+  flagFresh(...actions: Action[]): void {
+    this.fresh.push(...actions);
+  }
+
+  /** filter the candidate emissions for this poll (held set) */
+  filter(candidate: Set<Action>): Set<Action> {
+    const deferred: Action[] = [];
+    for (const a of this.fresh) {
+      if ((this.gap.get(a) ?? 0) > 0) {
+        deferred.push(a);
+        candidate.delete(a); // force the release frame
+      } else {
+        candidate.add(a);
+      }
+    }
+    this.fresh = deferred;
+    for (const a of candidate) this.gap.set(a, 1);
+    for (const [a, g] of [...this.gap]) {
+      if (!candidate.has(a)) {
+        if (g - 1 <= 0) this.gap.delete(a);
+        else this.gap.set(a, g - 1);
+      }
+    }
+    return candidate;
+  }
+}
