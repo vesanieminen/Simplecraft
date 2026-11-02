@@ -29,7 +29,8 @@ export class UiManager {
       <div class="welcome">
         <h1>🧱 Little Block World</h1>
         <div class="press">Press any button on a controller to join!</div>
-        <div class="sub" style="color:#fff;margin-top:10px">Keyboard: press Enter</div>
+        <div class="sub" style="color:#fff;margin-top:10px">Pick a world first: Y / △ (F)</div>
+        <div class="sub" style="color:#fff;margin-top:4px">Keyboard: press Enter to join, F for worlds</div>
       </div>`;
     this.pauseEl = document.createElement('div');
     this.pauseEl.className = 'pause-banner';

@@ -13,14 +13,13 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DATA_DIR = process.env.LBW_DATA_DIR ?? path.join(ROOT, 'world-data');
-const WORLD_FILE = path.join(DATA_DIR, 'world.json');
-const WORLD_BAK = path.join(DATA_DIR, 'world.bak.json');
 const PORT = Number(process.env.PORT ?? 3000);
 const IS_PROD = process.env.NODE_ENV === 'production';
 
 interface WorldSave {
   version: number;
   seed: number;
+  theme?: number;
   mods: Record<string, number>;
   collectedStars: number[];
 }
@@ -30,10 +29,11 @@ function validSave(x: unknown): x is WorldSave {
   const s = x as WorldSave;
   if (s.version !== 1) return false;
   if (typeof s.seed !== 'number' || !Number.isInteger(s.seed)) return false;
+  if (s.theme !== undefined && (typeof s.theme !== 'number' || !Number.isInteger(s.theme) || s.theme < 0 || s.theme > 64)) return false;
   if (!s.mods || typeof s.mods !== 'object') return false;
   for (const [k, v] of Object.entries(s.mods)) {
     const i = Number(k);
-    if (!Number.isInteger(i) || i < 0 || i > 2_500_000) return false;
+    if (!Number.isInteger(i) || i < 0 || i > 4_200_000) return false;
     if (typeof v !== 'number' || v < 0 || v > 255) return false;
   }
   if (!Array.isArray(s.collectedStars)) return false;
@@ -41,11 +41,24 @@ function validSave(x: unknown): x is WorldSave {
   return true;
 }
 
-function readWorld(): WorldSave | null {
-  for (const f of [WORLD_FILE, WORLD_BAK]) {
+function worldFile(seed: number, theme: number): string {
+  return path.join(DATA_DIR, `world-${seed}-${theme}.json`);
+}
+
+/** each saved world lives in its own file, keyed by seed + theme */
+function listWorldFiles(): string[] {
+  try {
+    return fs.readdirSync(DATA_DIR).filter((f) => /^world-.+-\d+\.json$/.test(f)).map((f) => path.join(DATA_DIR, f));
+  } catch {
+    return [];
+  }
+}
+
+function readWorld(seed: number, theme: number): WorldSave | null {
+  const primary = worldFile(seed, theme);
+  for (const f of [primary, primary.replace('.json', '.bak.json')]) {
     try {
-      const raw = fs.readFileSync(f, 'utf8');
-      const parsed = JSON.parse(raw);
+      const parsed = JSON.parse(fs.readFileSync(f, 'utf8'));
       if (validSave(parsed)) return parsed;
     } catch {
       // corrupt or missing — try the backup
@@ -56,12 +69,14 @@ function readWorld(): WorldSave | null {
 
 function writeWorld(save: WorldSave): void {
   fs.mkdirSync(DATA_DIR, { recursive: true });
+  const file = worldFile(save.seed, save.theme ?? 0);
+  const bak = file.replace('.json', '.bak.json');
   try {
-    if (fs.existsSync(WORLD_FILE)) fs.copyFileSync(WORLD_FILE, WORLD_BAK);
+    if (fs.existsSync(file)) fs.copyFileSync(file, bak);
   } catch { /* best effort */ }
-  const tmp = WORLD_FILE + '.tmp';
+  const tmp = file + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(save));
-  fs.renameSync(tmp, WORLD_FILE); // atomic on POSIX
+  fs.renameSync(tmp, file); // atomic on POSIX
 }
 
 async function main(): Promise<void> {
@@ -72,8 +87,15 @@ async function main(): Promise<void> {
     res.json({ ok: true, name: 'little-block-world' });
   });
 
-  app.get('/api/world', (_req: Request, res: Response) => {
-    res.json(readWorld());
+  // GET /api/world?seed=..&theme=.. — returns that world's saved edits (or null)
+  app.get('/api/world', (req: Request, res: Response) => {
+    const seed = Number(req.query.seed);
+    const theme = Number(req.query.theme) || 0;
+    if (!Number.isInteger(seed)) {
+      res.status(400).json({ error: 'seed required' });
+      return;
+    }
+    res.json(readWorld(seed, theme));
   });
 
   app.post('/api/world', (req, res) => {
@@ -83,14 +105,15 @@ async function main(): Promise<void> {
     }
     try {
       // merge: per-key last write wins, never lose another client's blocks
-      const prev = readWorld();
+      const theme = req.body.theme ?? 0;
+      const prev = readWorld(req.body.seed, theme);
       const incoming = req.body;
       if (!prev || prev.seed !== incoming.seed) {
         writeWorld(incoming);
       } else {
         const mods = { ...prev.mods, ...incoming.mods };
         const collectedStars = [...new Set([...prev.collectedStars, ...incoming.collectedStars])].sort((a, b) => a - b);
-        writeWorld({ version: 1, seed: incoming.seed, mods, collectedStars });
+        writeWorld({ version: 1, seed: incoming.seed, theme, mods, collectedStars });
       }
       res.json({ ok: true });
     } catch {
@@ -98,10 +121,18 @@ async function main(): Promise<void> {
     }
   });
 
-  app.post('/api/world/reset', (_req, res) => {
+  // POST /api/world/reset?seed=..&theme=.. — reset one world; no args = all worlds
+  app.post('/api/world/reset', (req, res) => {
     try {
-      for (const f of [WORLD_FILE, WORLD_BAK, WORLD_FILE + '.tmp']) {
-        if (fs.existsSync(f)) fs.unlinkSync(f);
+      const seedParam = req.query.seed;
+      if (seedParam !== undefined && seedParam !== '') {
+        const seed = Number(seedParam);
+        const theme = Number(req.query.theme) || 0;
+        for (const f of [worldFile(seed, theme), worldFile(seed, theme).replace('.json', '.bak.json')]) {
+          if (fs.existsSync(f)) fs.unlinkSync(f);
+        }
+      } else {
+        for (const f of listWorldFiles()) fs.unlinkSync(f);
       }
       res.json({ ok: true });
     } catch {

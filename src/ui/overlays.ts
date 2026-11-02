@@ -6,6 +6,8 @@
 
 import { BlockId, blockDef, FAVORITES, PALETTE } from '../core/blocks';
 import { AudioKit } from '../core/audio';
+import { computeHeights, themeOf, WORLD_THEMES } from '../core/terrain';
+import { WATER_LEVEL, WORLD_SX, WORLD_SZ } from '../core/world';
 import { ControllerType, FrameControls } from '../input/types';
 import { AVATAR_COLORS, NICKNAMES } from '../players/avatar';
 import { LocalPlayer } from '../players/localPlayer';
@@ -292,6 +294,7 @@ export interface GrownUpActions {
   toggleFreeze(): void;
   cycleLayout(): string;
   resetWorld(): void;
+  openWorlds(): void;
   frozen: () => boolean;
   layout: () => string;
 }
@@ -308,6 +311,7 @@ export class GrownUpsMenu extends Overlay {
     this.items = [
       { icon: '⏸️', label: 'Freeze Game', val: () => (actions.frozen() ? 'ON' : 'OFF'), fn: () => actions.toggleFreeze() },
       { icon: '🔀', label: 'Split Screen', val: () => actions.layout(), fn: () => actions.cycleLayout() },
+      { icon: '🌍', label: 'Choose World', fn: () => actions.openWorlds() },
       {
         icon: '🗑️',
         label: 'Reset World',
@@ -349,6 +353,135 @@ export class GrownUpsMenu extends Overlay {
     if (nav.up) { this.sel = (this.sel + this.items.length - 1) % this.items.length; this.audio.uiMove(); this.refresh(); }
     if (nav.confirm) { this.audio.uiSelect(); this.items[this.sel].fn(); this.refresh(); }
     if (nav.back) { this.audio.uiBack(); this.close(); }
+  }
+}
+
+// ------------------------------------------------------- world selection
+
+/**
+ * Draws a top-down map preview of a seed+theme onto a canvas using the
+ * same heightmap math as the real generator — instant, no 3D render needed.
+ */
+function drawWorldPreview(canvas: HTMLCanvasElement, seed: number, themeIdx: number): void {
+  const th = themeOf(themeIdx);
+  const heights = computeHeights(seed, th);
+  const water = WATER_LEVEL + th.waterDelta;
+  const img = canvas.getContext('2d')!.createImageData(WORLD_SX, WORLD_SZ);
+  const px = img.data;
+  for (let x = 0; x < WORLD_SX; x++) {
+    for (let z = 0; z < WORLD_SZ; z++) {
+      const h = heights[x * WORLD_SZ + z];
+      let r: number, g: number, b: number;
+      if (h < water) {
+        const deep = Math.min(1, (water - h) / 6);
+        r = 70 - deep * 30; g = 140 - deep * 50; b = 210 - deep * 40;
+      } else if (h <= water + 1) {
+        r = 235; g = 214; b = 150; // beach
+      } else if (h >= th.snowAbove) {
+        r = 245; g = 246; b = 250; // snow cap
+      } else if (h > th.rockAbove) {
+        const t = (h - th.rockAbove) * 3;
+        r = 150 - t; g = 155 - t; b = 162 - t; // bare rock
+      } else {
+        const t = (h - water) * 3;
+        r = 96 - t * 0.6; g = 180 - t * 1.2; b = 80 - t * 0.8; // meadow greens
+      }
+      const i = (z * WORLD_SX + x) * 4;
+      px[i] = r; px[i + 1] = g; px[i + 2] = b; px[i + 3] = 255;
+    }
+  }
+  canvas.getContext('2d')!.putImageData(img, 0, 0);
+}
+
+export class WorldSelectOverlay extends Overlay {
+  private seed: number;
+  private theme: number;
+  private sel = 0;
+  private rows: HTMLElement[] = [];
+  private canvas: HTMLCanvasElement;
+
+  constructor(
+    audio: AudioKit,
+    type: ControllerType,
+    curSeed: number,
+    curTheme: number,
+    private onStart: (seed: number, theme: number) => void,
+  ) {
+    super(audio, type);
+    this.seed = curSeed;
+    this.theme = curTheme % WORLD_THEMES.length;
+    const c = this.card('Choose a World');
+
+    this.canvas = document.createElement('canvas');
+    this.canvas.width = WORLD_SX;
+    this.canvas.height = WORLD_SZ;
+    this.canvas.className = 'world-preview';
+    c.appendChild(this.canvas);
+
+    const mk = (label: () => string): HTMLElement => {
+      const row = document.createElement('div');
+      row.className = 'menu-item';
+      row.innerHTML = `<span class="mi-arrow">◀</span><span class="mi-body">${label()}</span><span class="mi-arrow">▶</span>`;
+      this.rows.push(row);
+      return row;
+    };
+    const list = document.createElement('div');
+    list.className = 'menu-list';
+    list.appendChild(mk(() => `🌍 ${WORLD_THEMES[this.theme].icon} ${WORLD_THEMES[this.theme].name}`));
+    list.appendChild(mk(() => `🎲 Seed: ${this.seed}`));
+    list.appendChild(mk(() => `✨ Surprise me!`));
+    list.appendChild(mk(() => `▶ Start this world!`));
+    c.appendChild(list);
+
+    const k = btnLabels(type);
+    this.keys(c, [[k.ud, 'move'], [type === 'keyboard' ? 'Arrows' : k.lr, 'change'], [k.a, 'start'], [k.b, 'keep']]);
+    this.refresh();
+  }
+
+  private refresh(): void {
+    this.rows.forEach((r, i) => {
+      r.classList.toggle('sel', i === this.sel);
+      const body = r.querySelector('.mi-body');
+      if (body) {
+        body.textContent = i === 0 ? `🌍 ${WORLD_THEMES[this.theme].icon} ${WORLD_THEMES[this.theme].name}`
+          : i === 1 ? `🎲 Seed: ${this.seed}`
+          : i === 2 ? '✨ Surprise me!'
+          : '▶ Start this world!';
+      }
+    });
+    drawWorldPreview(this.canvas, this.seed, this.theme);
+  }
+
+  tick(frame: FrameControls, dt: number): void {
+    const nav = this.nav.tick(frame, dt);
+    let changed = false;
+    if (nav.down) { this.sel = (this.sel + 1) % this.rows.length; this.audio.uiMove(); }
+    if (nav.up) { this.sel = (this.sel + this.rows.length - 1) % this.rows.length; this.audio.uiMove(); }
+    if (nav.left || nav.right) {
+      const fwd = nav.right;
+      if (this.sel === 0) {
+        this.theme = (this.theme + (fwd ? 1 : WORLD_THEMES.length - 1)) % WORLD_THEMES.length;
+        changed = true;
+      } else if (this.sel === 1) {
+        this.seed += fwd ? 1 : -1;
+        changed = true;
+      }
+      this.audio.uiMove();
+    }
+    if (nav.confirm) {
+      if (this.sel === 2) {
+        this.seed = Math.floor(Math.random() * 90_000_000) + 1000;
+        this.audio.uiSelect();
+        changed = true;
+      } else {
+        this.audio.uiSelect();
+        this.onStart(this.seed, this.theme);
+        this.close();
+        return;
+      }
+    }
+    if (nav.back) { this.audio.uiBack(); this.close(); return; }
+    if (changed || nav.up || nav.down) this.refresh();
   }
 }
 
