@@ -9,9 +9,27 @@ export interface SkyEnv {
   update(dt: number): void;
 }
 
+export const SKY_RADIUS = 320;
+/** matches the fog, so the renderer can clear to it: nothing in this game should
+ *  ever be able to show the raw canvas, and a black gap frightens kids */
+export const SKY_CLEAR = 0xbfe0f5;
+/** Camera far plane. The dome is centred on the MIDDLE of the world, so the most
+ *  a camera can be from its centre is the half-diagonal (~91) plus the build
+ *  ceiling (~44) — stay well clear of dome + that, or three clips a hole in the
+ *  sky and the black canvas shows through it. */
+export const SKY_FAR = SKY_RADIUS + 200;
+
 export function createSky(scene: THREE.Scene): SkyEnv {
+  // The sky hangs around the middle of the world, not the coordinate origin: on a
+  // 128-block map the origin is a CORNER, and a dome centred there reaches 450
+  // blocks from a camera near spawn — past the far plane, which used to punch a
+  // black hole in the sky once the welcome camera had drifted around a little.
+  const sky = new THREE.Group();
+  sky.position.set(WORLD_SX / 2, 0, WORLD_SZ / 2);
+  scene.add(sky);
+
   // gradient dome
-  const domeGeo = new THREE.SphereGeometry(320, 24, 16);
+  const domeGeo = new THREE.SphereGeometry(SKY_RADIUS, 24, 16);
   const colors: number[] = [];
   const pos = domeGeo.attributes.position as THREE.BufferAttribute;
   const top = new THREE.Color(0.45, 0.68, 0.98);
@@ -19,7 +37,7 @@ export function createSky(scene: THREE.Scene): SkyEnv {
   const horizon = new THREE.Color(0.88, 0.95, 1.0);
   const c = new THREE.Color();
   for (let i = 0; i < pos.count; i++) {
-    const y = pos.getY(i) / 320; // -1..1
+    const y = pos.getY(i) / SKY_RADIUS; // -1..1
     if (y > 0.25) c.copy(mid).lerp(top, Math.min(1, (y - 0.25) / 0.6));
     else c.copy(horizon).lerp(mid, Math.max(0, (y + 0.15) / 0.4));
     colors.push(c.r, c.g, c.b);
@@ -29,15 +47,15 @@ export function createSky(scene: THREE.Scene): SkyEnv {
     domeGeo,
     new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false }),
   );
-  scene.add(dome);
+  sky.add(dome);
 
-  // sun
+  // sun (offset from the world centre, roughly where the key light comes from)
   const sun = new THREE.Mesh(
     new THREE.SphereGeometry(9, 16, 12),
     new THREE.MeshBasicMaterial({ color: 0xfff2a8, fog: false }),
   );
-  sun.position.set(120, 170, -90);
-  scene.add(sun);
+  sun.position.set(56, 170, -154);
+  sky.add(sun);
 
   scene.fog = new THREE.Fog(0xbfe0f5, 60, 240);
 

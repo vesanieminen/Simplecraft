@@ -24,6 +24,18 @@
 - `scripts/hero-shot.ts` and `scripts/feature-shots.ts` regenerate the README
   screenshots against a :3100 server; headless Chromium has no emoji font, so
   both scripts swap/strip emoji in the DOM before shooting.
+- Sky/camera invariant: the sky dome (radius `SKY_RADIUS`) is parented to a group
+  centred on the **middle** of the world — the coordinate origin is a map
+  *corner*, so centring the dome there puts its far side past the far plane and
+  three clips a black hole in the sky (it shows up seconds later, as the welcome
+  camera drifts). Every camera's far plane comes from `SKY_FAR` in
+  `src/render/sky.ts` and must stay bigger than `SKY_RADIUS` + the farthest a
+  camera can be from the world middle; `renderer.setClearColor(SKY_CLEAR)` is the
+  backstop so a gap reads as haze, not the void.
+- Visual regressions can be checked in e2e by decoding `page.screenshot()` into a
+  2D canvas in the page and counting offending pixels (see `blackPixels` in
+  `tests/e2e/game.spec.ts`); `gl.readPixels` is useless there because the
+  drawing buffer is already swapped.
 - Physical gamepad behaviour is verified manually (checklist in the README);
   virtual pads in tests exercise the same input abstraction, which is not a
   substitute for hardware QA.

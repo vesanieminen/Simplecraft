@@ -780,3 +780,71 @@ test('the ?seed= and ?world= url params choose the starting world', async ({ pag
   }));
   expect(state).toEqual({ seed: 4242, theme: 2, worldTheme: 2 });
 });
+
+// ------------------------------------------------------------ sky & rendering
+
+/**
+ * Counts pixels that are essentially pure black: the only way to see those is
+ * the canvas behind the scene, i.e. something got clipped out of the picture.
+ */
+async function blackPixels(page: Page): Promise<number> {
+  const png = await page.screenshot();
+  return page.evaluate(async (b64: string) => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${b64}`;
+    await img.decode();
+    const cv = document.createElement('canvas');
+    cv.width = img.width;
+    cv.height = img.height;
+    const ctx = cv.getContext('2d')!;
+    ctx.drawImage(img, 0, 0);
+    const d = ctx.getImageData(0, 0, cv.width, cv.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i] < 26 && d[i + 1] < 26 && d[i + 2] < 26) n++;
+    }
+    return n;
+  }, png.toString('base64'));
+}
+
+test('no black hole in the sky, wherever the camera looks', async ({ page }) => {
+  test.slow();
+  await boot(page);
+
+  // the symptom: a few seconds after loading, a black wedge appeared in the
+  // background once the welcome camera had drifted to where the sky dome hangs
+  // farthest away. Tiny tolerance for the odd dark animal pixel; the bug was
+  // ~10 000 pixels.
+  for (const angle of [0.5, 1.05, 2.6, 4.2, 5.8]) {
+    await page.evaluate((a: number) => { (window as any).__lbw.game.idleAngle = a; }, angle);
+    await frames(page, 3);
+    expect(await blackPixels(page), `welcome camera at angle ${angle}`).toBeLessThan(200);
+  }
+
+  // the invariant that keeps it fixed: the sky dome hangs over the MIDDLE of the
+  // world (the origin is a map corner), and every camera's far plane reaches
+  // past the dome from the farthest place a camera can be. Checked with a real
+  // player camera too, because that is what a kid walking to the map edge uses.
+  await joinWithPad(page);
+  const sky = await page.evaluate(() => {
+    const g = (window as any).__lbw.game;
+    const d = (window as any).__lbw.dims;
+    const group = g.scene.children.find((o: any) =>
+      o.children?.some((c: any) => c.isMesh && (c.geometry?.parameters?.radius ?? 0) > 100));
+    const dome = group.children.find((c: any) => c.isMesh && (c.geometry?.parameters?.radius ?? 0) > 100);
+    const [cx, cy, cz] = [group.position.x, group.position.y, group.position.z];
+    let farthestCam = 0;
+    for (const x of [0, d.sx]) for (const y of [0, d.sy]) for (const z of [0, d.sz]) {
+      farthestCam = Math.max(farthestCam, Math.hypot(x - cx, y - cy, z - cz));
+    }
+    const cams = [g.idleCamera, ...g.players.map((p: any) => p.camera)];
+    return {
+      centre: [cx, cy, cz], worldMiddle: [d.sx / 2, 0, d.sz / 2],
+      radius: dome.geometry.parameters.radius,
+      farthestPossibleDomeDistance: farthestCam + dome.geometry.parameters.radius,
+      farPlanes: cams.map((c: any) => c.far),
+    };
+  });
+  expect(sky.centre).toEqual(sky.worldMiddle);
+  for (const far of sky.farPlanes) expect(sky.farthestPossibleDomeDistance).toBeLessThan(far);
+});

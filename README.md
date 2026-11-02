@@ -172,7 +172,7 @@ a block above the water, place a block or dig a step to make a stair.
 
 ## Testing status (honest)
 
-Automated (Playwright, real Chromium, 22 tests): game loads error-free,
+Automated (Playwright, real Chromium, 23 tests): game loads error-free,
 keyboard-only join, controller join/move/jump/build/cycle, palette with
 D-pad, per-player menu + fly toggle, split-screen activation, 2×2
 four-player grid, independent movement, one player's palette not pausing
@@ -184,8 +184,10 @@ really work (Freeze stops the whole world dead, split-screen layouts cycle
 through Smart/Left-Right/Up-Down/2×2, Reset World wipes edits, Choose World
 starts a new theme+seed and the preview canvas actually paints a map), the
 welcome-screen world picker (theme, surprise seed, start), menu
-sub-screens receiving controller input, `?seed=…&world=…` handling, and
-walking into a pond then **hopping back out** with the jump button held.
+sub-screens receiving controller input, `?seed=…&world=…` handling,
+walking into a pond then **hopping back out** with the jump button held,
+and a **screenshot check that the sky has no black holes** wherever the
+camera looks.
 
 ```bash
 npm test          # e2e suite (starts its own server on :3100)
