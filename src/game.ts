@@ -436,14 +436,26 @@ export class Game {
 
   // ------------------------------------------------------------ persistence
 
+  // ---------------------------------------------------------- GH Pages build
+  // When the game is hosted statically (no local server), /api/world does not
+  // exist: we detect that once and keep all saves in the browser (localStorage)
+  // so the game stays fully playable.
+  private serverBacked = true;
+
+  private api(path: string): string {
+    // relative: works at '/' in dev and under '/Simplecraft/' on GH Pages
+    return `api/${path}`;
+  }
+
   private async loadSave(): Promise<WorldSaveData | null> {
     try {
-      const r = await fetch('/api/world');
-      if (!r.ok) throw new Error(String(r.status));
-      const data = (await r.json()) as WorldSaveData | null;
+      const r = await fetch(this.api('world'));
+      const data = r.ok ? (await r.json()) as WorldSaveData | null : null;
       if (data && data.mods) return data;
+      if (!r.ok) throw new Error(String(r.status));
       return null;
     } catch {
+      this.serverBacked = false; // static hosting or server down: browser-only mode
       const cached = localStorage.getItem('lbw-world');
       if (cached) {
         try { return JSON.parse(cached) as WorldSaveData; } catch { /* corrupted cache */ }
@@ -461,19 +473,24 @@ export class Game {
     const save = this.world.toSave();
     try {
       localStorage.setItem('lbw-world', JSON.stringify(save));
-      await fetch('/api/world', {
+    } catch { /* storage full/unavailable */ }
+    if (!this.serverBacked) return; // GH Pages / browser-only mode
+    try {
+      const r = await fetch(this.api('world'), {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(save),
       });
+      if (!r.ok) this.serverBacked = false;
     } catch {
-      // offline: keep the localStorage copy
+      // server went away: keep the localStorage copy, stop hitting the API
+      this.serverBacked = false;
     }
   }
 
   async resetWorld(): Promise<void> {
     try {
-      await fetch('/api/world/reset', { method: 'POST' });
+      await fetch(this.api('world/reset'), { method: 'POST' });
     } catch { /* ignore */ }
     localStorage.removeItem('lbw-world');
     const seed = this.world.seed;

@@ -92,7 +92,9 @@ export class LocalPlayer {
   update(dt: number, frame: FrameControls, hooks: WorldHooks, worldMenuBlock: boolean): void {
     // ---- look ----
     if (!worldMenuBlock) {
-      this.entity.yaw += frame.look.x * LOOK_RATE * this.sensitivity * dt;
+      // turning right must rotate aim toward the player's right (yaw decreases
+      // with dir=(sin yaw, cos yaw)); verified against strafe-right convention
+      this.entity.yaw -= frame.look.x * LOOK_RATE * this.sensitivity * dt;
       this.entity.pitch -= frame.look.y * LOOK_RATE * this.sensitivity * dt;
       const maxPitch = Math.PI / 2 - 0.05;
       this.entity.pitch = Math.max(-maxPitch, Math.min(maxPitch, this.entity.pitch));

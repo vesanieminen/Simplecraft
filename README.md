@@ -5,6 +5,9 @@
 A colorful, controller-first voxel sandbox for kids — inspired by Minecraft
 Creative mode, built for a 5-year-old and a parent on one couch.
 
+- 🎮 **Play online right now:** <https://vesanieminen.github.io/Simplecraft/>
+  (in-browser save, see [How the world saves](#how-the-world-saves) — a split-screen
+  couch session also works on one machine with two controllers plugged into it)
 - No accounts, no internet needed after install, no external services.
 - Two controllers on one computer = instant split screen (up to 4 players).
 - A world that saves itself and survives restarts.
@@ -81,6 +84,10 @@ Q/R cycle blocks · F palette · E pet animals · Esc menu · Enter confirm.
 
 ## How the world saves
 
+- **On the GitHub Pages site** the game runs entirely in your browser: the
+  world is saved in that browser's local storage (per computer, per
+  browser). Great for playing instantly; for a shared family world, run
+  the game from a computer at home as below.
 - The terrain you start with is generated from a **seed** (default
   `20261102`). Only player edits (blocks placed/removed, stars collected)
   are stored — a few KB, not the whole world.

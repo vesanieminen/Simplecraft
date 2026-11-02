@@ -189,6 +189,29 @@ test('RT places a block and LT removes it', async ({ page }) => {
   expect(removed).toBe(true);
 });
 
+test('right stick turns the view right (and stick up looks up)', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page);
+  await page.evaluate(() => (window as any).__testPad.set('jump', false));
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 5000 });
+  const y0 = await page.evaluate(() => (window as any).__lbw.game.players[0].entity.yaw);
+  // hold the right stick RIGHT for 300ms
+  await page.evaluate(() => (window as any).__testPad.setLook(1, 0));
+  await page.waitForTimeout(300);
+  await page.evaluate(() => (window as any).__testPad.setLook(0, 0));
+  const y1 = await page.evaluate(() => (window as any).__lbw.game.players[0].entity.yaw);
+  // dir=(sin yaw, cos yaw): turning right means yaw decreases
+  expect(y1).toBeLessThan(y0);
+
+  // stick UP (negative axis) must look up (pitch increases)
+  const p0 = await page.evaluate(() => (window as any).__lbw.game.players[0].entity.pitch);
+  await page.evaluate(() => (window as any).__testPad.setLook(0, -1));
+  await page.waitForTimeout(300);
+  await page.evaluate(() => (window as any).__testPad.setLook(0, 0));
+  const p1 = await page.evaluate(() => (window as any).__lbw.game.players[0].entity.pitch);
+  expect(p1).toBeGreaterThan(p0);
+});
+
 test('world modifications persist across a page reload', async ({ page }) => {
   await boot(page);
   await joinWithPad(page);
