@@ -23,6 +23,15 @@ interface WorldSave {
   mods: Record<string, number>;
   collectedStars: number[];
   doorFacing?: Record<string, number>;
+  savedAt?: number;
+}
+
+/** what GET /api/world/list hands back, one entry per saved world */
+interface SavedWorldInfo {
+  seed: number;
+  theme: number;
+  savedAt: number;
+  mods: number;
 }
 
 function validSave(x: unknown): x is WorldSave {
@@ -46,6 +55,7 @@ function validSave(x: unknown): x is WorldSave {
       if (v !== 0 && v !== 1) return false;
     }
   }
+  if (s.savedAt !== undefined && typeof s.savedAt !== 'number') return false;
   return true;
 }
 
@@ -56,10 +66,31 @@ function worldFile(seed: number, theme: number): string {
 /** each saved world lives in its own file, keyed by seed + theme */
 function listWorldFiles(): string[] {
   try {
-    return fs.readdirSync(DATA_DIR).filter((f) => /^world-.+-\d+\.json$/.test(f)).map((f) => path.join(DATA_DIR, f));
+    // includes .bak.json siblings: anything that deletes worlds must delete those too
+    return fs.readdirSync(DATA_DIR).filter((f) => /^world-.+\.json$/.test(f)).map((f) => path.join(DATA_DIR, f));
   } catch {
     return [];
   }
+}
+
+/** one row per real (non-backup) saved world, newest saved first */
+function listWorldInfos(): SavedWorldInfo[] {
+  const out: SavedWorldInfo[] = [];
+  for (const f of listWorldFiles()) {
+    if (f.endsWith('.bak.json')) continue;
+    try {
+      const s = JSON.parse(fs.readFileSync(f, 'utf8')) as WorldSave;
+      if (!Number.isInteger(s.seed)) continue;
+      out.push({
+        seed: s.seed,
+        theme: s.theme ?? 0,
+        savedAt: s.savedAt ?? fs.statSync(f).mtimeMs,
+        mods: Object.keys(s.mods ?? {}).length,
+      });
+    } catch { /* corrupt file: it will fall back to its backup when played */ }
+  }
+  out.sort((a, b) => b.savedAt - a.savedAt);
+  return out;
 }
 
 function readWorld(seed: number, theme: number): WorldSave | null {
@@ -106,6 +137,11 @@ async function main(): Promise<void> {
     res.json(readWorld(seed, theme));
   });
 
+  // GET /api/world/list — every saved world (seed, theme, last saved, edits)
+  app.get('/api/world/list', (_req, res) => {
+    res.json(listWorldInfos());
+  });
+
   app.post('/api/world', (req, res) => {
     if (!validSave(req.body)) {
       res.status(400).json({ error: 'bad save' });
@@ -117,12 +153,15 @@ async function main(): Promise<void> {
       const prev = readWorld(req.body.seed, theme);
       const incoming = req.body;
       if (!prev || prev.seed !== incoming.seed) {
-        writeWorld(incoming);
+        writeWorld({ ...incoming, theme, savedAt: incoming.savedAt ?? Date.now() });
       } else {
         const mods = { ...prev.mods, ...incoming.mods };
         const collectedStars = [...new Set([...prev.collectedStars, ...incoming.collectedStars])].sort((a, b) => a - b);
         const doorFacing = { ...prev.doorFacing, ...incoming.doorFacing };
-        writeWorld({ version: 2, seed: incoming.seed, theme, mods, collectedStars, doorFacing });
+        writeWorld({
+          version: 2, seed: incoming.seed, theme, mods, collectedStars, doorFacing,
+          savedAt: Math.max(prev.savedAt ?? 0, incoming.savedAt ?? 0) || Date.now(),
+        });
       }
       res.json({ ok: true });
     } catch {

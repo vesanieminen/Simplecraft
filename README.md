@@ -39,6 +39,27 @@ keyboard) to open the world chooser:
   World*, and the URL takes both: `?seed=12345&world=2`
   (`world` = 0 Meadow, 1 Islands, 2 Mountains, 3 Deep Forest).
 
+## My Worlds (saved games)
+
+Because every world autosaves, the game keeps a list of them all:
+**💾 My Worlds** — from *Start → Grown-Ups → My Worlds*, or *📚 My saved
+worlds* inside the world chooser at the welcome screen.
+
+- Every world you have ever played is listed, most recent first, with a map
+  preview, the world theme, the seed, how many blocks are saved, and how long
+  ago you last played.
+- Highlight a world and press **A** to move the whole family into it — the
+  builds come back exactly as you left them, saplings keep growing and lit
+  dynamite keeps burning. Players start at the world's spawn point.
+- 💾 **Save this world now** for grown-ups who want the belt *and* braces
+  (autosave already fires a second after any change).
+- 🗑 **Delete**: highlight a world and press **Y / △** (or **F**) — the row
+  answers **SURE?** and a second press wipes that world for good. Moving the
+  cursor away cancels; nothing else can be deleted by mistake.
+- On the GitHub Pages site this list comes from that browser's storage; on
+  the home server it comes from the server (plus anything you saved while it
+  was briefly asleep).
+
 ## Launch
 
 ```bash
@@ -263,14 +284,18 @@ running out, so children learn to run clear without anyone having to tell them.
   `world-data/world-<seed>-<world>.json` (atomic write + backup + corruption
   recovery), with a browser-cache fallback if the server is briefly
   unreachable. Each world you choose gets its own file, so nobody overwrites
-  anybody else's house.
+  anybody else's house. `GET /api/world/list` returns the saved worlds (seed,
+  theme, last saved, edit count) for the My Worlds menu; a small
+  `lbw-world-index` localStorage key does the same job when there is no
+  server.
 - Restart the server any time; your buildings are still there.
 - **Reset the world** deliberately from *Start → Grown-Ups → Reset World*
   (asks twice).
 - Grown-Up Settings (Start → 🧑 Grown-Ups) also has **Freeze Game** — the
   whole world stops dead, animals and players included, so a parent can
   pause the adventure — **Choose World** to move the family to a new
-  world/theme/seed mid-game, and the **Split Screen** switch
+  world/theme/seed mid-game, **My Worlds** to play an old saved world again,
+  and the **Split Screen** switch
   (Smart · Left/Right · Up/Down · 2×2 Grid).
 - Use a different world per family with `?seed=12345&world=1` in the URL
   (each world + seed gets its own saved edits).
@@ -350,8 +375,9 @@ npm run typecheck
 sticks, building, palette, menus, split screen and waking a sleeping
 controller. The items below are what to re-check after any input change; the
 **swapped LT/RT build/break mapping**, the new **door / stairs / sapling**
-blocks, the **first-person visibility fix** and the **Leave / Waiting
-Players** rows all still owe the couch a turn. Virtual pads in the automated tests drive
+blocks, the **first-person visibility fix**, the **Leave / Waiting
+Players** rows, and the new **My Worlds** saved-game list all still owe the
+couch a turn. Virtual pads in the automated tests drive
 the exact same input abstraction (dead zones, edge detection, button mapping
 all shared) — a good regression net, still not a substitute for hardware QA.
 
@@ -381,7 +407,12 @@ all shared) — a good regression net, still not a substitute for hardware QA.
 7. Start menu → Fly ON → A rises, X descends, gentle landing.
 8. Start → Grown-Ups: **Freeze Game** stops players *and* animals dead
    (menus still work), **Split Screen** cycles the layout, **Choose World**
-   opens the picker, **Reset World** asks twice.
+   opens the picker, **Reset World** asks twice. Open **💾 My Worlds**: the
+   D-pad walks the saved-world list and the map picture follows the
+   highlight, **A** on a world loads it, **Y / △** on a world asks once
+   (**SURE?**) and deletes on the second press, and from the welcome
+   screen's chooser **📚 My saved worlds** ↔ **🌍 New world…** swap
+   back and forth.
 9. Unplug a controller mid-game → "controller asleep" appears → plug in
    (or press another pad) → same character resumes.
 10. Start → 🚪 **Leave** → press **A** twice: that half of the screen closes,
@@ -396,8 +427,8 @@ Implemented: a 128 × 128 × 64 voxel world (four world themes + any seed,
 picked on a screen with a live map preview), building, textured plants,
 eight kinds of animals, doors, stairs, saplings that grow into trees,
 stars, special blocks, audio, particles, complete controller UX,
-2–4 player split screen, per-world persistence, and remembered
-grown-up settings.
+2–4 player split screen, per-world persistence with a saved-worlds menu, and
+remembered grown-up settings.
 
 Next (designed for): LAN multiplayer — the architecture already separates
 *local player*, *remote player*, *controller*, *camera*, and *network

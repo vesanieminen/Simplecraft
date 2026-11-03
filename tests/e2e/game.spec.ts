@@ -490,8 +490,9 @@ test('grown-ups can send controller-asleep players home', async ({ page }) => {
   expect(await page.evaluate(() => document.querySelectorAll('.pane').length)).toBe(2);
 
   await openGrownUpsMenu(page);
-  await selectRow(page, 4); // Waiting Players
-  expect(await page.evaluate(() => [...document.querySelectorAll('.menu-item')][4].textContent)).toContain('asleep');
+  await selectRow(page, 5); // Waiting Players
+  expect(await page.evaluate(() => [...document.querySelectorAll('.menu-item')]
+    .find((r) => (r.textContent ?? '').includes('Waiting Players'))?.textContent)).toContain('asleep');
   await tap(page, 'jump'); // first press only arms it
   expect(await page.evaluate(() => (window as any).__lbw.game.players.length)).toBe(2);
   await tap(page, 'jump'); // second press sends them home
@@ -782,7 +783,7 @@ test('grown-up menu: freeze pauses the world, split screen cycles, reset clears 
   expect(new Set(layouts).size).toBe(4);
   expect(layouts).toContain('grid2x2');
 
-  await selectRow(page, 3); // Reset World: first tap arms, second wipes
+  await selectRow(page, 4); // Reset World: first tap arms, second wipes
   await tap(page, 'jump');
   await page.waitForTimeout(200);
   expect(await page.evaluate(() => (window as any).__lbw.game.world.mods.size)).toBeGreaterThan(0);
@@ -819,7 +820,7 @@ test('grown-up menu: Choose World opens the preview picker and starts a new worl
   expect(variety).toBeGreaterThan(12);
 
   await tap(page, 'right'); // next theme
-  await selectRow(page, 3); // Start this world
+  await selectRow(page, 4); // Start this world (row 3 is My saved worlds now)
   await tap(page, 'jump');
   await page.waitForSelector('.world-preview', { state: 'detached' });
 
@@ -860,7 +861,7 @@ test('world picker at the welcome screen picks a theme, a surprise seed and star
   expect(Number.isInteger(shownSeed)).toBe(true);
   expect(shownSeed).toBeGreaterThan(0);
 
-  await selectRow(page, 3); // Start
+  await selectRow(page, 4); // Start (row 3 is My saved worlds now)
   await tap(page, 'jump');
   await page.waitForSelector('.world-preview', { state: 'detached' });
   const state = await page.evaluate(() => ({
@@ -872,6 +873,154 @@ test('world picker at the welcome screen picks a theme, a surprise seed and star
   expect(state.theme).toBe(1);
   expect(state.worldTheme).toBe(1);
   // back to the welcome screen, ready to join
+  await expect(page.locator('.welcome')).toBeVisible();
+});
+
+/** labels of the world rows in the My Worlds list (world rows end in "N built") */
+async function worldRows(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('.overlay-card .menu-item > span:first-child')]
+      .map((e) => e.textContent ?? '')
+      .filter((t) => t.includes(' built')),
+  );
+}
+
+/** index of the menu row whose text contains `needle` (row order is dynamic) */
+async function rowIndexOf(page: Page, needle: string): Promise<number> {
+  return page.evaluate((s: string) => {
+    const rows = [...document.querySelectorAll('.overlay-card .menu-item')];
+    return rows.findIndex((r) => (r.textContent ?? '').includes(s));
+  }, needle);
+}
+
+test('My Worlds menu lists saved worlds, plays one back with builds intact, and deletes it', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 10000 });
+
+  // a landmark in the home world, saved on purpose
+  const home = await page.evaluate(() => ({
+    seed: (window as any).__lbw.game.seed,
+    theme: (window as any).__lbw.game.theme,
+  }));
+  const homeLabel = `Meadow · seed ${home.seed}`;
+  await page.evaluate(() => (window as any).__lbw.game.world.set(33, 30, 33, 21));
+  await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); });
+
+  // leave home: start the same seed fresh — the landmark is out of sight now
+  await openGrownUpsMenu(page);
+  await selectRow(page, 2); // Choose World
+  await tap(page, 'jump');
+  await page.waitForSelector('.world-preview');
+  await selectRow(page, 4); // Start this world
+  await tap(page, 'jump');
+  await page.waitForSelector('.world-preview', { state: 'detached' });
+  await page.waitForFunction('window.__lbw.game.world.get(33, 30, 33) === 0', null, { timeout: 20000 });
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 12000 });
+
+  // My Worlds: the home world is in the list; A on its row plays it back
+  await openGrownUpsMenu(page);
+  await selectRow(page, 3); // My Worlds
+  await tap(page, 'jump');
+  await page.waitForSelector('.overlay-card:has-text("My Worlds")');
+  const hasHome = async () => (await worldRows(page)).some((t) => t.includes(homeLabel));
+  await expect.poll(hasHome, { timeout: 10000 }).toBe(true);
+
+  await selectRow(page, await rowIndexOf(page, homeLabel));
+  await tap(page, 'jump'); // A on a world row = play!
+  await page.waitForFunction(
+    (s: { seed: number; theme: number }) => {
+      const g = (window as any).__lbw.game;
+      return g.seed === s.seed && g.theme === s.theme && g.world.get(33, 30, 33) === 21;
+    },
+    home, { timeout: 20000 },
+  );
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 12000 });
+
+  // move on to an Islands world: two saved worlds now, newest first
+  await openGrownUpsMenu(page);
+  await selectRow(page, 2); // Choose World
+  await tap(page, 'jump');
+  await page.waitForSelector('.world-preview');
+  await tap(page, 'right'); // theme -> Islands
+  await selectRow(page, 4); // Start this world
+  await tap(page, 'jump');
+  await page.waitForSelector('.world-preview', { state: 'detached' });
+  await page.waitForFunction('window.__lbw.game.theme === 1', null, { timeout: 10000 });
+  await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); });
+
+  await openGrownUpsMenu(page);
+  await selectRow(page, 3); // My Worlds
+  await tap(page, 'jump');
+  await page.waitForSelector('.overlay-card:has-text("My Worlds")');
+  const islandsLabel = `Islands · seed ${home.seed}`;
+  const hasBoth = async () => {
+    const rows = await worldRows(page);
+    return rows.some((t) => t.includes(homeLabel)) && rows.some((t) => t.includes(islandsLabel));
+  };
+  await expect.poll(hasBoth, { timeout: 10000 }).toBe(true);
+
+  // belt and braces: Save this world now
+  await selectRow(page, await rowIndexOf(page, 'Save this world now'));
+  await tap(page, 'jump');
+  await expect(page.locator('.toast')).toContainText('World saved');
+
+  // delete the Meadow home world: highlight its row and press Y (palette
+  // button) twice — first press arms 'SURE?' on that row, second deletes it
+  await selectRow(page, await rowIndexOf(page, homeLabel));
+  await tap(page, 'palette');
+  const sureRow = page.locator('.menu-item', { hasText: homeLabel });
+  await expect(sureRow).toContainText('SURE?');
+  await tap(page, 'palette');
+  await page.waitForFunction(
+    async (s: { seed: number; theme: number }) => {
+      const r = await fetch(`/api/world?seed=${s.seed}&theme=${s.theme}`);
+      return (await r.json()) === null;
+    },
+    home, { timeout: 10000 },
+  );
+  await expect.poll(hasHome, { timeout: 15000 }).toBe(false);
+
+  // back out, and the game is still running in the Islands world
+  await selectRow(page, await rowIndexOf(page, 'Back'));
+  await tap(page, 'jump');
+  const state = await page.evaluate(() => ({
+    theme: (window as any).__lbw.game.theme,
+    players: (window as any).__lbw.game.players.length,
+    overlays: (window as any).__lbw.game.overlays.size,
+  }));
+  expect(state).toEqual({ theme: 1, players: 1, overlays: 0 });
+});
+
+test('the welcome world picker swaps to the saved-worlds list and back', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await page.evaluate(() => {
+    const pad = (window as any).__lbw.addVirtualPad();
+    (window as any).__testPad = pad;
+    pad.tap('palette');
+  });
+  await page.waitForSelector('.world-preview');
+  await selectRow(page, 3); // My saved worlds
+  await tap(page, 'jump');
+  await page.waitForSelector('.overlay-card:has-text("My Worlds")');
+
+  await selectRow(page, await rowIndexOf(page, 'New world…'));
+  await tap(page, 'jump'); // New world… swaps the picker back in
+  await page.waitForSelector('.world-preview');
+  await expect(page.locator('.mi-body', { hasText: 'Start this world' })).toBeVisible();
+
+  // the picker still works after the round trip
+  await tap(page, 'right'); // theme -> Islands
+  await selectRow(page, 4); // Start this world
+  await tap(page, 'jump');
+  await page.waitForSelector('.world-preview', { state: 'detached' });
+  const state = await page.evaluate(() => ({
+    theme: (window as any).__lbw.game.theme,
+    worldTheme: (window as any).__lbw.game.world.theme,
+  }));
+  expect(state).toEqual({ theme: 1, worldTheme: 1 });
   await expect(page.locator('.welcome')).toBeVisible();
 });
 

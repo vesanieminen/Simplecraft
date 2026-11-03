@@ -33,6 +33,18 @@ export interface WorldSaveData {
    * stands where the kid meant it to. Added in version 2.
    */
   doorFacing?: Record<string, number>;
+  /** wall-clock ms of the last write, for the "My Worlds" last-played list */
+  savedAt?: number;
+}
+
+/** one row in the saved-worlds list (My Worlds menu): enough to pick a world */
+export interface SavedWorldInfo {
+  seed: number;
+  theme: number;
+  /** when this world was last saved (wall-clock ms) */
+  savedAt?: number;
+  /** how many saved edits the world has ("blocks built") */
+  mods?: number;
 }
 
 export class World {

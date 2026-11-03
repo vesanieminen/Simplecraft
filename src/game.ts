@@ -17,10 +17,10 @@ import { ParticleSystem } from './core/particles';
 import { RayHit } from './core/raycast';
 import { blockAabb, boxesOverlap, playerAabb } from './core/physics';
 import { DEFAULT_SEED, generateTerrain, plantTree, themeOf, WORLD_THEMES } from './core/terrain';
-import { idx as worldIdx, World, WorldSaveData, WORLD_SX, WORLD_SY, WORLD_SZ } from './core/world';
+import { idx as worldIdx, SavedWorldInfo, World, WorldSaveData, WORLD_SX, WORLD_SY, WORLD_SZ } from './core/world';
 import { InputManager } from './input/inputManager';
 import { KeyboardSource } from './input/keyboard';
-import { InputSource, FrameControls, emptyFrame } from './input/types';
+import { ControllerType, InputSource, FrameControls, emptyFrame } from './input/types';
 import { VirtualPadSource } from './input/virtual';
 import { LocalPlayer } from './players/localPlayer';
 import { PlayerEntity } from './players/playerEntity';
@@ -30,7 +30,8 @@ import { createSky, SKY_CLEAR, SKY_FAR, SkyEnv } from './render/sky';
 import { SplitLayout, ViewportManager } from './render/viewportManager';
 import { Hud } from './ui/hud';
 import {
-  GrownUpsMenu, HelpOverlay, JoinCard, Overlay, PaletteOverlay, PlayerMenu, ReconnectOverlay, WorldSelectOverlay,
+  GrownUpsMenu, HelpOverlay, JoinCard, MyWorldsActions, MyWorldsOverlay, Overlay, PaletteOverlay,
+  PlayerMenu, ReconnectOverlay, WorldSelectOverlay,
 } from './ui/overlays';
 import { UiManager } from './ui/uiManager';
 
@@ -80,7 +81,8 @@ export class Game {
   theme = 0;
 
   private spawnPoint = new THREE.Vector3(WORLD_SX / 2, 12, WORLD_SZ / 2);
-  private welcomePicker: { sid: string; overlay: WorldSelectOverlay } | null = null;
+  /** the welcome-screen world menu (new-world picker or the saved-worlds list) */
+  private welcomePicker: { sid: string; overlay: Overlay } | null = null;
   private idleAngle = 0;
   /** slow orbit camera used while nobody has joined (welcome + world picker backdrop) */
   private idleCamera = new THREE.PerspectiveCamera(70, 16 / 9, 0.1, SKY_FAR);
@@ -426,6 +428,7 @@ export class Game {
             },
             resetWorld: () => void this.resetWorld(),
             openWorlds: () => { this.openWorldPickerFor(p); },
+            openMyWorlds: () => { this.openMyWorldsFor(p); },
             sendWaitingHome: () => this.sendWaitingHome(),
             waiting: () => this.waitingLabel(),
             frozen: () => this.frozen,
@@ -455,11 +458,30 @@ export class Game {
         this.applyNewWorld(seed, theme);
         this.ui.toast(`${themeOf(theme).icon} ${themeOf(theme).name} world — seed ${seed}!`);
       },
+      () => this.openWelcomeSavedWorlds(),
     );
     this.welcomePicker = { sid: s.id, overlay: o };
     this.ui.showWelcome(false);
     this.ui.addOverlay(0, o);
     this.resize();
+  }
+
+  /** welcome screen: swap the new-world picker for the list of saved worlds */
+  private openWelcomeSavedWorlds(): void {
+    if (!this.welcomePicker) return;
+    const sid = this.welcomePicker.sid;
+    this.welcomePicker.overlay.close();
+    this.ui.clearOverlays(0);
+    const o = new MyWorldsOverlay(
+      this.audio, this.controllerTypeOf(sid), this.seed, this.theme,
+      this.myWorldsActions(() => {
+        // "New world…" from the list: swap the fresh-world picker back in
+        const s = this.input.sources.get(sid);
+        if (s) this.openWelcomeWorldPicker(s);
+      }),
+    );
+    this.welcomePicker = { sid, overlay: o };
+    this.ui.addOverlay(0, o);
   }
 
   private openWorldPickerFor(p: LocalPlayer): void {
@@ -473,6 +495,20 @@ export class Game {
         this.applyNewWorld(seed, theme);
         this.ui.toast(`${themeOf(theme).icon} ${themeOf(theme).name} world — seed ${seed}!`);
       },
+      () => this.openMyWorldsFor(p),
+    );
+    this.overlays.set(p.entity.id, o);
+    this.ui.addOverlay(idx, o);
+  }
+
+  /** the My Worlds list, riding this player's overlay slot */
+  private openMyWorldsFor(p: LocalPlayer): void {
+    const idx = this.players.indexOf(p);
+    this.overlays.get(p.entity.id)?.close();
+    this.ui.clearOverlays(idx);
+    const o = new MyWorldsOverlay(
+      this.audio, this.typeOf(p), this.seed, this.theme,
+      this.myWorldsActions(() => this.openWorldPickerFor(p)),
     );
     this.overlays.set(p.entity.id, o);
     this.ui.addOverlay(idx, o);
@@ -486,9 +522,28 @@ export class Game {
     this.ui.addOverlay(idx, pal);
   }
 
+  private controllerTypeOf(sid: string): ControllerType {
+    return this.input.sources.get(sid)?.controllerType ?? 'generic';
+  }
+
   private typeOf(p: LocalPlayer): 'xbox' | 'playstation' | 'generic' | 'keyboard' {
-    const s = this.input.sources.get(this.sourceIdOf(p));
-    return s?.controllerType ?? 'generic';
+    return this.controllerTypeOf(this.sourceIdOf(p));
+  }
+
+  /** the button wiring for the My Worlds list; openNewWorld adds its "🌍 New world…" row */
+  private myWorldsActions(openNewWorld?: () => void): MyWorldsActions {
+    return {
+      list: () => this.fetchWorldList(),
+      play: (seed, theme) => void this.loadSavedWorld(seed, theme),
+      remove: (seed, theme) => this.deleteWorld(seed, theme).then(() => {
+        this.ui.toast('That world is gone — a fresh field for new ideas 🗑');
+      }),
+      saveNow: async () => {
+        await this.saveNow();
+        this.ui.toast('World saved! 💾');
+      },
+      openNewWorld,
+    };
   }
 
   private removePlayer(p: LocalPlayer): void {
@@ -814,6 +869,52 @@ export class Game {
     return `lbw-world-${seed}-${theme}`;
   }
 
+  /**
+   * A small browser-side index of every world this machine has saved.
+   * It powers the My Worlds list when there is no server (GH Pages) and
+   * remembers worlds saved while the server was briefly away.
+   */
+  private worldIndexKey = 'lbw-world-index';
+
+  private readWorldIndex(): Map<string, SavedWorldInfo> {
+    try {
+      const raw = localStorage.getItem(this.worldIndexKey);
+      if (!raw) return new Map();
+      const obj = JSON.parse(raw) as Record<string, SavedWorldInfo>;
+      return new Map(Object.entries(obj));
+    } catch {
+      return new Map(); // corrupted index: start fresh
+    }
+  }
+
+  private writeWorldIndex(idx: Map<string, SavedWorldInfo>): void {
+    try {
+      localStorage.setItem(this.worldIndexKey, JSON.stringify(Object.fromEntries(idx)));
+    } catch { /* storage unavailable */ }
+  }
+
+  private updateWorldIndex(save: WorldSaveData): void {
+    const idx = this.readWorldIndex();
+    idx.set(`${save.seed}-${save.theme ?? 0}`, {
+      seed: save.seed,
+      theme: save.theme ?? 0,
+      savedAt: save.savedAt ?? Date.now(),
+      mods: Object.keys(save.mods).length,
+    });
+    // keep it a family-sized list: a dozen most-recent worlds
+    const stale = [...idx.entries()]
+      .sort((a, b) => (b[1].savedAt ?? 0) - (a[1].savedAt ?? 0))
+      .slice(12);
+    for (const [k] of stale) idx.delete(k);
+    this.writeWorldIndex(idx);
+  }
+
+  private dropFromWorldIndex(seed: number, theme: number): void {
+    const idx = this.readWorldIndex();
+    idx.delete(`${seed}-${theme}`);
+    this.writeWorldIndex(idx);
+  }
+
   private async loadSave(): Promise<WorldSaveData | null> {
     try {
       const r = await fetch(this.api(`world?seed=${this.seed}&theme=${this.theme}`));
@@ -831,6 +932,31 @@ export class Game {
     }
   }
 
+  /** every saved world, most recently played first: server list + offline finds */
+  async fetchWorldList(): Promise<SavedWorldInfo[]> {
+    if (this.serverBacked) {
+      try {
+        const r = await fetch(this.api('world/list'));
+        if (r.ok) {
+          const list = (await r.json()) as SavedWorldInfo[];
+          if (Array.isArray(list)) {
+            const seen = new Set(list.map((w) => `${w.seed}-${w.theme ?? 0}`));
+            for (const [key, w] of this.readWorldIndex()) {
+              if (!seen.has(key)) list.push(w); // saved while offline: still real
+            }
+            return list.sort((a, b) => (b.savedAt ?? 0) - (a.savedAt ?? 0));
+          }
+        } else {
+          this.serverBacked = false;
+        }
+      } catch {
+        this.serverBacked = false; // server went away: the browser keeps its own list
+      }
+    }
+    return [...this.readWorldIndex().values()]
+      .sort((a, b) => (b.savedAt ?? 0) - (a.savedAt ?? 0));
+  }
+
   private scheduleSave(): void {
     if (this.saveTimer !== undefined) clearTimeout(this.saveTimer);
     this.saveTimer = window.setTimeout(() => this.saveNow(), 1500);
@@ -838,6 +964,8 @@ export class Game {
 
   async saveNow(): Promise<void> {
     const save = this.world.toSave();
+    save.savedAt = Date.now();
+    this.updateWorldIndex(save);
     try {
       localStorage.setItem(this.storageKey(), JSON.stringify(save));
     } catch { /* storage full/unavailable */ }
@@ -855,13 +983,56 @@ export class Game {
     }
   }
 
+  /**
+   * Play an old saved world again: fetch its save (server first, browser
+   * cache as fallback) and move the whole game into it. Every player
+   * respawns at the world's spawn, so nobody ends up inside a wall.
+   */
+  async loadSavedWorld(seed: number, theme: number): Promise<void> {
+    await this.saveNow(); // belt and braces: keep the world we are leaving safe
+    let save: WorldSaveData | null = null;
+    if (this.serverBacked) {
+      try {
+        const r = await fetch(this.api(`world?seed=${seed}&theme=${theme}`));
+        if (r.ok) save = (await r.json()) as WorldSaveData | null;
+        else this.serverBacked = false;
+      } catch {
+        this.serverBacked = false;
+      }
+    }
+    if (!save) {
+      const cached = localStorage.getItem(this.storageKey(seed, theme));
+      if (cached) {
+        try { save = JSON.parse(cached) as WorldSaveData; } catch { /* corrupted cache */ }
+      }
+    }
+    this.applyNewWorld(seed, theme, save);
+    this.ui.toast(`${themeOf(theme).icon} Back in ${themeOf(theme).name} world — seed ${seed}!`);
+  }
+
+  /** wipe one saved world: server file, browser cache and the index entry */
+  async deleteWorld(seed: number, theme: number): Promise<void> {
+    if (this.serverBacked) {
+      try {
+        const r = await fetch(this.api(`world/reset?seed=${seed}&theme=${theme}`), { method: 'POST' });
+        if (!r.ok) this.serverBacked = false;
+      } catch {
+        this.serverBacked = false;
+      }
+    }
+    localStorage.removeItem(this.storageKey(seed, theme));
+    this.dropFromWorldIndex(seed, theme);
+  }
+
   /** fresh terrain for a (new) seed+theme, reusing the same World object so
-   *  players/chunks keep valid references */
-  applyNewWorld(seed: number, theme: number): void {
+   *  players/chunks keep valid references. A save can ride along: it lands
+   *  on top of the generated terrain, exactly like at boot. */
+  applyNewWorld(seed: number, theme: number, restore?: WorldSaveData | null): void {
     this.seed = seed;
     this.theme = theme;
     this.world.resetFor(seed, theme);
     const gen = generateTerrain(this.world, themeOf(theme));
+    if (restore) this.world.applySave(restore);
     this.spawnPoint.set(gen.spawnX, gen.spawnY, gen.spawnZ);
     this.chunks.rebuildAll();
     // rebuild stars & animals against the new world
@@ -872,9 +1043,15 @@ export class Game {
     this.sparkleBlocks.clear();
     this.saplings.clear();
     this.dynamite.clear(); // no half-burnt sticks from the old world, please
+    // living things and lit fuses that came with a save wake up, same as at boot
+    for (const [i, b] of this.world.mods) {
+      if (blockDef(b).sparkle) this.sparkleBlocks.add(i);
+      if (b === SAPLING) this.saplings.set(i, -this.saplingGrowSeconds + 10);
+    }
+    this.dynamite.restoreFromWorld();
     for (const p of this.players) p.respawnAt(this.spawnPoint.clone());
     this.lastRevision = this.world.revision;
-    void this.saveNow(); // remember the empty new world
+    void this.saveNow(); // remember the (possibly just restored) world
   }
 
   async resetWorld(): Promise<void> {
@@ -882,6 +1059,7 @@ export class Game {
       await fetch(this.api(`world/reset?seed=${this.seed}&theme=${this.theme}`), { method: 'POST' });
     } catch { /* ignore */ }
     localStorage.removeItem(this.storageKey());
+    this.dropFromWorldIndex(this.seed, this.theme);
     this.applyNewWorld(this.seed, this.theme);
     this.ui.toast('Fresh new world! 🌍');
   }
