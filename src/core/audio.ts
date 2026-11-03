@@ -3,6 +3,9 @@
  * no external assets, all original.
  */
 
+// type-only, so there is no import cycle with core/animals.ts (which uses AudioKit)
+import type { AnimalKind } from './animals';
+
 export class AudioKit {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
@@ -174,7 +177,7 @@ export class AudioKit {
     [440, 554, 659].forEach((f, i) => this.tone('triangle', f, f, 0.18, 0.18, i * 0.08));
   }
 
-  animal(kind: 'sheep' | 'bunny' | 'chicken' | 'cow'): void {
+  animal(kind: AnimalKind): void {
     switch (kind) {
       case 'sheep':
         this.tone('sawtooth', 300, 220, 0.28, 0.08);
@@ -188,6 +191,27 @@ export class AudioKit {
         break;
       case 'cow':
         this.tone('sawtooth', 150, 115, 0.5, 0.09);
+        break;
+      case 'pig':
+        // two oinks: short grunt, then the happy upward squeal
+        this.tone('sawtooth', 210, 170, 0.1, 0.09);
+        this.tone('sawtooth', 240, 330, 0.16, 0.08, 0.12);
+        break;
+      case 'horse':
+        // whinny: a loud neigh that slides down, then snorts
+        this.tone('sawtooth', 520, 340, 0.3, 0.1);
+        this.tone('sawtooth', 380, 260, 0.22, 0.07, 0.26);
+        this.noise(0.12, 0.05, 900, 0.5);
+        break;
+      case 'cat':
+        // meow: bright, rising-then-falling
+        this.tone('sine', 620, 780, 0.14, 0.1);
+        this.tone('sine', 760, 540, 0.22, 0.09, 0.14);
+        break;
+      case 'fox':
+        // the fox's two-syllable yip
+        this.tone('square', 660, 880, 0.08, 0.07);
+        this.tone('square', 820, 600, 0.12, 0.06, 0.11);
         break;
     }
   }

@@ -1,6 +1,7 @@
 /**
- * Friendly voxel animals: sheep, bunnies, chickens, cows.
- * They wander near their birth spot, hop when petted, never hurt anyone.
+ * Friendly voxel animals: sheep, bunnies, chickens, cows, pigs, horses,
+ * cats and foxes. They wander near their birth spot, hop when petted,
+ * never hurt anyone.
  */
 
 import * as THREE from 'three';
@@ -9,7 +10,7 @@ import { World, WORLD_SX, WORLD_SZ } from './world';
 import { ParticleSystem } from './particles';
 import { AudioKit } from './audio';
 
-export type AnimalKind = 'sheep' | 'bunny' | 'chicken' | 'cow';
+export type AnimalKind = 'sheep' | 'bunny' | 'chicken' | 'cow' | 'pig' | 'horse' | 'cat' | 'fox';
 
 interface AnimalDefArt {
   body: number;
@@ -22,6 +23,10 @@ const ART: Record<AnimalKind, AnimalDefArt> = {
   bunny: { body: 0xffe9e0, head: 0xffe9e0, scale: 0.62 },
   chicken: { body: 0xffffff, head: 0xffffff, scale: 0.55 },
   cow: { body: 0xf5f0e8, head: 0x454b57, scale: 1.25 },
+  pig: { body: 0xffa7c4, head: 0xffa7c4, scale: 0.9 },
+  horse: { body: 0xb07a4a, head: 0x9a6738, scale: 1.45 },
+  cat: { body: 0xf2a65d, head: 0xf2a65d, scale: 0.5 },
+  fox: { body: 0xe8814a, head: 0xe8814a, scale: 0.65 },
 };
 
 export class Animal {
@@ -104,13 +109,92 @@ export class Animal {
         g.add(horn);
       }
     }
+    if (kind === 'pig') {
+      // flat snout, flicked-up ears and a curly little tail
+      const pink = new THREE.MeshLambertMaterial({ color: 0xff86b0 });
+      const snout = new THREE.Mesh(new THREE.BoxGeometry(0.2 * s, 0.14 * s, 0.08 * s), pink);
+      snout.position.set(0, 0.82 * s, 0.72 * s);
+      g.add(snout);
+      for (const ex of [-0.13, 0.13]) {
+        const ear = new THREE.Mesh(new THREE.BoxGeometry(0.12 * s, 0.14 * s, 0.06 * s), headMat);
+        ear.position.set(ex * s, 1.12 * s, 0.48 * s);
+        ear.rotation.x = -0.4;
+        g.add(ear);
+      }
+      for (const [tx, ty, tz] of [[0, 0.66, -0.52], [0.07, 0.73, -0.58], [0, 0.8, -0.62]] as const) {
+        const curl = new THREE.Mesh(new THREE.BoxGeometry(0.06 * s, 0.06 * s, 0.06 * s), pink);
+        curl.position.set(tx * s, ty * s, tz * s);
+        g.add(curl);
+      }
+    }
+    if (kind === 'horse') {
+      // dark mane along the neck, a tail, pricked ears and a white blaze
+      const dark = new THREE.MeshLambertMaterial({ color: 0x5f4023 });
+      const mane = new THREE.Mesh(new THREE.BoxGeometry(0.1 * s, 0.42 * s, 0.62 * s), dark);
+      mane.position.set(0, 1.08 * s, 0.16 * s);
+      g.add(mane);
+      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.12 * s, 0.62 * s, 0.12 * s), dark);
+      tail.position.set(0, 0.55 * s, -0.56 * s);
+      g.add(tail);
+      for (const ex of [-0.12, 0.12]) {
+        const ear = new THREE.Mesh(new THREE.BoxGeometry(0.08 * s, 0.16 * s, 0.06 * s), headMat);
+        ear.position.set(ex * s, 1.14 * s, 0.5 * s);
+        g.add(ear);
+      }
+      const blaze = new THREE.Mesh(new THREE.BoxGeometry(0.1 * s, 0.3 * s, 0.03 * s), new THREE.MeshLambertMaterial({ color: 0xfaf3ea }));
+      blaze.position.set(0, 0.86 * s, 0.71 * s);
+      g.add(blaze);
+    }
+    if (kind === 'cat') {
+      // pointy ears, white chest, pink nose and a tail standing up
+      for (const ex of [-0.13, 0.13]) {
+        const ear = new THREE.Mesh(new THREE.BoxGeometry(0.1 * s, 0.16 * s, 0.06 * s), bodyMat);
+        ear.position.set(ex * s, 1.16 * s, 0.46 * s);
+        g.add(ear);
+      }
+      const white = new THREE.MeshLambertMaterial({ color: 0xfff3e6 });
+      const chest = new THREE.Mesh(new THREE.BoxGeometry(0.3 * s, 0.32 * s, 0.06 * s), white);
+      chest.position.set(0, 0.6 * s, 0.45 * s);
+      g.add(chest);
+      const nose = new THREE.Mesh(new THREE.BoxGeometry(0.06 * s, 0.04 * s, 0.03 * s), new THREE.MeshLambertMaterial({ color: 0xff8fa3 }));
+      nose.position.set(0, 0.85 * s, 0.71 * s);
+      g.add(nose);
+      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.08 * s, 0.52 * s, 0.08 * s), new THREE.MeshLambertMaterial({ color: 0xd9853f }));
+      tail.position.set(0, 0.72 * s, -0.52 * s);
+      tail.rotation.x = -0.3; // tail standing up — a happy cat
+      g.add(tail);
+    }
+    if (kind === 'fox') {
+      // big dark-tipped ears, white chest fluff and a big white-tipped tail
+      const white = new THREE.MeshLambertMaterial({ color: 0xfff6ea });
+      for (const ex of [-0.15, 0.15]) {
+        const ear = new THREE.Mesh(new THREE.BoxGeometry(0.14 * s, 0.2 * s, 0.06 * s), bodyMat);
+        ear.position.set(ex * s, 1.16 * s, 0.46 * s);
+        g.add(ear);
+        const tip = new THREE.Mesh(new THREE.BoxGeometry(0.09 * s, 0.08 * s, 0.07 * s), new THREE.MeshLambertMaterial({ color: 0x3a2a20 }));
+        tip.position.set(ex * s, 1.26 * s, 0.46 * s);
+        g.add(tip);
+      }
+      const chest = new THREE.Mesh(new THREE.BoxGeometry(0.4 * s, 0.4 * s, 0.06 * s), white);
+      chest.position.set(0, 0.6 * s, 0.46 * s);
+      g.add(chest);
+      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.16 * s, 0.16 * s, 0.5 * s), bodyMat);
+      tail.position.set(0, 0.56 * s, -0.72 * s);
+      g.add(tail);
+      const tailTip = new THREE.Mesh(new THREE.BoxGeometry(0.18 * s, 0.18 * s, 0.14 * s), white);
+      tailTip.position.set(0, 0.56 * s, -1.0 * s);
+      g.add(tailTip);
+    }
 
-    // legs
-    const legMat = new THREE.MeshLambertMaterial({ color: kind === 'sheep' || kind === 'cow' ? 0x565d68 : art.body });
+    // legs — a horse gets slim dark stockings, the rest keep their body colour
+    const legW = kind === 'horse' ? 0.12 : 0.16;
+    const legMat = new THREE.MeshLambertMaterial({
+      color: kind === 'sheep' || kind === 'cow' ? 0x565d68 : kind === 'horse' ? 0x4a331c : art.body,
+    });
     for (const [lx, lz] of [[-0.22, 0.3], [0.22, 0.3], [-0.22, -0.3], [0.22, -0.3]]) {
       const pivot = new THREE.Object3D();
       pivot.position.set(lx * s, 0.42 * s, lz * s);
-      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.16 * s, 0.42 * s, 0.16 * s), legMat);
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(legW * s, 0.42 * s, legW * s), legMat);
       leg.position.y = -0.21 * s;
       pivot.add(leg);
       g.add(pivot);
@@ -261,7 +345,12 @@ export class AnimalWorld {
     spawnX: number,
     spawnZ: number,
   ) {
-    const kinds: AnimalKind[] = ['sheep', 'bunny', 'chicken', 'cow'];
+    // the whole barnyard — farm regulars are drawn a little more often
+    // than the shy critters, so every kind stays a pleasant surprise
+    const kinds: AnimalKind[] = [
+      'sheep', 'sheep', 'bunny', 'bunny', 'chicken', 'chicken', 'cow', 'cow',
+      'pig', 'pig', 'horse', 'cat', 'cat', 'fox',
+    ];
     let seed = (world.seed ^ 0x5eed) & 0x7fffffff;
     const rnd = () => {
       seed = (seed * 1103515245 + 12345) & 0x7fffffff;
@@ -269,7 +358,7 @@ export class AnimalWorld {
     };
     let placed = 0;
     let tries = 0;
-    while (placed < 28 && tries < 1400) {
+    while (placed < 38 && tries < 1600) {
       tries++;
       const x = 4 + rnd() * (WORLD_SX - 8);
       const z = 4 + rnd() * (WORLD_SZ - 8);
