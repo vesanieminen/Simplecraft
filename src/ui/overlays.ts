@@ -181,6 +181,7 @@ export class PaletteOverlay extends Overlay {
 
   private refresh(): void {
     this.cells.forEach((el, i) => el.classList.toggle('sel', i === this.sel));
+    this.cells[this.sel]?.scrollIntoView({ block: 'nearest' });
   }
 
   private move(d: number): void {
@@ -287,6 +288,7 @@ export class PlayerMenu extends Overlay {
       const v = r.querySelector('.mi-val');
       if (v) v.textContent = this.items[i].val?.() ?? '';
     });
+    this.rows[this.sel]?.scrollIntoView({ block: 'nearest' });
   }
 
   tick(frame: FrameControls, dt: number): void {
@@ -370,6 +372,7 @@ export class GrownUpsMenu extends Overlay {
       const v = r.querySelector('.mi-val');
       if (v) v.textContent = this.items[i].val?.() ?? '';
     });
+    this.rows[this.sel]?.scrollIntoView({ block: 'nearest' });
   }
 
   tick(frame: FrameControls, dt: number): void {
@@ -516,10 +519,10 @@ const PAD_ROWS: [string, string][] = [
   ['LEFT STICK', 'Walk around'],
   ['RIGHT STICK', 'Look / aim'],
   ['A', 'Jump'],
-  ['RT', 'Place block'],
-  ['LT', 'Break block'],
+  ['LT', 'Place block'],
+  ['RT', 'Break block'],
   ['LB / RB', 'Prev / next block'],
-  ['X', 'Pet animals'],
+  ['X', 'Pet animals · open doors'],
   ['Y', 'Block palette'],
   ['START', 'Menu'],
   ['B', 'Back'],

@@ -92,6 +92,10 @@ html, body {
   max-width: 92%; max-height: 92%;
   box-shadow: 0 10px 0 rgba(38, 48, 61, 0.25);
 }
+/* In a stacked split screen the pane is only half (or a quarter) as tall, so a
+ * long list must scroll inside the card instead of spilling over the top
+ * player's pane. The menus keep the selected row scrolled into view. */
+.card .menu-list, .card .palette-grid { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .card h2 { margin: 0; font-size: calc(24px * var(--ui-scale, 1)); color: var(--ink); }
 .card .sub { color: rgba(38, 48, 61, 0.75); font-size: calc(14px * var(--ui-scale, 1)); }
 
