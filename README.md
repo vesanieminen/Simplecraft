@@ -114,7 +114,9 @@ milestone; see Roadmap. Today, each computer gets the same saved world.)
 | B / ◯ | Back / close |
 
 Everything is doable with a controller only — joining, palettes, menus,
-settings, help, everything.
+settings, help, everything. The block palette is a real grid: **left/right**
+step through blocks and **up/down** jump a whole row, so finding the one you
+want is four presses, not twenty.
 
 ## Keyboard & mouse (optional)
 
@@ -141,11 +143,15 @@ different things so both just work).
 
 New in the palette (Y / △), right next to the planks they're built from:
 
-- **🚪 Door** — one block, painted with panels, hinges and a brass knob.
-  Press **X / ☐ / E** while looking at it and it swings open with a wooden
-  creak: closed it keeps the rain (and cows) out, open it's a thin panel
-  you walk through. It stands the way you placed it, and it *remembers*
-  which way it opens across saves and restarts.
+- **🚪 Door** — **two blocks high and half a block thick**, painted like a
+  real door: two panels below, a tall panel with a little window above,
+  hinges on one side and a brass knob at hand height. One press of the build
+  trigger puts the whole thing in — no stacking blocks to size it. Press
+  **X / ☐ / E** while looking at any part of it and the whole door swings
+  open with a wooden creak: closed it keeps the rain (and cows) out, open
+  it's a thin standing panel you walk straight through. Break any half and
+  the whole door comes down. It stands the way you placed it, and it
+  *remembers* which way it opens across saves and restarts.
 - **🪜 Stairs** — a chunky wooden half-step. Walk into one and you simply
   step up onto it: no jumping, no fiddling, from every side. Rows of them
   make real staircases, and one makes a friendly kerb anywhere.
@@ -291,7 +297,7 @@ running out, so children learn to run clear without anyone having to tell them.
 
 ## Testing status (honest)
 
-Automated (Playwright, real Chromium, 40 tests): game loads error-free,
+Automated (Playwright, real Chromium, 42 tests): game loads error-free,
 keyboard-only join, controller join/move/jump/build/cycle, palette with
 D-pad, per-player menu + fly toggle, split-screen activation, 2×2
 four-player grid, independent movement, one player's palette not pausing
@@ -318,10 +324,16 @@ atlas is decoded in the page and every cell must be drawn and different from
 all the others, painted blocks must really reach the textured mesh channels
 (including see-through glass and water), and the avatars must be wearing
 cloth, denim and a jumper front. And no black hole in the sky, from any angle.
-New this round: a door gets built with the build trigger, stops a walking
-kid while closed, swings open under the pet button, lets them walk through,
-closes from the other side and appears in the v2 save with its swing;
-stairs **step you up automatically** while walking; a planted sapling grows
+New this round: a **two-block-high, half-a-block-deep door** gets built with
+one press of the build trigger, stops a walking kid right at the panel (not
+half a block short of it), swings open under the pet button, lets them walk
+through, closes from the other side, comes down as a whole door when any half
+is broken, and reappears after a reload from the v2 save with its swing;
+the **block palette** really walks its grid — left/right step cells, up/down
+jump whole rows and wrap; **releasing the mouse button stops building** (the
+endless auto-placing bug: the swap left `mouseup` on the old mapping, so a
+released right button stayed held forever); stairs **step you up automatically**
+while walking; a planted sapling grows
 into a recorded full tree; **first person** hides a body from its own camera
 via three.js layers while every other camera keeps seeing it; the 10-row
 player menu really **fits inside a half-height stacked pane**; grown-up
@@ -356,10 +368,14 @@ all shared) — a good regression net, still not a substitute for hardware QA.
 5. Walk up to a flower and hold **RT** — it pops into particles (and the
    block behind it survives, so you can also dig the ground under it).
    Walk up to a sheep and tap **X** — it hops and beeps.
-5b. Place a **door**, look at it, tap **X**: it swings open with a creak, walk
-   through, tap X from the other side to close it. Walk into a **stairs**
+5b. Place a **door**: it should stand two blocks high out of one press, half
+   a block thick. Look at it (any half) and tap **X**: the whole door swings
+   open with a creak, walk through, tap X from the other side to close it.
+   Break the top half: the whole door comes down. Walk into a **stairs**
    block: you step up without jumping. Plant a **sapling**, wait a moment:
-   a tree. Check these on the pad, not just in the automated tests.
+   a tree. In the **block palette**, check the D-pad really goes up/down as
+   well as left/right. Check all of this on the pad, not just in the
+   automated tests, and build/break a few times with the swapped triggers.
 6. Walk into a lake and hold **A** — you kick up to the surface, then hop out
    onto the bank instead of paddling in circles (works from the Islands sea too).
 7. Start menu → Fly ON → A rises, X descends, gentle landing.
