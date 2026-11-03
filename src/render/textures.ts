@@ -13,7 +13,7 @@
 
 import * as THREE from 'three';
 import {
-  ATLAS_BOUNCY, ATLAS_BRICKS, ATLAS_CELL_COUNT, ATLAS_DIRT, ATLAS_DOOR, ATLAS_DYNAMITE_CAP,
+  ATLAS_BOUNCY, ATLAS_BRICKS, ATLAS_CELL_COUNT, ATLAS_DIRT, ATLAS_DOOR, ATLAS_DOOR_TOP, ATLAS_DYNAMITE_CAP,
   ATLAS_DYNAMITE_SIDE, ATLAS_GLASS, ATLAS_GLOW, ATLAS_GRASS_SIDE, ATLAS_GRASS_TOP,
   ATLAS_LEAVES, ATLAS_LOG_END, ATLAS_LOG_SIDE, ATLAS_MUSIC, ATLAS_PLANKS, ATLAS_ROCK,
   ATLAS_SAND, ATLAS_SCORCH, ATLAS_SPARKLE, ATLAS_STONE, ATLAS_WATER, ATLAS_WEAVE,
@@ -420,6 +420,34 @@ function drawDoor(ctx: CanvasRenderingContext2D, ox: number): void {
   ctx.fillRect(ox + 26, 15, 1, 1);
 }
 
+/**
+ * The upper half of the two-block door: the same slab and frame, one tall
+ * panel, and a little window so a kid can see who is on the other side.
+ */
+function drawDoorTop(ctx: CanvasRenderingContext2D, ox: number): void {
+  rect(ctx, ox, 0, 0, S, S, '#c98d52'); // the door slab
+  for (const x of [2, 10, 18, 26]) rect(ctx, ox, x, 1, 1, S - 2, '#a86e3a'); // board gaps
+  speckle(ctx, ox, '#b87c44', 0.06, 71);
+  rect(ctx, ox, 0, 0, S, 2, '#e0aa70'); // frame top
+  rect(ctx, ox, 0, S - 2, S, 2, '#8a5a2c'); // frame bottom (shadow side)
+  rect(ctx, ox, 0, 0, 2, S, '#e0aa70'); // frame left…
+  rect(ctx, ox, S - 2, 0, 2, S, '#8a5a2c'); // …and right
+  // one tall recessed panel, same style as the lower half's panels
+  rect(ctx, ox, 5, 5, 22, 22, '#d9a766');
+  rect(ctx, ox, 5, 5, 22, 1, '#96632f');
+  rect(ctx, ox, 5, 5, 1, 22, '#96632f');
+  rect(ctx, ox, 5, 26, 22, 1, '#efd0a0');
+  rect(ctx, ox, 26, 5, 1, 22, '#efd0a0');
+  // the window: dark reveal, pale glass, glazing bars and one bright pane
+  rect(ctx, ox, 9, 9, 14, 14, '#6c4f30');
+  rect(ctx, ox, 10, 10, 12, 12, '#cfe6f2');
+  rect(ctx, ox, 10, 10, 12, 1, '#9fc4d8');
+  rect(ctx, ox, 15, 10, 1, 12, '#7d9fb3');
+  rect(ctx, ox, 10, 15, 12, 1, '#7d9fb3');
+  ctx.fillStyle = '#f4fbff';
+  ctx.fillRect(ox + 11, 11, 3, 3);
+}
+
 // --- see-through and special blocks -----------------------------------------
 
 /** leaves: chunky green lumps with darker veins and gaps */
@@ -565,6 +593,7 @@ const BLOCK_ART: Record<number, CellArt> = {
   [ATLAS_SCORCH]: drawScorch,
   [ATLAS_WEAVE]: drawWeave,
   [ATLAS_DOOR]: drawDoor,
+  [ATLAS_DOOR_TOP]: drawDoorTop,
 };
 
 let cachedBlock: THREE.CanvasTexture | null = null;

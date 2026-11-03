@@ -6,8 +6,8 @@
 
 import * as THREE from 'three';
 import {
-  ATLAS_CELL_COUNT, ATLAS_PLANKS, blockDef, isCrossBlock, isOpaqueBlock, isTranslucentBlock,
-  DOOR_OPEN, PLANT_ATLAS_CELLS, STAIRS,
+  ATLAS_CELL_COUNT, ATLAS_DOOR, ATLAS_PLANKS, blockDef, isCrossBlock, isDoorBlock,
+  isDoorClosedBlock, isOpaqueBlock, isTranslucentBlock, PLANT_ATLAS_CELLS, STAIRS,
 } from './blocks';
 import { CHUNK, idx as worldIdx, WORLD_SY, World } from './world';
 
@@ -179,16 +179,14 @@ export function buildChunkGeometry(world: World, cx: number, cz: number): ChunkG
             def.sideAtlasCell ?? ATLAS_PLANKS, true);
           continue;
         }
-        if (id === DOOR_OPEN) {
-          // an opened door: a thin standing panel, oriented by the way the
-          // door was placed (world.doorFacing). It touches no cell boundary,
-          // so none of its faces can ever be hidden by neighbours.
-          const facing = world.doorFacing.get(worldIdx(x, y, z)) ?? 0;
-          const t = 0.09;
-          const box: [number, number, number, number, number, number] = facing === 0
-            ? [x + 0.5 - t, y, z, x + 0.5 + t, y + 1, z + 1]
-            : [x, y, z + 0.5 - t, x + 1, y + 1, z + 0.5 + t];
-          addTexturedSubBox(tex, world, [x, y, z], box, def.sideAtlasCell ?? 0, false);
+        if (isDoorBlock(id)) {
+          // A door is two cells tall (DOOR + DOOR_TOP) and its panel is only
+          // half a block deep, standing in the middle of its cell while closed
+          // and swung flat along the doorway while open. doorFacing says which
+          // axis it is thin along. Open halves are never solid, so you walk
+          // straight through them.
+          const box = doorPanelBox(world, x, y, z)!;
+          addTexturedSubBox(tex, world, [x, y, z], box, def.sideAtlasCell ?? ATLAS_DOOR, true);
           continue;
         }
 
@@ -280,8 +278,53 @@ function faceUvs(
 }
 
 /**
+ * The painted panel of a door half — the shape the mesher draws and the
+ * physics box a closed one collides as (see physics.solidBoxOf). A door is
+ * two cells tall (the pair of halves), half a block deep, centred in its cell
+ * while closed and swung flat against one side of the doorway while open.
+ * Null when the cell holds no door.
+ */
+function doorPanelBox(
+  world: World, x: number, y: number, z: number,
+): [number, number, number, number, number, number] | null {
+  const id = world.get(x, y, z);
+  if (!isDoorBlock(id)) return null;
+  const facing = world.doorFacing.get(worldIdx(x, y, z)) ?? 0;
+  if (isDoorClosedBlock(id)) {
+    return facing === 0
+      ? [x + 0.25, y, z, x + 0.75, y + 1, z + 1]
+      : [x, y, z + 0.25, x + 1, y + 1, z + 0.75];
+  }
+  return facing === 0
+    ? [x, y, z, x + 1, y + 1, z + 0.5]
+    : [x, y, z, x + 0.5, y + 1, z + 1];
+}
+
+/**
+ * Doors are not opaque (a wall beside one keeps its own faces), so the generic
+ * flush cull cannot see them. But the two halves of a door — and two doors
+ * standing side by side — share a face exactly, and drawing it twice makes the
+ * seam flicker. True when the neighbouring door's panel covers this very face.
+ */
+function doorSeamCovers(
+  world: World,
+  box: [number, number, number, number, number, number],
+  cx: number, cy: number, cz: number,
+  fi: number,
+): boolean {
+  const f = FACES[fi];
+  const nb = doorPanelBox(world, cx + f.dir[0], cy + f.dir[1], cz + f.dir[2]);
+  if (!nb) return false;
+  const E = 1e-6;
+  const same = (a: number, b: number): boolean => Math.abs(a - b) < E;
+  if (fi === 0 || fi === 1) return same(nb[1], box[1]) && same(nb[4], box[4]) && same(nb[2], box[2]) && same(nb[5], box[5]);
+  if (fi === 2 || fi === 3) return same(nb[0], box[0]) && same(nb[3], box[3]) && same(nb[2], box[2]) && same(nb[5], box[5]);
+  return same(nb[0], box[0]) && same(nb[3], box[3]) && same(nb[1], box[1]) && same(nb[4], box[4]);
+}
+
+/**
  * A painted box smaller than a full cell — the mesher's shape language for
- * "not a cube" blocks (stairs steps, opened door panels). One atlas cell
+ * "not a cube" blocks (stairs steps, door panels). One atlas cell
  * covers it; faces that sit flush on the cell border are culled against
  * opaque neighbours when `cullFlush`, and shading is face-angle only (no AO:
  * these shapes are small enough that it would only muddy them).
@@ -305,7 +348,8 @@ function addTexturedSubBox(
   ];
   for (let fi = 0; fi < 6; fi++) {
     const f = FACES[fi];
-    if (cullFlush && flush[fi] && isOpaqueBlock(world.get(cx + f.dir[0], cy + f.dir[1], cz + f.dir[2]))) continue;
+    if (cullFlush && flush[fi]
+      && (isOpaqueBlock(world.get(cx + f.dir[0], cy + f.dir[1], cz + f.dir[2])) || doorSeamCovers(world, box, cx, cy, cz, fi))) continue;
     const shade = FACE_SHADE[fi] * vary;
     const tint: [number, number, number][] = [
       [shade, shade, shade], [shade, shade, shade], [shade, shade, shade], [shade, shade, shade],

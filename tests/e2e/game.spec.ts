@@ -1372,13 +1372,18 @@ async function placeSelected(page: Page, blockId: number): Promise<Cell> {
     const t = (window as any).__lbw.game.players[0].target;
     return { x: t.px, y: t.py, z: t.pz };
   });
+  // one block per hold: release as soon as it lands, before the auto-repeat
+  // (0.28 s of game time) can put a second one down
   await page.evaluate(() => (window as any).__testPad.set('place', true));
-  await page.waitForTimeout(600);
+  await page.waitForFunction(
+    (c: Cell) => (window as any).__lbw.game.world.get(c.x, c.y, c.z) !== 0,
+    cell, { timeout: 4000 },
+  );
   await page.evaluate(() => (window as any).__testPad.set('place', false));
   return cell;
 }
 
-test('doors: build one, pat it open with the pet button, walk through, and it remembers', async ({ page }) => {
+test('doors: two blocks high and half a block deep — build, pat open, walk through, break, remember', async ({ page }) => {
   test.slow();
   await boot(page);
   await joinWithPad(page);
@@ -1386,24 +1391,34 @@ test('doors: build one, pat it open with the pet button, walk through, and it re
   const ids = await page.evaluate(() => (window as any).__lbw.ids);
   const site = await clearRunway(page);
 
-  // build a door with the build trigger, right where the aim lands
-  const door = await placeSelected(page, ids.DOOR);
-  expect(await page.evaluate((c: Cell) => (window as any).__lbw.game.world.get(c.x, c.y, c.z), door))
-    .toBe(ids.DOOR);
-  const facing = await page.evaluate((c: Cell) => {
+  /** the doorFacing entry for a cell */
+  const facingAt = (c: Cell, dy = 0) => page.evaluate((arg: { c: Cell; dy: number }) => {
     const { sz, sy } = (window as any).__lbw.dims;
-    return (window as any).__lbw.game.world.doorFacing.get((c.x * sz + c.z) * sy + c.y);
-  }, door);
-  expect(facing === 0 || facing === 1).toBe(true);
+    return (window as any).__lbw.game.world.doorFacing.get((arg.c.x * sz + arg.c.z) * sy + arg.c.y + arg.dy);
+  }, { c, dy });
+  const blockAt = (c: Cell, dy = 0) =>
+    page.evaluate((arg: { c: Cell; dy: number }) => (window as any).__lbw.game.world.get(arg.c.x, arg.c.y + arg.dy, arg.c.z), { c, dy });
+
+  // build a door with the build trigger: it fills TWO cells and nothing more
+  const door = await placeSelected(page, ids.DOOR);
+  expect(await blockAt(door)).toBe(ids.DOOR);
+  expect(await blockAt(door, 1)).toBe(ids.DOOR_TOP);
+  expect(await blockAt(door, 2)).toBe(ids.AIR); // no second door from the auto-repeat
+  const swing = await facingAt(door);
+  expect(swing === 0 || swing === 1).toBe(true);
+  expect(await facingAt(door, 1)).toBe(swing); // the upper half remembers it too
 
   // fill the wall around it so the door is the only way through
   await page.evaluate((c: Cell) => {
     const game = (window as any).__lbw.game;
-    game.world.set(c.x, c.y, c.z - 1, (window as any).__lbw.ids.PLANKS);
-    game.world.set(c.x, c.y, c.z + 1, (window as any).__lbw.ids.PLANKS);
+    for (const dy of [0, 1]) {
+      game.world.set(c.x, c.y + dy, c.z - 1, (window as any).__lbw.ids.PLANKS);
+      game.world.set(c.x, c.y + dy, c.z + 1, (window as any).__lbw.ids.PLANKS);
+    }
   }, door);
 
-  // walk into the CLOSED door: the wall stops you
+  // walk into the CLOSED door: the panel is only half a block deep, so a kid
+  // stops right at the wood — half a block sooner than a full cube would
   await page.evaluate((arg: { c: Cell; gy: number; pz: number }) => {
     const e = (window as any).__lbw.game.players[0].entity;
     e.pos.set(arg.c.x + 2.5, arg.gy + 1, arg.pz);
@@ -1415,19 +1430,20 @@ test('doors: build one, pat it open with the pet button, walk through, and it re
   await waitForStop(page);
   await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
   const blockedX = await page.evaluate(() => (window as any).__lbw.game.players[0].entity.pos.x);
-  expect(blockedX).toBeGreaterThan(door.x + 1.15); // stopped in front of the closed door
+  expect(blockedX).toBeGreaterThan(door.x + 0.95); // stopped at the panel face
+  expect(blockedX).toBeLessThan(door.x + 1.2);     // …not half a block short of it
 
-  // the pet button, aimed at the door: it swings open
+  // the pet button, aimed at the door: the whole two-block door swings open
   await page.evaluate(() => {
     (window as any).__lbw.game.players[0].entity.pitch = -0.75; // look down right in front
   });
-  await page.waitForFunction((bid: number) => {
+  await page.waitForFunction((bids: number[]) => {
     const t = (window as any).__lbw.game.players[0].removeTarget;
-    return t !== null && t.block === bid;
-  }, ids.DOOR, { timeout: 8000 });
+    return t !== null && bids.includes(t.block);
+  }, [ids.DOOR, ids.DOOR_TOP], { timeout: 8000 });
   await tap(page, 'interact');
-  expect(await page.evaluate((c: Cell) => (window as any).__lbw.game.world.get(c.x, c.y, c.z), door))
-    .toBe(ids.DOOR_OPEN);
+  expect(await blockAt(door)).toBe(ids.DOOR_OPEN);
+  expect(await blockAt(door, 1)).toBe(ids.DOOR_TOP_OPEN);
 
   // and now walking goes straight through it
   await page.evaluate(() => (window as any).__testPad.setMove(0, -1));
@@ -1437,45 +1453,67 @@ test('doors: build one, pat it open with the pet button, walk through, and it re
   );
   await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
 
-  // pat it from the other side: it closes again
+  // pat it from the other side: both halves close again
   await page.evaluate(() => {
     const e = (window as any).__lbw.game.players[0].entity;
     e.yaw = Math.PI / 2;
     e.pitch = -0.75;
   });
-  await page.waitForFunction((bid: number) => {
+  await page.waitForFunction((bids: number[]) => {
     const t = (window as any).__lbw.game.players[0].removeTarget;
-    return t !== null && t.block === bid;
-  }, ids.DOOR_OPEN, { timeout: 8000 });
+    return t !== null && bids.includes(t.block);
+  }, [ids.DOOR_OPEN, ids.DOOR_TOP_OPEN], { timeout: 8000 });
   await tap(page, 'interact');
-  expect(await page.evaluate((c: Cell) => (window as any).__lbw.game.world.get(c.x, c.y, c.z), door))
-    .toBe(ids.DOOR);
+  expect(await blockAt(door)).toBe(ids.DOOR);
+  expect(await blockAt(door, 1)).toBe(ids.DOOR_TOP);
 
-  // the save carries the door and the way it stands
+  // breaking either half takes the whole door down, swing records and all
+  await tap(page, 'remove');
+  expect(await blockAt(door)).toBe(ids.AIR);
+  expect(await blockAt(door, 1)).toBe(ids.AIR);
+  expect(await facingAt(door)).toBeUndefined();
+  expect(await facingAt(door, 1)).toBeUndefined();
+
+  // build a fresh one and the save carries both cells and both swings
+  await clearRunway(page);
+  const door2 = await placeSelected(page, ids.DOOR);
   const saved = await page.evaluate((c: Cell) => {
     const { sz, sy } = (window as any).__lbw.dims;
     const save = (window as any).__lbw.game.world.toSave();
-    const key = String((c.x * sz + c.z) * sy + c.y);
-    return { version: save.version, doorInMods: save.mods[key], swing: save.doorFacing?.[key] };
-  }, door);
+    const at = (dy: number) => String((c.x * sz + c.z) * sy + c.y + dy);
+    return {
+      version: save.version,
+      bottom: save.mods[at(0)],
+      top: save.mods[at(1)],
+      swingBottom: save.doorFacing?.[at(0)],
+      swingTop: save.doorFacing?.[at(1)],
+    };
+  }, door2);
   expect(saved.version).toBe(2);
-  expect(saved.doorInMods).toBe(ids.DOOR);
-  expect(saved.swing === 0 || saved.swing === 1).toBe(true);
+  expect(saved.bottom).toBe(ids.DOOR);
+  expect(saved.top).toBe(ids.DOOR_TOP);
+  expect(saved.swingBottom === 0 || saved.swingBottom === 1).toBe(true);
+  expect(saved.swingTop).toBe(saved.swingBottom);
 
-  // a reload brings the door back, same spot, same swing
+  // a reload brings the whole door back, same spot, same swing
   await page.evaluate(() => (window as any).__lbw.game.saveNow());
   await page.reload();
   await page.waitForFunction('window.__lbw !== undefined');
   const after = await page.evaluate((c: Cell) => {
     const game = (window as any).__lbw.game;
     const { sz, sy } = (window as any).__lbw.dims;
+    const at = (dy: number) => game.world.doorFacing.get((c.x * sz + c.z) * sy + c.y + dy);
     return {
-      block: game.world.get(c.x, c.y, c.z),
-      facing: game.world.doorFacing.get((c.x * sz + c.z) * sy + c.y),
+      bottom: game.world.get(c.x, c.y, c.z),
+      top: game.world.get(c.x, c.y + 1, c.z),
+      swingBottom: at(0),
+      swingTop: at(1),
     };
-  }, door);
-  expect(after.block).toBe(ids.DOOR);
-  expect(after.facing === 0 || after.facing === 1).toBe(true);
+  }, door2);
+  expect(after.bottom).toBe(ids.DOOR);
+  expect(after.top).toBe(ids.DOOR_TOP);
+  expect(after.swingBottom === 0 || after.swingBottom === 1).toBe(true);
+  expect(after.swingTop).toBe(after.swingBottom);
 });
 
 test('stairs: walk into one and you step up onto it — no jumping required', async ({ page }) => {

@@ -8,7 +8,8 @@ import * as THREE from 'three';
 import { AudioKit } from './core/audio';
 import { AnimalWorld } from './core/animals';
 import {
-  blockDef, DOOR, DOOR_OPEN, isDoorBlock, isExplosiveBlock, isSolidBlock, ROCK, SAPLING, WATER,
+  blockDef, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, isDoorBlock, isDoorTopBlock,
+  isExplosiveBlock, isSolidBlock, ROCK, SAPLING, WATER,
 } from './core/blocks';
 import { StarField } from './core/collectibles';
 import { BlastInfo, DynamiteManager } from './core/dynamite';
@@ -34,6 +35,14 @@ import {
 import { UiManager } from './ui/uiManager';
 
 const MAX_PLAYERS = 4;
+
+/** flat world index back to x/y/z — the inverse of world.idx */
+function unidx(i: number): [number, number, number] {
+  const x = Math.floor(i / (WORLD_SZ * WORLD_SY));
+  const rest = i - x * WORLD_SZ * WORLD_SY;
+  const z = Math.floor(rest / WORLD_SY);
+  return [x, rest - z * WORLD_SY, z];
+}
 
 interface PendingJoin {
   source: InputSource;
@@ -549,30 +558,38 @@ export class Game {
     return Math.abs(Math.sin(lp.entity.yaw)) > Math.abs(Math.cos(lp.entity.yaw)) ? 0 : 1;
   }
 
-  /** the pet/interact button on a door: it swings open, or closes again */
+  /** the pet/interact button on a door: the whole door swings open, or closes */
   private toggleDoor(lp: LocalPlayer, hit: RayHit): void {
-    void lp;
-    const i = worldIdx(hit.x, hit.y, hit.z);
-    if (hit.block === DOOR) {
-      if (!this.world.doorFacing.has(i)) this.world.doorFacing.set(i, this.doorFacingFromAim(lp, hit));
-      this.world.set(hit.x, hit.y, hit.z, DOOR_OPEN);
-      this.audio.doorOpen();
-      this.particles.burst(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, 0xd9a766, 5, 0.5);
-    } else if (hit.block === DOOR_OPEN) {
-      this.world.set(hit.x, hit.y, hit.z, DOOR);
-      this.audio.doorClose();
-      this.particles.burst(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, 0xd9a766, 5, 0.5);
+    // a door is two cells tall; aim at either half and the pair swings together
+    const yBottom = isDoorTopBlock(hit.block) ? hit.y - 1 : hit.y;
+    const bottom = this.world.get(hit.x, yBottom, hit.z);
+    const top = this.world.get(hit.x, yBottom + 1, hit.z);
+    const parts: [number, number][] = []; // [y, block id]
+    if (isDoorBlock(bottom) && !isDoorTopBlock(bottom)) {
+      parts.push([yBottom, bottom]);
+      if (isDoorTopBlock(top)) parts.push([yBottom + 1, top]);
+    } else {
+      // a half standing on its own: a door left over from an old one-block save
+      parts.push([hit.y, hit.block]);
     }
+    const opening = parts.some(([, b]) => b === DOOR || b === DOOR_TOP);
+    for (const [y, b] of parts) {
+      const to = b === DOOR ? DOOR_OPEN : b === DOOR_TOP ? DOOR_TOP_OPEN
+        : b === DOOR_OPEN ? DOOR : b === DOOR_TOP_OPEN ? DOOR_TOP : b;
+      this.world.set(hit.x, y, hit.z, to);
+      const i = worldIdx(hit.x, y, hit.z);
+      if (!this.world.doorFacing.has(i)) this.world.doorFacing.set(i, this.doorFacingFromAim(lp, hit));
+    }
+    if (opening) this.audio.doorOpen();
+    else this.audio.doorClose();
+    this.particles.burst(hit.x + 0.5, yBottom + 1, hit.z + 0.5, 0xd9a766, 6, 0.6);
     this.world.revision++; // the swing itself is a change: let autosave catch it
   }
 
   /** plant one, look away, look back: a tree */
   private growSaplings(): void {
     for (const [i, planted] of [...this.saplings]) {
-      const x = Math.floor(i / (WORLD_SZ * WORLD_SY));
-      const rest = i - x * WORLD_SZ * WORLD_SY;
-      const z = Math.floor(rest / WORLD_SY);
-      const y = rest - z * WORLD_SY;
+      const [x, y, z] = unidx(i);
       if (this.world.get(x, y, z) !== SAPLING) {
         this.saplings.delete(i); // broken, blasted or built over — forget it
         continue;
@@ -603,10 +620,25 @@ export class Game {
         if (!this.world.inBounds(px, py, pz)) return false;
         if (py <= 0) return false;
         const id = lp.selected;
-        const b = blockAabb(px, py, pz);
+        // A door is TWO blocks high and you always build it from its bottom
+        // half: the upper half comes with it, so the cell above has to be free.
+        if (isDoorTopBlock(id)) return false;
+        const door = id === DOOR;
+        if (door) {
+          const above = this.world.get(px, py + 1, pz);
+          if (!this.world.inBounds(px, py + 1, pz) || isSolidBlock(above) || above === WATER) {
+            this.particles.burst(px + 0.5, py + 0.5, pz + 0.5, 0xff5d5d, 4, 0.4);
+            return false;
+          }
+        }
+        const cells: [number, number, number][] =
+          door ? [[px, py, pz], [px, py + 1, pz]] : [[px, py, pz]];
+        const footprints = cells.map(([cx, cy, cz]) => blockAabb(cx, cy, cz));
         // never trap a player
         for (const other of this.players) {
-          if (isSolidBlock(id) && boxesOverlap(playerAabb(other.entity.pos.x, other.entity.pos.y, other.entity.pos.z), b)) {
+          if (!isSolidBlock(id)) continue;
+          const pb = playerAabb(other.entity.pos.x, other.entity.pos.y, other.entity.pos.z);
+          if (footprints.some((b) => boxesOverlap(pb, b))) {
             this.particles.burst(px + 0.5, py + 0.5, pz + 0.5, 0xff5d5d, 4, 0.4);
             return false;
           }
@@ -615,16 +647,22 @@ export class Game {
           for (const a of this.animals.animals) {
             const ab = blockAabb(a.pos.x - 0.3, a.pos.y, a.pos.z - 0.3);
             ab.w = ab.d = 0.6; ab.h = 0.8;
-            if (boxesOverlap(ab, b)) return false;
+            if (footprints.some((b) => boxesOverlap(ab, b))) return false;
           }
         }
-        this.world.set(px, py, pz, id);
+        const toSet: [number, number, number, number][] =
+          door ? [[px, py, pz, DOOR], [px, py + 1, pz, DOOR_TOP]] : [[px, py, pz, id]];
+        const facing = door ? this.doorFacingFromAim(lp, hit) : 0;
+        for (const [cx, cy, cz, cid] of toSet) {
+          this.world.set(cx, cy, cz, cid);
+          const i = worldIdx(cx, cy, cz);
+          if (door) this.world.doorFacing.set(i, facing);
+          if (blockDef(cid).sparkle) this.sparkleBlocks.add(i);
+        }
         this.audio.place();
         const def = blockDef(id);
         this.particles.burst(px + 0.5, py + 0.5, pz + 0.5, new THREE.Color(def.color[0], def.color[1], def.color[2]), 7, 0.7);
-        if (def.sparkle) this.sparkleBlocks.add(worldIdx(px, py, pz));
         if (id === SAPLING) this.saplings.set(worldIdx(px, py, pz), this.time);
-        if (id === DOOR) this.world.doorFacing.set(worldIdx(px, py, pz), this.doorFacingFromAim(lp, hit));
         if (def.explosive) {
           // dynamite lights the moment it is set down: grab a stick, run, boom
           this.dynamite.light(px, py, pz);
@@ -646,12 +684,29 @@ export class Game {
           this.particles.burst(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, 0xff5d5d, 4, 0.4);
           return;
         }
-        this.world.set(hit.x, hit.y, hit.z, 0);
+        // a door is one thing in two cells: breaking either half takes the whole
+        // door (a lone half from an old one-block save breaks on its own)
+        const cells: [number, number][] = [];
+        if (isDoorBlock(hit.block)) {
+          const yBottom = isDoorTopBlock(hit.block) ? hit.y - 1 : hit.y;
+          const bottom = this.world.get(hit.x, yBottom, hit.z);
+          const top = this.world.get(hit.x, yBottom + 1, hit.z);
+          if (isDoorBlock(bottom) && !isDoorTopBlock(bottom)) cells.push([yBottom, bottom]);
+          if (isDoorTopBlock(top)) cells.push([yBottom + 1, top]);
+          if (cells.length === 0) cells.push([hit.y, hit.block]);
+        } else {
+          cells.push([hit.y, hit.block]);
+        }
+        for (const [y, b] of cells) {
+          this.world.set(hit.x, y, hit.z, 0);
+          const i = worldIdx(hit.x, y, hit.z);
+          this.world.doorFacing.delete(i);
+          this.sparkleBlocks.delete(i);
+          this.saplings.delete(i);
+          const c = blockDef(b).color;
+          this.particles.burst(hit.x + 0.5, y + 0.5, hit.z + 0.5, new THREE.Color(c[0], c[1], c[2]), 9, 0.9);
+        }
         this.audio.remove();
-        this.particles.burst(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, new THREE.Color(def.color[0], def.color[1], def.color[2]), 9, 0.9);
-        this.sparkleBlocks.delete(worldIdx(hit.x, hit.y, hit.z));
-        this.saplings.delete(worldIdx(hit.x, hit.y, hit.z));
-        if (isDoorBlock(hit.block)) this.world.doorFacing.delete(worldIdx(hit.x, hit.y, hit.z));
         void lp;
       },
       interact: (lp: LocalPlayer): void => {
@@ -678,6 +733,14 @@ export class Game {
     for (const i of b.removed) {
       this.sparkleBlocks.delete(i);
       this.saplings.delete(i);
+      this.world.doorFacing.delete(i);
+      // a blast that ate the bottom half of a door would leave the upper half
+      // hanging in the air, so bring it down too
+      const [x, y, z] = unidx(i);
+      if (y + 1 < WORLD_SY && isDoorTopBlock(this.world.get(x, y + 1, z))) {
+        this.world.set(x, y + 1, z, 0);
+        this.world.doorFacing.delete(worldIdx(x, y + 1, z));
+      }
     }
 
     const cx = b.x + 0.5, cy = b.y + 0.5, cz = b.z + 0.5;
