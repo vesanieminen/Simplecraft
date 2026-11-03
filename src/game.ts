@@ -102,6 +102,8 @@ export class Game {
   private rafId = 0;
 
   async init(): Promise<void> {
+    this.loadSettings(); // layout + sound survive reloads
+
     // ---- world (seed + theme, overridable via ?seed=..&world=0..N) ----
     const params = new URLSearchParams(location.search);
     this.seed = Number(params.get('seed')) || DEFAULT_SEED;
@@ -393,7 +395,7 @@ export class Game {
         toggleFly: () => { p.entity.flying = !p.entity.flying; p.entity.vel.y = 0; },
         toggleCamera: () => { p.firstPerson = !p.firstPerson; },
         goHome: () => { p.respawnAt(this.spawnPoint.clone()); },
-        toggleSound: () => { this.audio.setMuted(!this.audio.muted); },
+        toggleSound: () => { this.audio.setMuted(!this.audio.muted); this.saveSettings(); },
         openHelp: () => {
           this.ui.clearOverlays(idx);
           const h = new HelpOverlay(this.audio, this.typeOf(p));
@@ -408,6 +410,7 @@ export class Game {
               const order: SplitLayout[] = ['auto', 'horizontal', 'vertical', 'grid2x2'];
               this.layout = order[(order.indexOf(this.layout) + 1) % order.length];
               this.resize();
+              this.saveSettings();
               return this.layout === 'auto' ? 'Smart'
                 : this.layout === 'horizontal' ? 'Left/Right'
                 : this.layout === 'vertical' ? 'Up/Down' : '2×2 Grid';
@@ -705,6 +708,31 @@ export class Game {
   }
 
   // ------------------------------------------------------------ persistence
+
+  // -------------------------------------------------------- global settings
+  // The few grown-up settings that belong to the whole browser (split-screen
+  // layout, sound on/off) keep their own little localStorage key, so a
+  // family's tablet stays the way they left it.
+
+  private settingsKey = 'lbw-settings';
+
+  private loadSettings(): void {
+    try {
+      const raw = localStorage.getItem(this.settingsKey);
+      if (!raw) return;
+      const s = JSON.parse(raw) as { layout?: string; muted?: boolean };
+      if (s.layout === 'auto' || s.layout === 'horizontal' || s.layout === 'vertical' || s.layout === 'grid2x2') {
+        this.layout = s.layout;
+      }
+      if (typeof s.muted === 'boolean') this.audio.muted = s.muted;
+    } catch { /* corrupted settings: defaults win */ }
+  }
+
+  private saveSettings(): void {
+    try {
+      localStorage.setItem(this.settingsKey, JSON.stringify({ layout: this.layout, muted: this.audio.muted }));
+    } catch { /* storage unavailable */ }
+  }
 
   // ---------------------------------------------------------- GH Pages build
   // When the game is hosted statically (no local server), the API does not

@@ -21,7 +21,8 @@ export class AudioKit {
       if (!Ctor) return;
       this.ctx = new Ctor();
       this.master = this.ctx.createGain();
-      this.master.gain.value = this.volume;
+      // honour a muted state restored from the settings before the first gesture
+      this.master.gain.value = this.muted ? 0 : this.volume;
       this.master.connect(this.ctx.destination);
       const len = Math.floor(this.ctx.sampleRate * 0.25);
       this.noiseBuf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
