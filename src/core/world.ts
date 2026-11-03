@@ -27,6 +27,12 @@ export interface WorldSaveData {
   mods: Record<string, number>;
   /** indices of collected star pickups */
   collectedStars: number[];
+  /**
+   * Which way each placed door swings: flat index -> 0 (panel thin along X)
+   * or 1 (thin along Z). Doors remember this even while open, so the panel
+   * stands where the kid meant it to. Added in version 2.
+   */
+  doorFacing?: Record<string, number>;
 }
 
 export class World {
@@ -37,6 +43,8 @@ export class World {
   /** chunk keys (cx*CHUNKS_X+cz) that need remeshing */
   readonly dirtyChunks = new Set<number>();
   collectedStars = new Set<number>();
+  /** flat index -> swing axis of a placed door (0: thin along x, 1: thin along z) */
+  readonly doorFacing = new Map<number, number>();
   /** bumped on every change so listeners (autosave) can debounce */
   revision = 0;
 
@@ -53,6 +61,7 @@ export class World {
     this.data.fill(0);
     this.mods.clear();
     this.collectedStars.clear();
+    this.doorFacing.clear();
     this.revision++;
   }
 
@@ -120,18 +129,29 @@ export class World {
     for (const s of save.collectedStars) {
       if (Number.isInteger(s) && s >= 0) this.collectedStars.add(s);
     }
+    if (save.doorFacing) {
+      for (const [k, v] of Object.entries(save.doorFacing)) {
+        const i = Number(k);
+        if (Number.isInteger(i) && i >= 0 && i < this.data.length && (v === 0 || v === 1)) {
+          this.doorFacing.set(i, v);
+        }
+      }
+    }
     this.markAllDirty();
   }
 
   toSave(): WorldSaveData {
     const mods: Record<string, number> = {};
     for (const [i, v] of this.mods) mods[String(i)] = v;
+    const doorFacing: Record<string, number> = {};
+    for (const [i, v] of this.doorFacing) doorFacing[String(i)] = v;
     return {
-      version: 1,
+      version: 2,
       seed: this.seed,
       theme: this.theme,
       mods,
       collectedStars: [...this.collectedStars].sort((a, b) => a - b),
+      doorFacing,
     };
   }
 }

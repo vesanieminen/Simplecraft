@@ -13,16 +13,14 @@
 
 import * as THREE from 'three';
 import {
-  ATLAS_BOUNCY, ATLAS_BRICKS, ATLAS_CELL_COUNT, ATLAS_DIRT, ATLAS_DYNAMITE_CAP,
+  ATLAS_BOUNCY, ATLAS_BRICKS, ATLAS_CELL_COUNT, ATLAS_DIRT, ATLAS_DOOR, ATLAS_DYNAMITE_CAP,
   ATLAS_DYNAMITE_SIDE, ATLAS_GLASS, ATLAS_GLOW, ATLAS_GRASS_SIDE, ATLAS_GRASS_TOP,
   ATLAS_LEAVES, ATLAS_LOG_END, ATLAS_LOG_SIDE, ATLAS_MUSIC, ATLAS_PLANKS, ATLAS_ROCK,
   ATLAS_SAND, ATLAS_SCORCH, ATLAS_SPARKLE, ATLAS_STONE, ATLAS_WATER, ATLAS_WEAVE,
+  PLANT_ATLAS_CELLS,
 } from '../core/blocks';
 
-export const PLANT_CELLS = 3; // atlas cells side by side
-export const PLANT_CELL_RED = 0;
-export const PLANT_CELL_YELLOW = 1;
-export const PLANT_CELL_TUFT = 2;
+export const PLANT_CELLS = PLANT_ATLAS_CELLS; // atlas cells side by side
 
 /** number of cells in the block atlas (side by side) */
 export const BLOCK_CELLS = ATLAS_CELL_COUNT;
@@ -91,6 +89,35 @@ function drawTuft(ctx: CanvasRenderingContext2D, ox: number): void {
 
 let cached: THREE.CanvasTexture | null = null;
 
+/**
+ * A baby tree for the sapling block: little trunk, a leafy hand of a crown.
+ * Big enough that a planted sapling reads as "this will be a tree".
+ */
+function drawSapling(ctx: CanvasRenderingContext2D, ox: number): void {
+  // trunk
+  stem(ctx, ox, 14, 20, 32, 3, '#7a5230');
+  stem(ctx, ox, 15, 20, 32, 1, '#a3754a');
+  // two roots flaring into the ground line
+  ctx.fillStyle = '#7a5230';
+  ctx.fillRect(ox + 11, 30, 3, 2);
+  ctx.fillRect(ox + 19, 30, 3, 2);
+  // crown: chunky leaf clusters, bright where the sun hits
+  ctx.fillStyle = '#3f8536';
+  ctx.fillRect(ox + 8, 10, 16, 11);
+  ctx.fillRect(ox + 11, 7, 10, 3);
+  ctx.fillRect(ox + 5, 14, 4, 6);
+  ctx.fillRect(ox + 23, 14, 4, 6);
+  ctx.fillStyle = '#5cae4e';
+  ctx.fillRect(ox + 10, 9, 12, 6);
+  ctx.fillStyle = '#8ade68';
+  ctx.fillRect(ox + 12, 8, 6, 3);
+  ctx.fillRect(ox + 8, 12, 3, 3);
+  // a couple of leaf tips poking out
+  ctx.fillStyle = '#4d9c43';
+  ctx.fillRect(ox + 6, 10, 3, 3);
+  ctx.fillRect(ox + 24, 11, 3, 3);
+}
+
 export function plantAtlasTexture(): THREE.CanvasTexture {
   if (cached) return cached;
   const canvas = document.createElement('canvas');
@@ -101,6 +128,7 @@ export function plantAtlasTexture(): THREE.CanvasTexture {
   drawFlower(ctx, 0, '#ff5f5f', '#ffd23e');
   drawFlower(ctx, S, '#ffd23e', '#e2762d');
   drawTuft(ctx, S * 2);
+  drawSapling(ctx, S * 3);
   const tex = new THREE.CanvasTexture(canvas);
   tex.magFilter = THREE.NearestFilter;
   tex.minFilter = THREE.NearestFilter;
@@ -348,6 +376,37 @@ function drawBricks(ctx: CanvasRenderingContext2D, ox: number): void {
   }
 }
 
+/** door: wooden boards, two recessed panels, hinges and a round brass knob */
+function drawDoor(ctx: CanvasRenderingContext2D, ox: number): void {
+  rect(ctx, ox, 0, 0, S, S, '#c98d52'); // the door slab
+  for (const x of [2, 10, 18, 26]) rect(ctx, ox, x, 1, 1, S - 2, '#a86e3a'); // board gaps
+  speckle(ctx, ox, '#b87c44', 0.06, 43);
+  rect(ctx, ox, 0, 0, S, 2, '#e0aa70'); // frame top
+  rect(ctx, ox, 0, S - 2, S, 2, '#8a5a2c'); // frame bottom (shadow side)
+  rect(ctx, ox, 0, 0, 2, S, '#e0aa70'); // frame left…
+  rect(ctx, ox, S - 2, 0, 2, S, '#8a5a2c'); // …and right
+  // two recessed panels: light face, dark inset edge
+  for (const [py, ph] of [[5, 11], [19, 9]] as const) {
+    rect(ctx, ox, 5, py, 22, ph, '#d9a766');
+    rect(ctx, ox, 5, py, 22, 1, '#96632f');
+    rect(ctx, ox, 5, py, 1, ph, '#96632f');
+    rect(ctx, ox, 5, py + ph - 1, 22, 1, '#efd0a0');
+    rect(ctx, ox, 26, py, 1, ph, '#efd0a0');
+  }
+  // hinges on the left edge
+  ctx.fillStyle = '#5c4a38';
+  ctx.fillRect(ox + 1, 4, 4, 3);
+  ctx.fillRect(ox + 1, 24, 4, 3);
+  ctx.fillStyle = '#8f7a5f';
+  ctx.fillRect(ox + 1, 4, 4, 1);
+  ctx.fillRect(ox + 1, 24, 4, 1);
+  // brass knob on the right
+  disc(ctx, ox + 27, 16, 2, '#8a5a2c');
+  disc(ctx, ox + 27, 16, 2, '#f2c14e');
+  ctx.fillStyle = '#fff3c4';
+  ctx.fillRect(ox + 26, 15, 1, 1);
+}
+
 // --- see-through and special blocks -----------------------------------------
 
 /** leaves: chunky green lumps with darker veins and gaps */
@@ -492,6 +551,7 @@ const BLOCK_ART: Record<number, CellArt> = {
   [ATLAS_ROCK]: drawRock,
   [ATLAS_SCORCH]: drawScorch,
   [ATLAS_WEAVE]: drawWeave,
+  [ATLAS_DOOR]: drawDoor,
 };
 
 let cachedBlock: THREE.CanvasTexture | null = null;

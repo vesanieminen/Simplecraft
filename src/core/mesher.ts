@@ -5,8 +5,11 @@
  */
 
 import * as THREE from 'three';
-import { ATLAS_CELL_COUNT, blockDef, isCrossBlock, isOpaqueBlock, isTranslucentBlock } from './blocks';
-import { CHUNK, WORLD_SY, World } from './world';
+import {
+  ATLAS_CELL_COUNT, ATLAS_PLANKS, blockDef, isCrossBlock, isOpaqueBlock, isTranslucentBlock,
+  DOOR_OPEN, PLANT_ATLAS_CELLS, STAIRS,
+} from './blocks';
+import { CHUNK, idx as worldIdx, WORLD_SY, World } from './world';
 
 function hashByte(x: number, y: number, z: number): number {
   let h = (x * 73856093 + y * 19349663 + z * 83492791) | 0;
@@ -168,6 +171,27 @@ export function buildChunkGeometry(world: World, cx: number, cz: number): ChunkG
           continue;
         }
 
+        if (id === STAIRS) {
+          // a chunky wooden step occupying the lower half of its cell; the
+          // step surface (half a block high) is never flush with a neighbour,
+          // so it never gets culled — the sides and underside do, as usual
+          addTexturedSubBox(tex, world, [x, y, z], [x, y, z, x + 1, y + 0.5, z + 1],
+            def.sideAtlasCell ?? ATLAS_PLANKS, true);
+          continue;
+        }
+        if (id === DOOR_OPEN) {
+          // an opened door: a thin standing panel, oriented by the way the
+          // door was placed (world.doorFacing). It touches no cell boundary,
+          // so none of its faces can ever be hidden by neighbours.
+          const facing = world.doorFacing.get(worldIdx(x, y, z)) ?? 0;
+          const t = 0.09;
+          const box: [number, number, number, number, number, number] = facing === 0
+            ? [x + 0.5 - t, y, z, x + 0.5 + t, y + 1, z + 1]
+            : [x, y, z + 0.5 - t, x + 1, y + 1, z + 0.5 + t];
+          addTexturedSubBox(tex, world, [x, y, z], box, def.sideAtlasCell ?? 0, false);
+          continue;
+        }
+
         const sideCell = def.sideAtlasCell;
         const isTextured = sideCell !== undefined;
         const seeThrough = isTranslucentBlock(id);
@@ -255,6 +279,44 @@ function faceUvs(
   return [[u0, v0], [u0, v1], [u1, v1], [u1, v0]];
 }
 
+/**
+ * A painted box smaller than a full cell — the mesher's shape language for
+ * "not a cube" blocks (stairs steps, opened door panels). One atlas cell
+ * covers it; faces that sit flush on the cell border are culled against
+ * opaque neighbours when `cullFlush`, and shading is face-angle only (no AO:
+ * these shapes are small enough that it would only muddy them).
+ */
+function addTexturedSubBox(
+  g: GeomBuilder,
+  world: World,
+  cell: [number, number, number],
+  box: [number, number, number, number, number, number],
+  sideCell: number,
+  cullFlush: boolean,
+): void {
+  const [cx, cy, cz] = cell;
+  const [x0, y0, z0, x1, y1, z1] = box;
+  const vary = 1 + (hashByte(cx, cy, cz) - 0.5) * 0.07;
+  const E = 1e-6;
+  const flush = [
+    x1 >= cx + 1 - E, x0 <= cx + E,
+    y1 >= cy + 1 - E, y0 <= cy + E,
+    z1 >= cz + 1 - E, z0 <= cz + E,
+  ];
+  for (let fi = 0; fi < 6; fi++) {
+    const f = FACES[fi];
+    if (cullFlush && flush[fi] && isOpaqueBlock(world.get(cx + f.dir[0], cy + f.dir[1], cz + f.dir[2]))) continue;
+    const shade = FACE_SHADE[fi] * vary;
+    const tint: [number, number, number][] = [
+      [shade, shade, shade], [shade, shade, shade], [shade, shade, shade], [shade, shade, shade],
+    ];
+    const pts = f.corners.map(([ax, ay, az]) => [
+      ax ? x1 : x0, ay ? y1 : y0, az ? z1 : z0,
+    ] as [number, number, number]);
+    g.quad(pts[0], pts[1], pts[2], pts[3], f.dir, tint, faceUvs(fi, sideCell, sideCell, sideCell));
+  }
+}
+
 /** two crossed vertical quads for flowers / grass tufts, textured from an atlas */
 function addCrossQuads(g: GeomBuilder, x: number, y: number, z: number, cell: number): void {
   const s = 0.9, o = (1 - s) / 2;
@@ -265,7 +327,7 @@ function addCrossQuads(g: GeomBuilder, x: number, y: number, z: number, cell: nu
     [1, 1, 1],
     [0.85, 0.85, 0.85],
   ];
-  const CELLS = 3;
+  const CELLS = PLANT_ATLAS_CELLS;
   const pad = 0.5 / 32; // half-pixel inset to avoid atlas bleed
   const u0 = (cell + pad) / CELLS;
   const u1 = (cell + 1 - pad) / CELLS;

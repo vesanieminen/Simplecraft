@@ -7,13 +7,15 @@
 import * as THREE from 'three';
 import { AudioKit } from './core/audio';
 import { AnimalWorld } from './core/animals';
-import { blockDef, isExplosiveBlock, isSolidBlock, ROCK, WATER } from './core/blocks';
+import {
+  blockDef, DOOR, DOOR_OPEN, isDoorBlock, isExplosiveBlock, isSolidBlock, ROCK, SAPLING, WATER,
+} from './core/blocks';
 import { StarField } from './core/collectibles';
 import { BlastInfo, DynamiteManager } from './core/dynamite';
 import { ParticleSystem } from './core/particles';
 import { RayHit } from './core/raycast';
 import { blockAabb, boxesOverlap, playerAabb } from './core/physics';
-import { DEFAULT_SEED, generateTerrain, themeOf, WORLD_THEMES } from './core/terrain';
+import { DEFAULT_SEED, generateTerrain, plantTree, themeOf, WORLD_THEMES } from './core/terrain';
 import { idx as worldIdx, World, WorldSaveData, WORLD_SX, WORLD_SY, WORLD_SZ } from './core/world';
 import { InputManager } from './input/inputManager';
 import { KeyboardSource } from './input/keyboard';
@@ -83,6 +85,14 @@ export class Game {
   private time = 0;
   private sparkleBlocks = new Set<number>();
   dynamite!: DynamiteManager;
+  /**
+   * Player-planted saplings: flat world index -> game time when planted.
+   * After `saplingGrowSeconds` of game time (public so tests can hurry it)
+   * they grow into real trees. Saplings restored from a save grow about ten
+   * seconds after joining, so a planted forest keeps living between sessions.
+   */
+  saplings = new Map<number, number>();
+  saplingGrowSeconds = 30;
   private lastLandSound = new Map<number, number>();
   private stepEvents = {
     landed: false, bounced: null as number | null,
@@ -118,6 +128,11 @@ export class Game {
 
     // sparkle blocks placed by players emit drifting sparkles
     for (const [i, b] of this.world.mods) if (blockDef(b).sparkle) this.sparkleBlocks.add(i);
+
+    // saplings that came back from a save keep growing from the moment you join
+    for (const [i, b] of this.world.mods) {
+      if (b === SAPLING) this.saplings.set(i, -this.saplingGrowSeconds + 10);
+    }
 
     this.animals = new AnimalWorld(this.scene, this.world, this.particles, this.audio, gen.spawnX, gen.spawnZ);
     this.starField = new StarField(this.scene, this.world, gen.spawnX, gen.spawnZ);
@@ -517,6 +532,66 @@ export class Game {
 
   // ------------------------------------------------------------ building
 
+  /**
+   * Which way a door's panel stands: 0 = thin along x, 1 = thin along z.
+   * Taken from the face the placement/aim hit (the panel lies in the wall's
+   * plane); when a door is patted out of flat ground, from where the player
+   * is looking.
+   */
+  private doorFacingFromAim(lp: LocalPlayer, hit: RayHit): number {
+    const nx = hit.px - hit.x;
+    const nz = hit.pz - hit.z;
+    if (Math.abs(nx) > 0) return 0;
+    if (Math.abs(nz) > 0) return 1;
+    return Math.abs(Math.sin(lp.entity.yaw)) > Math.abs(Math.cos(lp.entity.yaw)) ? 0 : 1;
+  }
+
+  /** the pet/interact button on a door: it swings open, or closes again */
+  private toggleDoor(lp: LocalPlayer, hit: RayHit): void {
+    void lp;
+    const i = worldIdx(hit.x, hit.y, hit.z);
+    if (hit.block === DOOR) {
+      if (!this.world.doorFacing.has(i)) this.world.doorFacing.set(i, this.doorFacingFromAim(lp, hit));
+      this.world.set(hit.x, hit.y, hit.z, DOOR_OPEN);
+      this.audio.doorOpen();
+      this.particles.burst(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, 0xd9a766, 5, 0.5);
+    } else if (hit.block === DOOR_OPEN) {
+      this.world.set(hit.x, hit.y, hit.z, DOOR);
+      this.audio.doorClose();
+      this.particles.burst(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, 0xd9a766, 5, 0.5);
+    }
+    this.world.revision++; // the swing itself is a change: let autosave catch it
+  }
+
+  /** plant one, look away, look back: a tree */
+  private growSaplings(): void {
+    for (const [i, planted] of [...this.saplings]) {
+      const x = Math.floor(i / (WORLD_SZ * WORLD_SY));
+      const rest = i - x * WORLD_SZ * WORLD_SY;
+      const z = Math.floor(rest / WORLD_SY);
+      const y = rest - z * WORLD_SY;
+      if (this.world.get(x, y, z) !== SAPLING) {
+        this.saplings.delete(i); // broken, blasted or built over — forget it
+        continue;
+      }
+      if (this.time - planted < this.saplingGrowSeconds) continue;
+      // needs a clear trunk path up, so it never punches through a roof
+      let room = true;
+      for (let k = 1; k <= 7 && y + k < WORLD_SY; k++) {
+        if (this.world.get(x, y + k, z) !== 0) { room = false; break; }
+      }
+      if (!room) {
+        this.saplings.set(i, this.time); // wait for the roof to go, then try again
+        continue;
+      }
+      this.saplings.delete(i);
+      plantTree(this.world, x, y, z, (this.seed ^ i) & 0x7fffffff, true);
+      this.audio.sparkle();
+      this.particles.burst(x + 0.5, y + 2, z + 0.5, 0x8ade68, 16, 1.2);
+      this.ui.toast('A sapling grew into a tree! 🌳');
+    }
+  }
+
   private hooks() {
     return {
       events: this.stepEvents,
@@ -545,6 +620,8 @@ export class Game {
         const def = blockDef(id);
         this.particles.burst(px + 0.5, py + 0.5, pz + 0.5, new THREE.Color(def.color[0], def.color[1], def.color[2]), 7, 0.7);
         if (def.sparkle) this.sparkleBlocks.add(worldIdx(px, py, pz));
+        if (id === SAPLING) this.saplings.set(worldIdx(px, py, pz), this.time);
+        if (id === DOOR) this.world.doorFacing.set(worldIdx(px, py, pz), this.doorFacingFromAim(lp, hit));
         if (def.explosive) {
           // dynamite lights the moment it is set down: grab a stick, run, boom
           this.dynamite.light(px, py, pz);
@@ -570,9 +647,18 @@ export class Game {
         this.audio.remove();
         this.particles.burst(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, new THREE.Color(def.color[0], def.color[1], def.color[2]), 9, 0.9);
         this.sparkleBlocks.delete(worldIdx(hit.x, hit.y, hit.z));
+        this.saplings.delete(worldIdx(hit.x, hit.y, hit.z));
+        if (isDoorBlock(hit.block)) this.world.doorFacing.delete(worldIdx(hit.x, hit.y, hit.z));
         void lp;
       },
       interact: (lp: LocalPlayer): void => {
+        // doors come first: the pet button is the family's "do something nice"
+        // button, and a door straight ahead is more pressing than an animal
+        const aim = lp.removeTarget;
+        if (aim && isDoorBlock(aim.block) && aim.dist <= 4.5) {
+          this.toggleDoor(lp, aim);
+          return;
+        }
         this.animals.petNearest(lp.entity.pos.x, lp.entity.pos.y + 0.8, lp.entity.pos.z, 2.4);
       },
     };
@@ -586,7 +672,10 @@ export class Game {
    * bookkeeping for blocks that no longer exist.
    */
   private onBlast(b: BlastInfo): void {
-    for (const i of b.removed) this.sparkleBlocks.delete(i);
+    for (const i of b.removed) {
+      this.sparkleBlocks.delete(i);
+      this.saplings.delete(i);
+    }
 
     const cx = b.x + 0.5, cy = b.y + 0.5, cz = b.z + 0.5;
     const range = b.radius * 2.4;
@@ -690,6 +779,7 @@ export class Game {
     this.animals.animals.forEach((a) => a.group.removeFromParent());
     this.animals = new AnimalWorld(this.scene, this.world, this.particles, this.audio, gen.spawnX, gen.spawnZ);
     this.sparkleBlocks.clear();
+    this.saplings.clear();
     this.dynamite.clear(); // no half-burnt sticks from the old world, please
     for (const p of this.players) p.respawnAt(this.spawnPoint.clone());
     this.lastRevision = this.world.revision;
@@ -768,6 +858,7 @@ export class Game {
       this.animals.update(dt);
       this.starField.update(this.time);
       this.dynamite.update(dt);
+      this.growSaplings();
 
       // ambient sparkles from placed sparkle blocks
       if (Math.random() < dt * 3) {

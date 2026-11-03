@@ -108,6 +108,21 @@ export class AudioKit {
     this.tone('sine', 1800, 1400, 0.25, 0.08);
   }
 
+  // ------------------------------------------------------------- doors
+
+  /** a door swinging open: a short wooden creak */
+  doorOpen(): void {
+    this.tone('sawtooth', 170, 250, 0.2, 0.09);
+    this.noise(0.1, 0.06, 1100, 0.04);
+  }
+
+  /** a door swinging shut: creak, then a soft thud */
+  doorClose(): void {
+    this.tone('sawtooth', 240, 170, 0.16, 0.08);
+    this.tone('triangle', 200, 110, 0.1, 0.16, 0.16);
+    this.noise(0.08, 0.12, 650, 0.17);
+  }
+
   // ------------------------------------------------------------- dynamite
 
   /** the fuse catching: paper thud, then a long hiss */

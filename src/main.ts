@@ -1,6 +1,7 @@
 import './ui/styles.css';
 import {
-  AIR, DYNAMITE, FLOWER_RED, FLOWER_YELLOW, GRASS, ROCK, SAND, SCORCH, STONE, TALLGRASS, WATER, WOOD,
+  AIR, DOOR, DOOR_OPEN, DYNAMITE, FLOWER_RED, FLOWER_YELLOW, GRASS, LEAVES, PLANKS, ROCK, SAND, SAPLING,
+  SCORCH, STAIRS, STONE, TALLGRASS, WATER, WOOD,
 } from './core/blocks';
 import { WORLD_SX, WORLD_SY, WORLD_SZ } from './core/world';
 import { Game } from './game';
@@ -24,7 +25,11 @@ async function boot(): Promise<void> {
     game,
     addVirtualPad: () => game.addVirtualPad('xbox'),
     dims: { sx: WORLD_SX, sy: WORLD_SY, sz: WORLD_SZ },
-    ids: { AIR, GRASS, STONE, SAND, ROCK, WATER, WOOD, FLOWER_RED, FLOWER_YELLOW, TALLGRASS, DYNAMITE, SCORCH },
+    ids: {
+      AIR, GRASS, STONE, SAND, ROCK, WATER, WOOD, PLANKS, LEAVES,
+      FLOWER_RED, FLOWER_YELLOW, TALLGRASS, DYNAMITE, SCORCH,
+      SAPLING, DOOR, DOOR_OPEN, STAIRS,
+    },
   };
 }
 

@@ -22,12 +22,13 @@ interface WorldSave {
   theme?: number;
   mods: Record<string, number>;
   collectedStars: number[];
+  doorFacing?: Record<string, number>;
 }
 
 function validSave(x: unknown): x is WorldSave {
   if (!x || typeof x !== 'object') return false;
   const s = x as WorldSave;
-  if (s.version !== 1) return false;
+  if (s.version !== 1 && s.version !== 2) return false;
   if (typeof s.seed !== 'number' || !Number.isInteger(s.seed)) return false;
   if (s.theme !== undefined && (typeof s.theme !== 'number' || !Number.isInteger(s.theme) || s.theme < 0 || s.theme > 64)) return false;
   if (!s.mods || typeof s.mods !== 'object') return false;
@@ -38,6 +39,13 @@ function validSave(x: unknown): x is WorldSave {
   }
   if (!Array.isArray(s.collectedStars)) return false;
   if (s.collectedStars.some((n) => !Number.isInteger(n) || n < 0)) return false;
+  if (s.doorFacing !== undefined) {
+    for (const [k, v] of Object.entries(s.doorFacing)) {
+      const i = Number(k);
+      if (!Number.isInteger(i) || i < 0 || i > 4_200_000) return false;
+      if (v !== 0 && v !== 1) return false;
+    }
+  }
   return true;
 }
 
@@ -113,7 +121,8 @@ async function main(): Promise<void> {
       } else {
         const mods = { ...prev.mods, ...incoming.mods };
         const collectedStars = [...new Set([...prev.collectedStars, ...incoming.collectedStars])].sort((a, b) => a - b);
-        writeWorld({ version: 1, seed: incoming.seed, theme, mods, collectedStars });
+        const doorFacing = { ...prev.doorFacing, ...incoming.doorFacing };
+        writeWorld({ version: 2, seed: incoming.seed, theme, mods, collectedStars, doorFacing });
       }
       res.json({ ok: true });
     } catch {
