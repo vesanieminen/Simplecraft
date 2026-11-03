@@ -1734,3 +1734,101 @@ test('the meadow has eight kinds of animal now, all petable', async ({ page }) =
     expect(herd.kinds).toContain(kind); // kinds cycle, so every one is guaranteed
   }
 });
+
+// -------------------------------------------------- reported bugs, kept fixed
+
+test('the block palette is a grid: dpad left/right step cells, up/down jump a whole row', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page);
+  await tap(page, 'palette');
+  await page.waitForSelector('.palette-grid');
+
+  const shape = await page.evaluate(() => {
+    const cells = [...document.querySelectorAll('.palette-cell')] as HTMLElement[];
+    const top0 = cells[0].offsetTop;
+    let cols = 1;
+    while (cols < cells.length && cells[cols].offsetTop === top0) cols++;
+    return { count: cells.length, cols };
+  });
+  expect(shape.count).toBeGreaterThan(6);
+  expect(shape.cols).toBeGreaterThan(1); // more than one row, or this test means nothing
+
+  const sel = () => page.evaluate(() =>
+    [...document.querySelectorAll('.palette-cell')].findIndex((c) => c.classList.contains('sel')));
+  const start = await sel();
+
+  // left and right walk the flat order...
+  await tap(page, 'right');
+  expect(await sel()).toBe((start + 1) % shape.count);
+  await tap(page, 'left');
+  expect(await sel()).toBe(start);
+
+  // ...and up/down move a whole row, keeping the column
+  await tap(page, 'down');
+  expect(await sel()).toBe(Math.min(start + shape.cols, shape.count - 1));
+  await tap(page, 'up');
+  expect(await sel()).toBe(start);
+
+  // up from the first row wraps to the last one, not to the previous cell
+  await tap(page, 'up');
+  const rows = Math.ceil(shape.count / shape.cols);
+  const lastRowStart = (rows - 1) * shape.cols;
+  const wrapped = await sel();
+  expect(wrapped).toBeGreaterThanOrEqual(Math.min(lastRowStart, shape.count - 1));
+});
+
+test('releasing the mouse stops building — no endless auto-placing', async ({ page }) => {
+  await boot(page);
+  await page.keyboard.press('Enter'); // keyboard-only join
+  await page.waitForFunction('window.__lbw.game.pendingJoins.size === 1');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction('window.__lbw.game.players.length === 1');
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  await page.evaluate((b: number) => { (window as any).__lbw.game.players[0].selected = b; }, ids.PLANKS);
+  const site = await clearRunway(page); // aim down the cleared strip, slightly at the ground
+
+  /** what is standing in the cleared strip (the clear leaves it empty) */
+  const builtHere = () => page.evaluate((s: { fx: number; fz: number; gy: number }) => {
+    const game = (window as any).__lbw.game;
+    let n = 0;
+    for (let x = s.fx - 4; x <= s.fx + 6; x++) {
+      for (let z = s.fz - 2; z <= s.fz + 2; z++) {
+        for (let y = s.gy + 1; y <= s.gy + 12; y++) if (game.world.get(x, y, z) !== 0) n++;
+      }
+    }
+    return n;
+  }, site);
+
+  expect(await builtHere()).toBe(0);
+  const cell = await page.evaluate(() => {
+    const t = (window as any).__lbw.game.players[0].target;
+    return { x: t.px, y: t.py, z: t.pz };
+  });
+  await page.mouse.move(640, 360);
+  await page.mouse.down({ button: 'right' }); // right button builds (Nov 2026 mapping)
+  await page.waitForFunction(
+    (c: Cell) => (window as any).__lbw.game.world.get(c.x, c.y, c.z) !== 0,
+    cell, { timeout: 5000 },
+  );
+  await page.mouse.up({ button: 'right' });
+
+  const built = await builtHere();
+  expect(built).toBeGreaterThanOrEqual(1); // the right-click built something
+
+  // the released button must never stay held — that is the endless-placing bug
+  const held = await page.evaluate(() => [...(window as any).__lbw.game.input.frame('keyboard').held]);
+  expect(held).not.toContain('place');
+
+  // and nothing new appears while free ground sits in front of the kid: a stuck
+  // build trigger would put another block down well inside this wait. (The wait
+  // is on purpose — the bug is a thing that must NOT happen.)
+  await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    e.yaw = Math.PI / 2;
+    e.pitch = -0.35;
+  });
+  await page.waitForTimeout(1500);
+  expect(await builtHere()).toBe(built);
+});
