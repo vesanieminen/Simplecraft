@@ -3,6 +3,14 @@ name: Test
 # The e2e suite is this project's safety net (no unit tests yet): a real
 # Chromium drives the game against the dev server on :3100, the same way
 # `npm test` does locally. Runs on every pull request and every push to main.
+#
+# The e2e job runs as four shards for speed. Sharding across separate VMs
+# (not extra workers in one job) is deliberate: every test shares one
+# server and one world-save directory, so in-job parallelism would let
+# tests stomp on each other's saved worlds. Each shard runs its tests
+# sequentially against its own fresh save dir; the split is by test index,
+# and the tests are self-contained (each boots the game and cleans after
+# itself), so shards don't depend on each other.
 
 on:
   pull_request:
@@ -19,9 +27,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  static:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      # a failure in one shard shouldn't cancel the others: the reports
+      # say which half of the suite broke
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -30,15 +57,14 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm run typecheck
-      # fresh world data: the suite shares one save between tests and its
-      # fuse/persistence checks assume a clean slate (same as the local loop)
+      # fresh world data: each shard shares one save between its tests and
+      # its fuse/persistence checks assume a clean slate (same as the local
+      # loop)
       - run: rm -rf /tmp/opencode/lbw-test-world
-      - run: npm test
-      - run: npm run build
+      - run: npm test -- --shard=${{ matrix.shard }}/4
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-report
+          name: playwright-report-shard-${{ matrix.shard }}
           path: playwright-report/
           retention-days: 7
