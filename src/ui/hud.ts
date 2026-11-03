@@ -62,8 +62,10 @@ export class Hud {
 
     this.hints = document.createElement('div');
     this.hints.className = 'hints';
+    // LT-position button builds, RT-position breaks (2026-11 control swap —
+    // on keyboard that means R-Click builds, L-Click breaks)
     this.hints.textContent =
-      `${b.rt} build · ${b.lt} break · ${b.a} jump · ${b.x} pet · ${b.y} blocks · ${b.start} menu`;
+      `${b.lt} build · ${b.rt} break · ${b.a} jump · ${b.x} pet/door · ${b.y} blocks · ${b.start} menu`;
 
     this.root.append(this.nameTag, this.stars, this.flyTag, this.crosshair, pod, this.hints);
   }

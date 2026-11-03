@@ -1,6 +1,6 @@
 /**
  * Keyboard & mouse source (optional alternate for player 1).
- * WASD move, arrow keys look, Space jump, LMB place, RMB remove,
+ * WASD move, arrow keys look, Space jump, RMB place, LMB remove,
  * Q/R cycle blocks, F palette, E interact, Esc menu/back, Enter confirm.
  */
 
@@ -44,12 +44,12 @@ export class KeyboardSource implements InputSource {
     window.addEventListener('keyup', (e: KeyboardEvent) => this.keys.delete(e.code));
     window.addEventListener('mousedown', (e: MouseEvent) => {
       if (e.button === 0) {
-        this.mousePlace = true;
-        this.gate.flagFresh('place');
-      }
-      if (e.button === 2) {
         this.mouseRemove = true;
         this.gate.flagFresh('remove');
+      }
+      if (e.button === 2) {
+        this.mousePlace = true;
+        this.gate.flagFresh('place');
       }
     });
     window.addEventListener('mouseup', (e: MouseEvent) => {

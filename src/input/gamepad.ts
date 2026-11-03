@@ -13,8 +13,8 @@ const BUTTON_MAP: Record<number, Action> = {
   3: 'palette',   // Y / Triangle
   4: 'prevBlock', // Left bumper
   5: 'nextBlock', // Right bumper
-  6: 'remove',    // Left trigger
-  7: 'place',     // Right trigger
+  6: 'place',     // Left trigger — building on LT, breaking on RT
+  7: 'remove',    // Right trigger   (swapped 2026-11: kids build more than they break)
   8: 'menu',      // Select/Share doubles as menu for kids? keep start only
   9: 'menu',      // Start / Options
   12: 'up',       // D-pad
