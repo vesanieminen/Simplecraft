@@ -347,17 +347,30 @@ function drawLogEnd(ctx: CanvasRenderingContext2D, ox: number): void {
   outline(ctx, ox, '#75491f');
 }
 
-/** planks: three boards with grain and a couple of nails */
+/** planks: four boards with real gaps, staggered butt joints, grain and nails */
 function drawPlanks(ctx: CanvasRenderingContext2D, ox: number): void {
-  rect(ctx, ox, 0, 0, S, S, '#e6ba78');
-  for (const y of [0, 11, 21]) {
-    rect(ctx, ox, 0, y, S, 10, '#f0c684');
-    rect(ctx, ox, 0, y + 10, S, 1, '#b0834a');
-    ctx.fillStyle = '#d3a463';
-    for (let i = 0; i < 5; i++) ctx.fillRect(ox + ((i * 7 + y) % S), y + 2 + (i % 3) * 2, 6, 1);
-    ctx.fillStyle = '#8f6a36';
-    ctx.fillRect(ox + 3, y + 2, 1, 1);
-    ctx.fillRect(ox + S - 5, y + 7, 1, 1);
+  rect(ctx, ox, 0, 0, S, S, '#a97e46'); // the dark gap behind the boards
+  for (const y of [0, 8, 16, 24]) {
+    rect(ctx, ox, 0, y, S, 7, '#f2c98c'); // the board
+    rect(ctx, ox, 0, y, S, 1, '#ffe3ae'); // bright top edge
+    rect(ctx, ox, 0, y + 6, S, 1, '#d3a463'); // shaded bottom edge
+    // long pale grain streaks
+    ctx.fillStyle = '#e2b473';
+    for (let i = 0; i < 4; i++) {
+      const gx = (i * 7 + y * 3 + 2) % 24;
+      ctx.fillRect(ox + gx, y + 1 + (i % 3) * 2, 6 + (i % 2) * 4, 1);
+    }
+    // staggered butt joint: where one board ends and the next begins
+    const seam = (y / 8) % 2 === 0 ? 6 : 22;
+    rect(ctx, ox, seam, y, 1, 7, '#a97e46');
+    rect(ctx, ox, seam + 1, y, 1, 7, '#ffe3ae');
+    // nail heads near both ends
+    for (const nx of [3, S - 5]) {
+      ctx.fillStyle = '#7c5a2e';
+      ctx.fillRect(ox + nx, y + 2, 2, 2);
+      ctx.fillStyle = '#fff7e0';
+      ctx.fillRect(ox + nx, y + 2, 1, 1);
+    }
   }
 }
 
