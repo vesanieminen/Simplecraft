@@ -53,8 +53,11 @@ export class KeyboardSource implements InputSource {
       }
     });
     window.addEventListener('mouseup', (e: MouseEvent) => {
-      if (e.button === 0) this.mousePlace = false;
-      if (e.button === 2) this.mouseRemove = false;
+      // must mirror the mousedown mapping exactly — button 0 breaks, button 2
+      // builds — or a released button stays "held" forever and the game keeps
+      // placing (or breaking) blocks on its own
+      if (e.button === 0) this.mouseRemove = false;
+      if (e.button === 2) this.mousePlace = false;
     });
     window.addEventListener('contextmenu', (e: Event) => e.preventDefault());
     window.addEventListener('wheel', (e: WheelEvent) => {
