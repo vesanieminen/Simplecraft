@@ -173,6 +173,15 @@ export class LocalPlayer {
     }
   }
 
+  /**
+   * Should this player's own camera see their avatar body? Third person only,
+   * and not when the camera is hugging them inside a build. Other players
+   * always see the body — the visibility is per-camera (three.js layers).
+   */
+  get showOwnBody(): boolean {
+    return !this.firstPerson && this.cameraDist >= 2.4;
+  }
+
   private updateCamera(dt: number): void {
     const e = this.entity;
     const head = new THREE.Vector3(e.pos.x, e.pos.y + 1.45, e.pos.z);
@@ -180,7 +189,6 @@ export class LocalPlayer {
     const k = 1 - Math.exp(-22 * dt);
     if (this.firstPerson) {
       this.camera.position.copy(head);
-      e.avatar.group.visible = false;
     } else {
       // third-person with terrain-aware pull-in
       const probe = raycastVoxel(this.world, head.x, head.y, head.z, -dir.x, -dir.y, -dir.z, 8, hitSolid);
@@ -190,26 +198,9 @@ export class LocalPlayer {
       // smooth camera position
       this.camPos.lerp(want, k);
       this.camera.position.copy(this.camPos);
-      e.avatar.group.visible = true;
-      // fade our own body away when the camera hugs us (inside builds)
-      const fade = this.cameraDist < 2.4;
-      e.avatar.group.traverse((o) => {
-        if (o.userData.noFade) return;
-        const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
-        if (!m) return;
-        const mats = Array.isArray(m) ? m : [m];
-        for (const mm of mats) {
-          if (fade) {
-            mm.transparent = true;
-            mm.opacity = 0.45;
-            mm.depthWrite = false;
-          } else {
-            mm.transparent = false;
-            mm.opacity = 1;
-            mm.depthWrite = true;
-          }
-        }
-      });
+      // When the camera hugs us (inside a build), our own body is hidden from
+      // *our* view via layers (see Game.applyAvatarLayers) — never faded out,
+      // because other players share the very same avatar meshes and materials.
     }
     this.camera.quaternion.setFromRotationMatrix(
       new THREE.Matrix4().lookAt(this.camera.position, head.clone().addScaledVector(dir, 2), new THREE.Vector3(0, 1, 0)),

@@ -732,6 +732,29 @@ export class Game {
     }
   }
 
+  /**
+   * Per-view avatar visibility via three.js layers: every player's body lives
+   * on its own layer, which every camera enables EXCEPT the body owner's, and
+   * the owner's camera enables it only while their body should be visible to
+   * them (third person, camera not hugging them). Before this, first person
+   * hid the avatar scene-wide — the other kids' screens lost that player
+   * entirely, ring and shadow included. Ring + shadow stay on layer 0, so
+   * everyone always finds themselves on the map.
+   */
+  private applyAvatarLayers(cameras: THREE.Camera[]): void {
+    const players = this.players;
+    for (let i = 0; i < players.length; i++) {
+      players[i].entity.avatar.body.traverse((o) => o.layers.set(1 + i));
+    }
+    for (const cam of cameras) {
+      cam.layers.set(0);
+      for (let i = 0; i < players.length; i++) cam.layers.enable(1 + i);
+    }
+    for (let i = 0; i < players.length; i++) {
+      if (!players[i].showOwnBody) players[i].camera.layers.disable(1 + i);
+    }
+  }
+
   private loop = (now: number): void => {
     this.rafId = requestAnimationFrame(this.loop);
     const dt = Math.min(0.05, (now - (this.lastNow ?? now)) / 1000);
@@ -801,6 +824,7 @@ export class Game {
       this.idleCamera.lookAt(this.spawnPoint.x, this.spawnPoint.y, this.spawnPoint.z);
       cameras.push(this.idleCamera);
     }
+    this.applyAvatarLayers(cameras);
     this.viewportMgr.render(this.renderer, this.scene, cameras);
 
     // HUD updates
