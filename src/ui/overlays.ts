@@ -181,10 +181,20 @@ export class PaletteOverlay extends Overlay {
 
   private refresh(): void {
     this.cells.forEach((el, i) => el.classList.toggle('sel', i === this.sel));
+    this.cells[this.sel]?.scrollIntoView({ block: 'nearest' });
   }
 
-  private move(d: number): void {
-    let n = this.sel + d;
+  /** how many cells fit in a row — measured from the live grid, so the CSS
+   *  column count and the nav can never drift apart */
+  private cols(): number {
+    if (this.cells.length === 0) return 1;
+    const top0 = this.cells[0].offsetTop;
+    let n = 1;
+    while (n < this.cells.length && this.cells[n].offsetTop === top0) n++;
+    return n;
+  }
+
+  private select(n: number): void {
     if (n < 0) n = PALETTE.length - 1;
     if (n >= PALETTE.length) n = 0;
     this.sel = n;
@@ -192,10 +202,31 @@ export class PaletteOverlay extends Overlay {
     this.refresh();
   }
 
+  private move(d: number): void {
+    this.select(this.sel + d);
+  }
+
+  /** up/down walk whole rows, staying in the same column where possible */
+  private moveVert(d: number): void {
+    const cols = this.cols();
+    const col = this.sel % cols;
+    const rows = Math.ceil(PALETTE.length / cols);
+    let row = Math.floor(this.sel / cols) + d;
+    if (row < 0) row = rows - 1;
+    if (row >= rows) row = 0;
+    let n = row * cols + col;
+    if (n >= PALETTE.length) n = PALETTE.length - 1; // a short last row: snap to its end
+    this.sel = n;
+    this.audio.uiMove();
+    this.refresh();
+  }
+
   tick(frame: FrameControls, dt: number): void {
     const nav = this.nav.tick(frame, dt);
-    if (nav.right || nav.down) this.move(1);
-    if (nav.left || nav.up) this.move(-1);
+    if (nav.right) this.move(1);
+    if (nav.left) this.move(-1);
+    if (nav.down) this.moveVert(1);
+    if (nav.up) this.moveVert(-1);
     if (frame.pressed.has('nextBlock')) this.move(1);
     if (frame.pressed.has('prevBlock')) this.move(-1);
     if (nav.confirm) {
@@ -287,6 +318,7 @@ export class PlayerMenu extends Overlay {
       const v = r.querySelector('.mi-val');
       if (v) v.textContent = this.items[i].val?.() ?? '';
     });
+    this.rows[this.sel]?.scrollIntoView({ block: 'nearest' });
   }
 
   tick(frame: FrameControls, dt: number): void {
@@ -370,6 +402,7 @@ export class GrownUpsMenu extends Overlay {
       const v = r.querySelector('.mi-val');
       if (v) v.textContent = this.items[i].val?.() ?? '';
     });
+    this.rows[this.sel]?.scrollIntoView({ block: 'nearest' });
   }
 
   tick(frame: FrameControls, dt: number): void {
@@ -516,10 +549,10 @@ const PAD_ROWS: [string, string][] = [
   ['LEFT STICK', 'Walk around'],
   ['RIGHT STICK', 'Look / aim'],
   ['A', 'Jump'],
-  ['RT', 'Place block'],
-  ['LT', 'Break block'],
+  ['LT', 'Place block'],
+  ['RT', 'Break block'],
   ['LB / RB', 'Prev / next block'],
-  ['X', 'Pet animals'],
+  ['X', 'Pet animals · open doors'],
   ['Y', 'Block palette'],
   ['START', 'Menu'],
   ['B', 'Back'],

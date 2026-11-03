@@ -243,9 +243,18 @@ export function generateTerrain(world: World, theme?: WorldTheme): GeneratedWorl
   return { spawnX: cx + 0.5, spawnZ: cz + 0.5, spawnY };
 }
 
-function plantTree(world: World, x: number, y: number, z: number, seed: number): void {
+/**
+ * Plant one tree (trunk + rounded canopy) with its feet at x,y,z.
+ * Also used when a planted sapling finally grows up.
+ */
+/**
+ * Plant one tree (trunk + rounded canopy) with its feet at x,y,z.
+ * Also used when a planted sapling finally grows up — then the tree must be
+ * recorded as a player modification, so it survives the reload.
+ */
+export function plantTree(world: World, x: number, y: number, z: number, seed: number, recordMod = false): void {
   const trunk = 4 + Math.floor(hash2(x, z, seed + 77) * 3); // 4..6
-  for (let i = 0; i < trunk; i++) world.set(x, y + i, z, WOOD, false);
+  for (let i = 0; i < trunk; i++) world.set(x, y + i, z, WOOD, recordMod);
   const top = y + trunk;
   // rounded blob canopy
   for (let ox = -2; ox <= 2; ox++) {
@@ -256,7 +265,7 @@ function plantTree(world: World, x: number, y: number, z: number, seed: number):
         if (ox === 0 && oz === 0 && oy < 0) continue;
         const bx = x + ox, by = top + oy, bz = z + oz;
         if (!world.inBounds(bx, by, bz)) continue;
-        if (world.get(bx, by, bz) === AIR) world.set(bx, by, bz, LEAVES, false);
+        if (world.get(bx, by, bz) === AIR) world.set(bx, by, bz, LEAVES, recordMod);
       }
     }
   }

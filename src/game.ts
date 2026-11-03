@@ -7,13 +7,16 @@
 import * as THREE from 'three';
 import { AudioKit } from './core/audio';
 import { AnimalWorld } from './core/animals';
-import { blockDef, isExplosiveBlock, isSolidBlock, ROCK, WATER } from './core/blocks';
+import {
+  blockDef, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, isDoorBlock, isDoorTopBlock,
+  isExplosiveBlock, isSolidBlock, ROCK, SAPLING, WATER,
+} from './core/blocks';
 import { StarField } from './core/collectibles';
 import { BlastInfo, DynamiteManager } from './core/dynamite';
 import { ParticleSystem } from './core/particles';
 import { RayHit } from './core/raycast';
 import { blockAabb, boxesOverlap, playerAabb } from './core/physics';
-import { DEFAULT_SEED, generateTerrain, themeOf, WORLD_THEMES } from './core/terrain';
+import { DEFAULT_SEED, generateTerrain, plantTree, themeOf, WORLD_THEMES } from './core/terrain';
 import { idx as worldIdx, World, WorldSaveData, WORLD_SX, WORLD_SY, WORLD_SZ } from './core/world';
 import { InputManager } from './input/inputManager';
 import { KeyboardSource } from './input/keyboard';
@@ -32,6 +35,14 @@ import {
 import { UiManager } from './ui/uiManager';
 
 const MAX_PLAYERS = 4;
+
+/** flat world index back to x/y/z — the inverse of world.idx */
+function unidx(i: number): [number, number, number] {
+  const x = Math.floor(i / (WORLD_SZ * WORLD_SY));
+  const rest = i - x * WORLD_SZ * WORLD_SY;
+  const z = Math.floor(rest / WORLD_SY);
+  return [x, rest - z * WORLD_SY, z];
+}
 
 interface PendingJoin {
   source: InputSource;
@@ -83,6 +94,14 @@ export class Game {
   private time = 0;
   private sparkleBlocks = new Set<number>();
   dynamite!: DynamiteManager;
+  /**
+   * Player-planted saplings: flat world index -> game time when planted.
+   * After `saplingGrowSeconds` of game time (public so tests can hurry it)
+   * they grow into real trees. Saplings restored from a save grow about ten
+   * seconds after joining, so a planted forest keeps living between sessions.
+   */
+  saplings = new Map<number, number>();
+  saplingGrowSeconds = 30;
   private lastLandSound = new Map<number, number>();
   private stepEvents = {
     landed: false, bounced: null as number | null,
@@ -92,6 +111,8 @@ export class Game {
   private rafId = 0;
 
   async init(): Promise<void> {
+    this.loadSettings(); // layout + sound survive reloads
+
     // ---- world (seed + theme, overridable via ?seed=..&world=0..N) ----
     const params = new URLSearchParams(location.search);
     this.seed = Number(params.get('seed')) || DEFAULT_SEED;
@@ -118,6 +139,11 @@ export class Game {
 
     // sparkle blocks placed by players emit drifting sparkles
     for (const [i, b] of this.world.mods) if (blockDef(b).sparkle) this.sparkleBlocks.add(i);
+
+    // saplings that came back from a save keep growing from the moment you join
+    for (const [i, b] of this.world.mods) {
+      if (b === SAPLING) this.saplings.set(i, -this.saplingGrowSeconds + 10);
+    }
 
     this.animals = new AnimalWorld(this.scene, this.world, this.particles, this.audio, gen.spawnX, gen.spawnZ);
     this.starField = new StarField(this.scene, this.world, gen.spawnX, gen.spawnZ);
@@ -378,7 +404,7 @@ export class Game {
         toggleFly: () => { p.entity.flying = !p.entity.flying; p.entity.vel.y = 0; },
         toggleCamera: () => { p.firstPerson = !p.firstPerson; },
         goHome: () => { p.respawnAt(this.spawnPoint.clone()); },
-        toggleSound: () => { this.audio.setMuted(!this.audio.muted); },
+        toggleSound: () => { this.audio.setMuted(!this.audio.muted); this.saveSettings(); },
         openHelp: () => {
           this.ui.clearOverlays(idx);
           const h = new HelpOverlay(this.audio, this.typeOf(p));
@@ -393,6 +419,7 @@ export class Game {
               const order: SplitLayout[] = ['auto', 'horizontal', 'vertical', 'grid2x2'];
               this.layout = order[(order.indexOf(this.layout) + 1) % order.length];
               this.resize();
+              this.saveSettings();
               return this.layout === 'auto' ? 'Smart'
                 : this.layout === 'horizontal' ? 'Left/Right'
                 : this.layout === 'vertical' ? 'Up/Down' : '2×2 Grid';
@@ -517,6 +544,74 @@ export class Game {
 
   // ------------------------------------------------------------ building
 
+  /**
+   * Which way a door's panel stands: 0 = thin along x, 1 = thin along z.
+   * Taken from the face the placement/aim hit (the panel lies in the wall's
+   * plane); when a door is patted out of flat ground, from where the player
+   * is looking.
+   */
+  private doorFacingFromAim(lp: LocalPlayer, hit: RayHit): number {
+    const nx = hit.px - hit.x;
+    const nz = hit.pz - hit.z;
+    if (Math.abs(nx) > 0) return 0;
+    if (Math.abs(nz) > 0) return 1;
+    return Math.abs(Math.sin(lp.entity.yaw)) > Math.abs(Math.cos(lp.entity.yaw)) ? 0 : 1;
+  }
+
+  /** the pet/interact button on a door: the whole door swings open, or closes */
+  private toggleDoor(lp: LocalPlayer, hit: RayHit): void {
+    // a door is two cells tall; aim at either half and the pair swings together
+    const yBottom = isDoorTopBlock(hit.block) ? hit.y - 1 : hit.y;
+    const bottom = this.world.get(hit.x, yBottom, hit.z);
+    const top = this.world.get(hit.x, yBottom + 1, hit.z);
+    const parts: [number, number][] = []; // [y, block id]
+    if (isDoorBlock(bottom) && !isDoorTopBlock(bottom)) {
+      parts.push([yBottom, bottom]);
+      if (isDoorTopBlock(top)) parts.push([yBottom + 1, top]);
+    } else {
+      // a half standing on its own: a door left over from an old one-block save
+      parts.push([hit.y, hit.block]);
+    }
+    const opening = parts.some(([, b]) => b === DOOR || b === DOOR_TOP);
+    for (const [y, b] of parts) {
+      const to = b === DOOR ? DOOR_OPEN : b === DOOR_TOP ? DOOR_TOP_OPEN
+        : b === DOOR_OPEN ? DOOR : b === DOOR_TOP_OPEN ? DOOR_TOP : b;
+      this.world.set(hit.x, y, hit.z, to);
+      const i = worldIdx(hit.x, y, hit.z);
+      if (!this.world.doorFacing.has(i)) this.world.doorFacing.set(i, this.doorFacingFromAim(lp, hit));
+    }
+    if (opening) this.audio.doorOpen();
+    else this.audio.doorClose();
+    this.particles.burst(hit.x + 0.5, yBottom + 1, hit.z + 0.5, 0xd9a766, 6, 0.6);
+    this.world.revision++; // the swing itself is a change: let autosave catch it
+  }
+
+  /** plant one, look away, look back: a tree */
+  private growSaplings(): void {
+    for (const [i, planted] of [...this.saplings]) {
+      const [x, y, z] = unidx(i);
+      if (this.world.get(x, y, z) !== SAPLING) {
+        this.saplings.delete(i); // broken, blasted or built over — forget it
+        continue;
+      }
+      if (this.time - planted < this.saplingGrowSeconds) continue;
+      // needs a clear trunk path up, so it never punches through a roof
+      let room = true;
+      for (let k = 1; k <= 7 && y + k < WORLD_SY; k++) {
+        if (this.world.get(x, y + k, z) !== 0) { room = false; break; }
+      }
+      if (!room) {
+        this.saplings.set(i, this.time); // wait for the roof to go, then try again
+        continue;
+      }
+      this.saplings.delete(i);
+      plantTree(this.world, x, y, z, (this.seed ^ i) & 0x7fffffff, true);
+      this.audio.sparkle();
+      this.particles.burst(x + 0.5, y + 2, z + 0.5, 0x8ade68, 16, 1.2);
+      this.ui.toast('A sapling grew into a tree! 🌳');
+    }
+  }
+
   private hooks() {
     return {
       events: this.stepEvents,
@@ -525,10 +620,25 @@ export class Game {
         if (!this.world.inBounds(px, py, pz)) return false;
         if (py <= 0) return false;
         const id = lp.selected;
-        const b = blockAabb(px, py, pz);
+        // A door is TWO blocks high and you always build it from its bottom
+        // half: the upper half comes with it, so the cell above has to be free.
+        if (isDoorTopBlock(id)) return false;
+        const door = id === DOOR;
+        if (door) {
+          const above = this.world.get(px, py + 1, pz);
+          if (!this.world.inBounds(px, py + 1, pz) || isSolidBlock(above) || above === WATER) {
+            this.particles.burst(px + 0.5, py + 0.5, pz + 0.5, 0xff5d5d, 4, 0.4);
+            return false;
+          }
+        }
+        const cells: [number, number, number][] =
+          door ? [[px, py, pz], [px, py + 1, pz]] : [[px, py, pz]];
+        const footprints = cells.map(([cx, cy, cz]) => blockAabb(cx, cy, cz));
         // never trap a player
         for (const other of this.players) {
-          if (isSolidBlock(id) && boxesOverlap(playerAabb(other.entity.pos.x, other.entity.pos.y, other.entity.pos.z), b)) {
+          if (!isSolidBlock(id)) continue;
+          const pb = playerAabb(other.entity.pos.x, other.entity.pos.y, other.entity.pos.z);
+          if (footprints.some((b) => boxesOverlap(pb, b))) {
             this.particles.burst(px + 0.5, py + 0.5, pz + 0.5, 0xff5d5d, 4, 0.4);
             return false;
           }
@@ -537,14 +647,22 @@ export class Game {
           for (const a of this.animals.animals) {
             const ab = blockAabb(a.pos.x - 0.3, a.pos.y, a.pos.z - 0.3);
             ab.w = ab.d = 0.6; ab.h = 0.8;
-            if (boxesOverlap(ab, b)) return false;
+            if (footprints.some((b) => boxesOverlap(ab, b))) return false;
           }
         }
-        this.world.set(px, py, pz, id);
+        const toSet: [number, number, number, number][] =
+          door ? [[px, py, pz, DOOR], [px, py + 1, pz, DOOR_TOP]] : [[px, py, pz, id]];
+        const facing = door ? this.doorFacingFromAim(lp, hit) : 0;
+        for (const [cx, cy, cz, cid] of toSet) {
+          this.world.set(cx, cy, cz, cid);
+          const i = worldIdx(cx, cy, cz);
+          if (door) this.world.doorFacing.set(i, facing);
+          if (blockDef(cid).sparkle) this.sparkleBlocks.add(i);
+        }
         this.audio.place();
         const def = blockDef(id);
         this.particles.burst(px + 0.5, py + 0.5, pz + 0.5, new THREE.Color(def.color[0], def.color[1], def.color[2]), 7, 0.7);
-        if (def.sparkle) this.sparkleBlocks.add(worldIdx(px, py, pz));
+        if (id === SAPLING) this.saplings.set(worldIdx(px, py, pz), this.time);
         if (def.explosive) {
           // dynamite lights the moment it is set down: grab a stick, run, boom
           this.dynamite.light(px, py, pz);
@@ -566,13 +684,39 @@ export class Game {
           this.particles.burst(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, 0xff5d5d, 4, 0.4);
           return;
         }
-        this.world.set(hit.x, hit.y, hit.z, 0);
+        // a door is one thing in two cells: breaking either half takes the whole
+        // door (a lone half from an old one-block save breaks on its own)
+        const cells: [number, number][] = [];
+        if (isDoorBlock(hit.block)) {
+          const yBottom = isDoorTopBlock(hit.block) ? hit.y - 1 : hit.y;
+          const bottom = this.world.get(hit.x, yBottom, hit.z);
+          const top = this.world.get(hit.x, yBottom + 1, hit.z);
+          if (isDoorBlock(bottom) && !isDoorTopBlock(bottom)) cells.push([yBottom, bottom]);
+          if (isDoorTopBlock(top)) cells.push([yBottom + 1, top]);
+          if (cells.length === 0) cells.push([hit.y, hit.block]);
+        } else {
+          cells.push([hit.y, hit.block]);
+        }
+        for (const [y, b] of cells) {
+          this.world.set(hit.x, y, hit.z, 0);
+          const i = worldIdx(hit.x, y, hit.z);
+          this.world.doorFacing.delete(i);
+          this.sparkleBlocks.delete(i);
+          this.saplings.delete(i);
+          const c = blockDef(b).color;
+          this.particles.burst(hit.x + 0.5, y + 0.5, hit.z + 0.5, new THREE.Color(c[0], c[1], c[2]), 9, 0.9);
+        }
         this.audio.remove();
-        this.particles.burst(hit.x + 0.5, hit.y + 0.5, hit.z + 0.5, new THREE.Color(def.color[0], def.color[1], def.color[2]), 9, 0.9);
-        this.sparkleBlocks.delete(worldIdx(hit.x, hit.y, hit.z));
         void lp;
       },
       interact: (lp: LocalPlayer): void => {
+        // doors come first: the pet button is the family's "do something nice"
+        // button, and a door straight ahead is more pressing than an animal
+        const aim = lp.removeTarget;
+        if (aim && isDoorBlock(aim.block) && aim.dist <= 4.5) {
+          this.toggleDoor(lp, aim);
+          return;
+        }
         this.animals.petNearest(lp.entity.pos.x, lp.entity.pos.y + 0.8, lp.entity.pos.z, 2.4);
       },
     };
@@ -586,7 +730,18 @@ export class Game {
    * bookkeeping for blocks that no longer exist.
    */
   private onBlast(b: BlastInfo): void {
-    for (const i of b.removed) this.sparkleBlocks.delete(i);
+    for (const i of b.removed) {
+      this.sparkleBlocks.delete(i);
+      this.saplings.delete(i);
+      this.world.doorFacing.delete(i);
+      // a blast that ate the bottom half of a door would leave the upper half
+      // hanging in the air, so bring it down too
+      const [x, y, z] = unidx(i);
+      if (y + 1 < WORLD_SY && isDoorTopBlock(this.world.get(x, y + 1, z))) {
+        this.world.set(x, y + 1, z, 0);
+        this.world.doorFacing.delete(worldIdx(x, y + 1, z));
+      }
+    }
 
     const cx = b.x + 0.5, cy = b.y + 0.5, cz = b.z + 0.5;
     const range = b.radius * 2.4;
@@ -616,6 +771,31 @@ export class Game {
   }
 
   // ------------------------------------------------------------ persistence
+
+  // -------------------------------------------------------- global settings
+  // The few grown-up settings that belong to the whole browser (split-screen
+  // layout, sound on/off) keep their own little localStorage key, so a
+  // family's tablet stays the way they left it.
+
+  private settingsKey = 'lbw-settings';
+
+  private loadSettings(): void {
+    try {
+      const raw = localStorage.getItem(this.settingsKey);
+      if (!raw) return;
+      const s = JSON.parse(raw) as { layout?: string; muted?: boolean };
+      if (s.layout === 'auto' || s.layout === 'horizontal' || s.layout === 'vertical' || s.layout === 'grid2x2') {
+        this.layout = s.layout;
+      }
+      if (typeof s.muted === 'boolean') this.audio.muted = s.muted;
+    } catch { /* corrupted settings: defaults win */ }
+  }
+
+  private saveSettings(): void {
+    try {
+      localStorage.setItem(this.settingsKey, JSON.stringify({ layout: this.layout, muted: this.audio.muted }));
+    } catch { /* storage unavailable */ }
+  }
 
   // ---------------------------------------------------------- GH Pages build
   // When the game is hosted statically (no local server), the API does not
@@ -690,6 +870,7 @@ export class Game {
     this.animals.animals.forEach((a) => a.group.removeFromParent());
     this.animals = new AnimalWorld(this.scene, this.world, this.particles, this.audio, gen.spawnX, gen.spawnZ);
     this.sparkleBlocks.clear();
+    this.saplings.clear();
     this.dynamite.clear(); // no half-burnt sticks from the old world, please
     for (const p of this.players) p.respawnAt(this.spawnPoint.clone());
     this.lastRevision = this.world.revision;
@@ -732,6 +913,29 @@ export class Game {
     }
   }
 
+  /**
+   * Per-view avatar visibility via three.js layers: every player's body lives
+   * on its own layer, which every camera enables EXCEPT the body owner's, and
+   * the owner's camera enables it only while their body should be visible to
+   * them (third person, camera not hugging them). Before this, first person
+   * hid the avatar scene-wide — the other kids' screens lost that player
+   * entirely, ring and shadow included. Ring + shadow stay on layer 0, so
+   * everyone always finds themselves on the map.
+   */
+  private applyAvatarLayers(cameras: THREE.Camera[]): void {
+    const players = this.players;
+    for (let i = 0; i < players.length; i++) {
+      players[i].entity.avatar.body.traverse((o) => o.layers.set(1 + i));
+    }
+    for (const cam of cameras) {
+      cam.layers.set(0);
+      for (let i = 0; i < players.length; i++) cam.layers.enable(1 + i);
+    }
+    for (let i = 0; i < players.length; i++) {
+      if (!players[i].showOwnBody) players[i].camera.layers.disable(1 + i);
+    }
+  }
+
   private loop = (now: number): void => {
     this.rafId = requestAnimationFrame(this.loop);
     const dt = Math.min(0.05, (now - (this.lastNow ?? now)) / 1000);
@@ -745,6 +949,7 @@ export class Game {
       this.animals.update(dt);
       this.starField.update(this.time);
       this.dynamite.update(dt);
+      this.growSaplings();
 
       // ambient sparkles from placed sparkle blocks
       if (Math.random() < dt * 3) {
@@ -801,6 +1006,7 @@ export class Game {
       this.idleCamera.lookAt(this.spawnPoint.x, this.spawnPoint.y, this.spawnPoint.z);
       cameras.push(this.idleCamera);
     }
+    this.applyAvatarLayers(cameras);
     this.viewportMgr.render(this.renderer, this.scene, cameras);
 
     // HUD updates

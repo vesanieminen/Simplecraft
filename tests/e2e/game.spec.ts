@@ -186,7 +186,7 @@ test('both local players move independently', async ({ page }) => {
   });
 });
 
-test('RT places a block and LT removes it', async ({ page }) => {
+test('the build trigger places a block and the break trigger removes it', async ({ page }) => {
   await boot(page);
   await joinWithPad(page);
   await page.waitForTimeout(300);
@@ -1340,4 +1340,495 @@ test('the kids are dressed: knitted jumpers, denim legs, a faced head', async ({
   expect(cloth.multiFace).toBe(1);                 // the jumper's front is its own artwork
   expect(cloth.faceMesh).toBe(1);                  // the little face is still there
   expect(cloth.textures).toBeGreaterThanOrEqual(3); // knit, denim and the jumper front differ
+});
+
+// ------------------------------------------------------- animals, doors, stairs, saplings
+
+/** flattens a strip of the starting meadow and faces the player down it */
+async function clearRunway(page: Page): Promise<{ fx: number; fz: number; gy: number }> {
+  return page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    const e = game.players[0].entity;
+    const fx = Math.floor(e.pos.x), fz = Math.floor(e.pos.z);
+    const gy = game.world.surfaceY(fx, fz);
+    for (let x = fx - 4; x <= fx + 6; x++) {
+      for (let z = fz - 2; z <= fz + 2; z++) {
+        for (let y = gy + 1; y <= gy + 12; y++) game.world.set(x, y, z, 0); // tall: whole trees too
+      }
+    }
+    e.yaw = Math.PI / 2; // face +x
+    e.pitch = -0.6; // look slightly down at the ground ahead
+    return { fx, fz, gy };
+  });
+}
+
+/** selects a block, aims, presses the build trigger and reports the cell it landed in */
+async function placeSelected(page: Page, blockId: number): Promise<Cell> {
+  await page.evaluate((b: number) => {
+    (window as any).__lbw.game.players[0].selected = b;
+  }, blockId);
+  await page.waitForFunction('window.__lbw.game.players[0].target !== null', null, { timeout: 15000 });
+  const cell = await page.evaluate(() => {
+    const t = (window as any).__lbw.game.players[0].target;
+    return { x: t.px, y: t.py, z: t.pz };
+  });
+  // one block per hold: release as soon as it lands, before the auto-repeat
+  // (0.28 s of game time) can put a second one down
+  await page.evaluate(() => (window as any).__testPad.set('place', true));
+  await page.waitForFunction(
+    (c: Cell) => (window as any).__lbw.game.world.get(c.x, c.y, c.z) !== 0,
+    cell, { timeout: 4000 },
+  );
+  await page.evaluate(() => (window as any).__testPad.set('place', false));
+  return cell;
+}
+
+test('doors: two blocks high and half a block deep — build, pat open, walk through, break, remember', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  const site = await clearRunway(page);
+
+  /** the doorFacing entry for a cell */
+  const facingAt = (c: Cell, dy = 0) => page.evaluate((arg: { c: Cell; dy: number }) => {
+    const { sz, sy } = (window as any).__lbw.dims;
+    return (window as any).__lbw.game.world.doorFacing.get((arg.c.x * sz + arg.c.z) * sy + arg.c.y + arg.dy);
+  }, { c, dy });
+  const blockAt = (c: Cell, dy = 0) =>
+    page.evaluate((arg: { c: Cell; dy: number }) => (window as any).__lbw.game.world.get(arg.c.x, arg.c.y + arg.dy, arg.c.z), { c, dy });
+
+  // build a door with the build trigger: it fills TWO cells and nothing more
+  const door = await placeSelected(page, ids.DOOR);
+  expect(await blockAt(door)).toBe(ids.DOOR);
+  expect(await blockAt(door, 1)).toBe(ids.DOOR_TOP);
+  expect(await blockAt(door, 2)).toBe(ids.AIR); // no second door from the auto-repeat
+  const swing = await facingAt(door);
+  expect(swing === 0 || swing === 1).toBe(true);
+  expect(await facingAt(door, 1)).toBe(swing); // the upper half remembers it too
+
+  // fill the wall around it so the door is the only way through
+  await page.evaluate((c: Cell) => {
+    const game = (window as any).__lbw.game;
+    for (const dy of [0, 1]) {
+      game.world.set(c.x, c.y + dy, c.z - 1, (window as any).__lbw.ids.PLANKS);
+      game.world.set(c.x, c.y + dy, c.z + 1, (window as any).__lbw.ids.PLANKS);
+    }
+  }, door);
+
+  // walk into the CLOSED door: the panel is only half a block deep, so a kid
+  // stops right at the wood — half a block sooner than a full cube would
+  await page.evaluate((arg: { c: Cell; gy: number; pz: number }) => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    e.pos.set(arg.c.x + 2.5, arg.gy + 1, arg.pz);
+    e.vel.set(0, 0, 0);
+    e.yaw = -Math.PI / 2; // face the door
+    e.pitch = -0.2;
+    (window as any).__testPad.setMove(0, -1);
+  }, { c: door, gy: site.gy, pz: site.fz + 0.5 });
+  await waitForStop(page);
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+  const blockedX = await page.evaluate(() => (window as any).__lbw.game.players[0].entity.pos.x);
+  expect(blockedX).toBeGreaterThan(door.x + 0.95); // stopped at the panel face
+  expect(blockedX).toBeLessThan(door.x + 1.2);     // …not half a block short of it
+
+  // the pet button, aimed at the door: the whole two-block door swings open
+  await page.evaluate(() => {
+    (window as any).__lbw.game.players[0].entity.pitch = -0.75; // look down right in front
+  });
+  await page.waitForFunction((bids: number[]) => {
+    const t = (window as any).__lbw.game.players[0].removeTarget;
+    return t !== null && bids.includes(t.block);
+  }, [ids.DOOR, ids.DOOR_TOP], { timeout: 8000 });
+  await tap(page, 'interact');
+  expect(await blockAt(door)).toBe(ids.DOOR_OPEN);
+  expect(await blockAt(door, 1)).toBe(ids.DOOR_TOP_OPEN);
+
+  // and now walking goes straight through it
+  await page.evaluate(() => (window as any).__testPad.setMove(0, -1));
+  await page.waitForFunction(
+    (c: Cell) => (window as any).__lbw.game.players[0].entity.pos.x < c.x - 0.4,
+    door, { timeout: 20000 },
+  );
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+
+  // pat it from the other side: both halves close again
+  await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    e.yaw = Math.PI / 2;
+    e.pitch = -0.75;
+  });
+  await page.waitForFunction((bids: number[]) => {
+    const t = (window as any).__lbw.game.players[0].removeTarget;
+    return t !== null && bids.includes(t.block);
+  }, [ids.DOOR_OPEN, ids.DOOR_TOP_OPEN], { timeout: 8000 });
+  await tap(page, 'interact');
+  expect(await blockAt(door)).toBe(ids.DOOR);
+  expect(await blockAt(door, 1)).toBe(ids.DOOR_TOP);
+
+  // breaking either half takes the whole door down, swing records and all
+  await tap(page, 'remove');
+  expect(await blockAt(door)).toBe(ids.AIR);
+  expect(await blockAt(door, 1)).toBe(ids.AIR);
+  expect(await facingAt(door)).toBeUndefined();
+  expect(await facingAt(door, 1)).toBeUndefined();
+
+  // build a fresh one and the save carries both cells and both swings
+  await clearRunway(page);
+  const door2 = await placeSelected(page, ids.DOOR);
+  const saved = await page.evaluate((c: Cell) => {
+    const { sz, sy } = (window as any).__lbw.dims;
+    const save = (window as any).__lbw.game.world.toSave();
+    const at = (dy: number) => String((c.x * sz + c.z) * sy + c.y + dy);
+    return {
+      version: save.version,
+      bottom: save.mods[at(0)],
+      top: save.mods[at(1)],
+      swingBottom: save.doorFacing?.[at(0)],
+      swingTop: save.doorFacing?.[at(1)],
+    };
+  }, door2);
+  expect(saved.version).toBe(2);
+  expect(saved.bottom).toBe(ids.DOOR);
+  expect(saved.top).toBe(ids.DOOR_TOP);
+  expect(saved.swingBottom === 0 || saved.swingBottom === 1).toBe(true);
+  expect(saved.swingTop).toBe(saved.swingBottom);
+
+  // a reload brings the whole door back, same spot, same swing
+  await page.evaluate(() => (window as any).__lbw.game.saveNow());
+  await page.reload();
+  await page.waitForFunction('window.__lbw !== undefined');
+  const after = await page.evaluate((c: Cell) => {
+    const game = (window as any).__lbw.game;
+    const { sz, sy } = (window as any).__lbw.dims;
+    const at = (dy: number) => game.world.doorFacing.get((c.x * sz + c.z) * sy + c.y + dy);
+    return {
+      bottom: game.world.get(c.x, c.y, c.z),
+      top: game.world.get(c.x, c.y + 1, c.z),
+      swingBottom: at(0),
+      swingTop: at(1),
+    };
+  }, door2);
+  expect(after.bottom).toBe(ids.DOOR);
+  expect(after.top).toBe(ids.DOOR_TOP);
+  expect(after.swingBottom === 0 || after.swingBottom === 1).toBe(true);
+  expect(after.swingTop).toBe(after.swingBottom);
+});
+
+test('stairs: walk into one and you step up onto it — no jumping required', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  const site = await clearRunway(page);
+
+  const step = await placeSelected(page, ids.STAIRS);
+  expect(await page.evaluate((c: Cell) => (window as any).__lbw.game.world.get(c.x, c.y, c.z), step))
+    .toBe(ids.STAIRS);
+
+  // walk into it from the far side: feet rise onto the step, then walk off it again
+  await page.evaluate((arg: { c: Cell; gy: number; pz: number }) => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    e.pos.set(arg.c.x + 2.5, arg.gy + 1, arg.pz);
+    e.vel.set(0, 0, 0);
+    e.yaw = -Math.PI / 2;
+    e.pitch = -0.2;
+    (window as any).__testPad.setMove(0, -1);
+  }, { c: step, gy: site.gy, pz: site.fz + 0.5 });
+
+  await page.waitForFunction(
+    (arg: { c: Cell; gy: number }) => {
+      const e = (window as any).__lbw.game.players[0].entity;
+      return e.pos.y >= arg.gy + 1.4 && e.pos.x <= arg.c.x + 1.0;
+    },
+    { c: step, gy: site.gy }, { timeout: 15000 },
+  );
+  // and the far side steps back down to the meadow floor
+  await page.waitForFunction(
+    (arg: { c: Cell; gy: number }) => {
+      const e = (window as any).__lbw.game.players[0].entity;
+      return e.pos.x < arg.c.x - 0.6 && Math.abs(e.pos.y - (arg.gy + 1)) < 0.25;
+    },
+    { c: step, gy: site.gy }, { timeout: 15000 },
+  );
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+});
+
+test('saplings: plant one on the meadow and it grows into a real tree', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  await page.evaluate(() => { (window as any).__lbw.game.saplingGrowSeconds = 2; }); // tests do not have a minute
+  await clearRunway(page);
+
+  const plant = await placeSelected(page, ids.SAPLING);
+  expect(await page.evaluate((c: Cell) => (window as any).__lbw.game.world.get(c.x, c.y, c.z), plant))
+    .toBe(ids.SAPLING);
+  expect(await page.evaluate(() => (window as any).__lbw.game.saplings.size)).toBeGreaterThan(0);
+
+  // game time runs slow in headless CI, so poll for the trunk — never sleep for it
+  await page.waitForFunction(
+    (arg: { c: Cell; wood: number }) => (window as any).__lbw.game.world.get(arg.c.x, arg.c.y + 1, arg.c.z) === arg.wood,
+    { c: plant, wood: ids.WOOD }, { timeout: 30000 },
+  );
+
+  const tree = await page.evaluate((arg: { c: Cell; wood: number; leaves: number }) => {
+    const game = (window as any).__lbw.game;
+    let trunk = 0, canopy = 0;
+    for (let k = 0; k < 7; k++) if (game.world.get(arg.c.x, arg.c.y + k, arg.c.z) === arg.wood) trunk++;
+    for (let ox = -2; ox <= 2; ox++) {
+      for (let oz = -2; oz <= 2; oz++) {
+        for (let oy = 2; oy <= 7; oy++) {
+          if (game.world.get(arg.c.x + ox, arg.c.y + oy, arg.c.z + oz) === arg.leaves) canopy++;
+        }
+      }
+    }
+    const { sz, sy } = (window as any).__lbw.dims;
+    const recorded = game.world.mods.get((arg.c.x * sz + arg.c.z) * sy + arg.c.y);
+    return { trunk, canopy, recorded };
+  }, { c: plant, wood: ids.WOOD, leaves: ids.LEAVES });
+  expect(tree.trunk).toBeGreaterThanOrEqual(4); // a real trunk, not a weed
+  expect(tree.canopy).toBeGreaterThan(8);       // and a proper crown of leaves
+  expect(tree.recorded).toBe(ids.WOOD);         // the grown tree is in the save
+});
+
+test('first person hides your own body from YOUR view only — other players still see it', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page);
+  await joinSecondPad(page);
+
+  // clean slate around the meadow: earlier tests leave blocks near spawn, and a
+  // wall right behind the camera would legitimately tuck the third-person view in
+  await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    const e = game.players[0].entity;
+    const fx = Math.floor(e.pos.x), fz = Math.floor(e.pos.z);
+    const gy = game.world.surfaceY(fx, fz);
+    for (let x = fx - 8; x <= fx + 8; x++) {
+      for (let z = fz - 8; z <= fz + 8; z++) {
+        for (let y = gy + 1; y <= gy + 12; y++) game.world.set(x, y, z, 0);
+      }
+    }
+  });
+  await page.waitForFunction('window.__lbw.game.players[0].showOwnBody === true', null, { timeout: 10000 });
+  await frames(page, 3);
+
+  // third person by default: both cameras see player 1's body (its avatar lives on layer 1).
+  // Note three r171: Layers.test() compares two Layers objects — ask isEnabled(channel).
+  const third = await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    return {
+      firstPerson: game.players[0].firstPerson,
+      ownView: game.players[0].camera.layers.isEnabled(1),
+      otherView: game.players[1].camera.layers.isEnabled(1),
+      bodyOnLayer1: game.players[0].entity.avatar.body.layers.isEnabled(1),
+    };
+  });
+  expect(third.firstPerson).toBe(false);
+  expect(third.ownView).toBe(true);
+  expect(third.otherView).toBe(true);
+  expect(third.bodyOnLayer1).toBe(true);
+
+  // switch player 1 to Eyes from their own menu
+  await tap(page, 'menu');
+  await page.waitForSelector('.menu-list');
+  await selectRow(page, 2); // Camera
+  await tap(page, 'jump');
+  await page.waitForFunction('window.__lbw.game.players[0].firstPerson === true', null, { timeout: 5000 });
+  await frames(page, 3);
+
+  const first = await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    return {
+      firstPerson: game.players[0].firstPerson,
+      ownView: game.players[0].camera.layers.isEnabled(1),
+      otherView: game.players[1].camera.layers.isEnabled(1),
+      otherSeesRing: game.players[1].camera.layers.isEnabled(0),
+    };
+  });
+  expect(first.firstPerson).toBe(true);
+  expect(first.ownView).toBe(false);   // the body is not in one's own eyes
+  expect(first.otherView).toBe(true);  // but the other kid still sees them fine
+  expect(first.otherSeesRing).toBe(true);
+});
+
+test('the player menu fits inside a half-height stacked pane — no overflow', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page);
+  await joinSecondPad(page);
+  await page.evaluate(() => {
+    (window as any).__lbw.game.layout = 'vertical'; // force the up/down split
+    window.dispatchEvent(new Event('resize'));
+  });
+  await frames(page, 4);
+
+  const halves = await page.evaluate(() => {
+    const g = (window as any).__lbw.game;
+    return { top: g.viewportMgr.rects[0].h, h: window.innerHeight };
+  });
+  expect(halves.top).toBeLessThanOrEqual(halves.h / 2 + 2);
+
+  await tap(page, 'menu');
+  await page.waitForSelector('.menu-list');
+  await selectRow(page, 9); // the LAST row (Leave) — the one that used to hang off the pane
+
+  const fit = await page.evaluate(() => {
+    const pane = document.querySelectorAll('.pane')[0].getBoundingClientRect();
+    const rows = [...document.querySelectorAll('.pane .menu-item')];
+    const last = rows[rows.length - 1].getBoundingClientRect();
+    return { count: rows.length, lastTop: last.top, lastBottom: last.bottom, paneTop: pane.top, paneBottom: pane.bottom };
+  });
+  expect(fit.count).toBe(10);
+  expect(fit.lastTop).toBeGreaterThanOrEqual(fit.paneTop - 1);
+  expect(fit.lastBottom).toBeLessThanOrEqual(fit.paneBottom + 1);
+});
+
+test('grown-up settings — split layout and sound — come back after a reload', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page);
+
+  // flip the split layout through the grown-up menu, exactly like a parent would
+  await openGrownUpsMenu(page);
+  await selectRow(page, 1); // Split Screen
+  await tap(page, 'jump'); // Smart -> Left/Right
+  expect(await page.evaluate(() => (window as any).__lbw.game.layout)).toBe('horizontal');
+
+  // and turn the sound off from the player menu
+  await tap(page, 'back');
+  await tap(page, 'menu');
+  await page.waitForSelector('.menu-list');
+  await selectRow(page, 7); // Sound
+  await tap(page, 'jump');
+  expect(await page.evaluate(() => (window as any).__lbw.game.audio.muted)).toBe(true);
+
+  const stored = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('lbw-settings') ?? '{}') as { layout?: string; muted?: boolean });
+  expect(stored.layout).toBe('horizontal');
+  expect(stored.muted).toBe(true);
+
+  await page.reload();
+  await page.waitForFunction('window.__lbw !== undefined');
+  const after = await page.evaluate(() => ({
+    layout: (window as any).__lbw.game.layout,
+    muted: (window as any).__lbw.game.audio.muted,
+  }));
+  expect(after.layout).toBe('horizontal');
+  expect(after.muted).toBe(true);
+});
+
+test('the meadow has eight kinds of animal now, all petable', async ({ page }) => {
+  await boot(page);
+  const herd = await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    return {
+      kinds: [...new Set(game.animals.animals.map((a: any) => a.kind))] as string[],
+      count: game.animals.animals.length,
+    };
+  });
+  expect(herd.count).toBeGreaterThanOrEqual(20);
+  for (const kind of ['sheep', 'bunny', 'chicken', 'cow', 'pig', 'horse', 'cat', 'fox']) {
+    expect(herd.kinds).toContain(kind); // kinds cycle, so every one is guaranteed
+  }
+});
+
+// -------------------------------------------------- reported bugs, kept fixed
+
+test('the block palette is a grid: dpad left/right step cells, up/down jump a whole row', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page);
+  await tap(page, 'palette');
+  await page.waitForSelector('.palette-grid');
+
+  const shape = await page.evaluate(() => {
+    const cells = [...document.querySelectorAll('.palette-cell')] as HTMLElement[];
+    const top0 = cells[0].offsetTop;
+    let cols = 1;
+    while (cols < cells.length && cells[cols].offsetTop === top0) cols++;
+    return { count: cells.length, cols };
+  });
+  expect(shape.count).toBeGreaterThan(6);
+  expect(shape.cols).toBeGreaterThan(1); // more than one row, or this test means nothing
+
+  const sel = () => page.evaluate(() =>
+    [...document.querySelectorAll('.palette-cell')].findIndex((c) => c.classList.contains('sel')));
+  const start = await sel();
+
+  // left and right walk the flat order...
+  await tap(page, 'right');
+  expect(await sel()).toBe((start + 1) % shape.count);
+  await tap(page, 'left');
+  expect(await sel()).toBe(start);
+
+  // ...and up/down move a whole row, keeping the column
+  await tap(page, 'down');
+  expect(await sel()).toBe(Math.min(start + shape.cols, shape.count - 1));
+  await tap(page, 'up');
+  expect(await sel()).toBe(start);
+
+  // up from the first row wraps to the last one, not to the previous cell
+  await tap(page, 'up');
+  const rows = Math.ceil(shape.count / shape.cols);
+  const lastRowStart = (rows - 1) * shape.cols;
+  const wrapped = await sel();
+  expect(wrapped).toBeGreaterThanOrEqual(Math.min(lastRowStart, shape.count - 1));
+});
+
+test('releasing the mouse stops building — no endless auto-placing', async ({ page }) => {
+  await boot(page);
+  await page.keyboard.press('Enter'); // keyboard-only join
+  await page.waitForFunction('window.__lbw.game.pendingJoins.size === 1');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction('window.__lbw.game.players.length === 1');
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  await page.evaluate((b: number) => { (window as any).__lbw.game.players[0].selected = b; }, ids.PLANKS);
+  const site = await clearRunway(page); // aim down the cleared strip, slightly at the ground
+
+  /** what is standing in the cleared strip (the clear leaves it empty) */
+  const builtHere = () => page.evaluate((s: { fx: number; fz: number; gy: number }) => {
+    const game = (window as any).__lbw.game;
+    let n = 0;
+    for (let x = s.fx - 4; x <= s.fx + 6; x++) {
+      for (let z = s.fz - 2; z <= s.fz + 2; z++) {
+        for (let y = s.gy + 1; y <= s.gy + 12; y++) if (game.world.get(x, y, z) !== 0) n++;
+      }
+    }
+    return n;
+  }, site);
+
+  expect(await builtHere()).toBe(0);
+  const cell = await page.evaluate(() => {
+    const t = (window as any).__lbw.game.players[0].target;
+    return { x: t.px, y: t.py, z: t.pz };
+  });
+  await page.mouse.move(640, 360);
+  await page.mouse.down({ button: 'right' }); // right button builds (Nov 2026 mapping)
+  await page.waitForFunction(
+    (c: Cell) => (window as any).__lbw.game.world.get(c.x, c.y, c.z) !== 0,
+    cell, { timeout: 5000 },
+  );
+  await page.mouse.up({ button: 'right' });
+
+  const built = await builtHere();
+  expect(built).toBeGreaterThanOrEqual(1); // the right-click built something
+
+  // the released button must never stay held — that is the endless-placing bug
+  const held = await page.evaluate(() => [...(window as any).__lbw.game.input.frame('keyboard').held]);
+  expect(held).not.toContain('place');
+
+  // and nothing new appears while free ground sits in front of the kid: a stuck
+  // build trigger would put another block down well inside this wait. (The wait
+  // is on purpose — the bug is a thing that must NOT happen.)
+  await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    e.yaw = Math.PI / 2;
+    e.pitch = -0.35;
+  });
+  await page.waitForTimeout(1500);
+  expect(await builtHere()).toBe(built);
 });

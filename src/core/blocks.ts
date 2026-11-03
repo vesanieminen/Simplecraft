@@ -35,13 +35,19 @@ export const C_WHITE: BlockId = 25;
 export const ROCK: BlockId = 26; // indestructible floor at y=0
 export const DYNAMITE: BlockId = 27; // lit fuse, then it blows a hole in things
 export const SCORCH: BlockId = 28; // what grass looks like after a blast
+export const SAPLING: BlockId = 29; // plant one, and in a minute it is a tree
+export const DOOR: BlockId = 30; // closed door, BOTTOM half: solid, painted like a door
+export const DOOR_OPEN: BlockId = 31; // the same door, opened with the pet/interact button
+export const STAIRS: BlockId = 32; // a half-height step you can walk up
+export const DOOR_TOP: BlockId = 33; // closed door, TOP half (placed automatically above DOOR)
+export const DOOR_TOP_OPEN: BlockId = 34; // top half of an opened door
 
 /**
  * Cells of the procedural *block* texture atlas (see render/textures.ts).
  * One 32x32 cell per block face style, laid out in a single row; the mesher
  * divides u by ATLAS_CELL_COUNT, so keep it in step with BLOCK_CELLS there.
  */
-export const ATLAS_CELL_COUNT = 21;
+export const ATLAS_CELL_COUNT = 23;
 export const ATLAS_DYNAMITE_SIDE = 0;
 export const ATLAS_DYNAMITE_CAP = 1;
 export const ATLAS_GRASS_TOP = 2;
@@ -64,6 +70,20 @@ export const ATLAS_ROCK = 18;
 export const ATLAS_SCORCH = 19;
 /** near-white weave: the flat candy colours multiply through it */
 export const ATLAS_WEAVE = 20;
+/** a painted wooden door: two panels, hinges and a round knob */
+export const ATLAS_DOOR = 21;
+/** the door's upper half: an inset panel with a little window */
+export const ATLAS_DOOR_TOP = 22;
+
+/**
+ * Cells of the *plant* atlas (cross blocks). Keep in step with PLANT_CELLS
+ * in render/textures.ts — same rule as the block atlas above.
+ */
+export const PLANT_ATLAS_CELLS = 4;
+export const PLANT_CELL_RED = 0;
+export const PLANT_CELL_YELLOW = 1;
+export const PLANT_CELL_TUFT = 2;
+export const PLANT_CELL_SAPLING = 3;
 
 export interface BlockDef {
   id: BlockId;
@@ -102,6 +122,8 @@ export interface BlockDef {
   note?: number;
   /** cannot be removed by players */
   unbreakable?: boolean;
+  /** collidable height of this block, 0..1 (stairs are a half step); default 1 */
+  solidHeight?: number;
   /** blows the surroundings away; sizzles and shakes before it goes */
   explosive?: boolean;
   /** seconds of fuse once it is lit (explosive blocks only) */
@@ -184,6 +206,39 @@ const DEFS: BlockDef[] = [
     topColor: rgb(84, 66, 49), sideColor: rgb(104, 82, 61),
     sideAtlasCell: ATLAS_SCORCH, solid: true, opaque: true,
   },
+  {
+    id: SAPLING, name: 'Sapling', icon: '🌳', color: rgb(110, 190, 100),
+    solid: false, opaque: false, cross: true, atlasCell: PLANT_CELL_SAPLING,
+  },
+  {
+    // A door is TWO blocks high (this cell plus DOOR_TOP above it) and its
+    // panel is only half a block thick: the mesher paints a 0.5-thick panel
+    // centred in the cell, and a closed door collides as that same panel
+    // (see physics.solidBoxOf). Placing one fills both cells at once, and the
+    // pet/interact button swings the pair (see tryPlace / toggleDoor in game.ts).
+    id: DOOR, name: 'Door', icon: '🚪', color: rgb(178, 122, 70),
+    sideAtlasCell: ATLAS_DOOR, solid: true, opaque: false,
+  },
+  {
+    id: DOOR_TOP, name: 'Door (upper half)', icon: '🚪', color: rgb(178, 122, 70),
+    sideAtlasCell: ATLAS_DOOR_TOP, solid: true, opaque: false,
+  },
+  {
+    // the same doors swung open with the pet/interact button: walk straight
+    // through them; the panel stays visible standing along the doorway
+    id: DOOR_OPEN, name: 'Door (open)', icon: '🚪', color: rgb(178, 122, 70),
+    sideAtlasCell: ATLAS_DOOR, solid: false, opaque: false,
+  },
+  {
+    id: DOOR_TOP_OPEN, name: 'Door (upper half open)', icon: '🚪', color: rgb(178, 122, 70),
+    sideAtlasCell: ATLAS_DOOR_TOP, solid: false, opaque: false,
+  },
+  {
+    // a chunky wooden step: collides only in its lower half, and kids
+    // automatically hop up onto it (see physics + playerEntity step assist)
+    id: STAIRS, name: 'Stairs', icon: '🪜', color: rgb(200, 154, 95),
+    sideAtlasCell: ATLAS_PLANKS, solid: true, opaque: false, solidHeight: 0.5,
+  },
 ];
 
 export const BLOCK_MAP = new Map<BlockId, BlockDef>(DEFS.map((d) => [d.id, d]));
@@ -217,16 +272,35 @@ export function isTexturedBlock(id: BlockId): boolean {
   return id !== AIR && blockDef(id).sideAtlasCell !== undefined;
 }
 
+/** is a block id one of the four door states? (interact button flips them) */
+export function isDoorBlock(id: BlockId): boolean {
+  return id === DOOR || id === DOOR_OPEN || id === DOOR_TOP || id === DOOR_TOP_OPEN;
+}
+/** a door half that stands closed (solid, and collides as its thin panel) */
+export function isDoorClosedBlock(id: BlockId): boolean {
+  return id === DOOR || id === DOOR_TOP;
+}
+/** the UPPER half of a door — placed/toggled only together with the bottom */
+export function isDoorTopBlock(id: BlockId): boolean {
+  return id === DOOR_TOP || id === DOOR_TOP_OPEN;
+}
+/** collidable height of a block id in its cell (0 for non-solids, 0.5 for stairs) */
+export function solidHeightOf(id: BlockId): number {
+  if (id === AIR) return 0;
+  const def = blockDef(id);
+  return def.solid ? (def.solidHeight ?? 1) : 0;
+}
+
 /** Blocks offered in the child-friendly creative palette (in order). */
 export const PALETTE: BlockId[] = [
-  GRASS, DIRT, STONE, SAND, WOOD, PLANKS, BRICKS, GLASS, LEAVES,
-  FLOWER_RED, FLOWER_YELLOW, TALLGRASS,
+  GRASS, DIRT, STONE, SAND, WOOD, PLANKS, STAIRS, DOOR, BRICKS, GLASS, LEAVES,
+  SAPLING, FLOWER_RED, FLOWER_YELLOW, TALLGRASS,
   GLOW, BOUNCY, SPARKLE, MUSIC, DYNAMITE,
   C_RED, C_ORANGE, C_YELLOW, C_GREEN, C_BLUE, C_PURPLE, C_PINK, C_WHITE,
 ];
 
 /** Quick-cycling favorites for shoulder buttons. */
 export const FAVORITES: BlockId[] = [
-  GRASS, PLANKS, BRICKS, GLASS, GLOW, BOUNCY, SPARKLE, MUSIC, DYNAMITE,
+  GRASS, PLANKS, STAIRS, BRICKS, GLASS, DOOR, GLOW, BOUNCY, SPARKLE, MUSIC, DYNAMITE,
   C_RED, C_BLUE, C_PINK, C_YELLOW,
 ];

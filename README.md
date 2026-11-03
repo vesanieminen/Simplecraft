@@ -15,8 +15,12 @@ Creative mode, built for a 5-year-old and a parent on one couch.
 - **Four worlds to pick from** at the start — Meadow, Islands, Mountains and
   Deep Forest — plus any seed, with a live map preview.
 - A world that saves itself and survives restarts (one save per world).
-- Friendly animals, glowing stars to collect, bouncy blocks, musical
-  blocks, and a world full of textured flowers, grass tufts, lakes, and trees.
+- **Eight friendly animals** — sheep, bunnies, chickens, cows, and new
+  pigs, horses, cats and foxes — each with a voice of its own.
+- **Doors you can open, stairs you can walk up, saplings that grow into
+  trees** — and planks that finally look like planks.
+- Glowing stars to collect, bouncy blocks, musical blocks, and a world
+  full of textured flowers, grass tufts, lakes, and trees.
 
 ## Choosing your world
 
@@ -99,35 +103,83 @@ milestone; see Roadmap. Today, each computer gets the same saved world.)
 | Left stick | Walk / swim / fly sideways |
 | Right stick | Look around / aim |
 | A / ✕ | Jump (hold while flying = up) |
-| RT / R2 | Place block |
-| LT / L2 | Break block |
+| LT / L2 | Place block |
+| RT / R2 | Break block |
 | LB / L1 | Previous block |
 | RB / R1 | Next block |
-| X / ☐ | Pet animals (hold while flying = down) |
+| X / ☐ | Pet animals · open/close doors (hold while flying = down) |
 | Y / △ | Open the block palette (before anyone joins: choose a world) |
 | D-pad | Navigate menus |
 | Start / Options | Player menu (fly, camera, home, help…) |
 | B / ◯ | Back / close |
 
 Everything is doable with a controller only — joining, palettes, menus,
-settings, help, everything.
+settings, help, everything. The block palette is a real grid: **left/right**
+step through blocks and **up/down** jump a whole row, so finding the one you
+want is four presses, not twenty.
 
 ## Keyboard & mouse (optional)
 
-WASD move · arrow keys look · Space jump · LMB place · RMB break ·
-Q/R cycle blocks · F palette · E pet animals · Esc menu · Enter confirm.
+WASD move · arrow keys look · Space jump · RMB place · LMB break ·
+Q/R cycle blocks · F palette · E pet animals / open doors · Esc menu · Enter confirm.
+
+*(The build/break buttons were swapped in November 2026 — kids build far
+more than they dig, so the comfy left trigger / right mouse button now
+builds. The Grown-Ups cannot turn this back; muscle memory will follow.)*
 
 ## Flowers you can actually pick
 
-![Textured flowers, sunflowers and grass tufts — breakable with LT](docs/screenshots/plants.jpg)
+![Textured flowers, sunflowers and grass tufts — breakable with RT](docs/screenshots/plants.jpg)
 
 Flowers, sunflowers and grass tufts are real textured plants: each one is a
 pair of crossed quads painted from a procedural 32-px atlas (drawn in code,
 still no image files). They sway in with the world, you walk straight through
-them — and **LT / L2 breaks them**, because the break button also targets
+them — and **RT / R2 breaks them**, because the break button also targets
 things that aren't solid. Water and bedrock stay indestructible, and plants
 never get in the way when you place a block (the two aim at slightly
 different things so both just work).
+
+## Doors, stairs and saplings 🚪
+
+New in the palette (Y / △), right next to the planks they're built from:
+
+- **🚪 Door** — **two blocks high and half a block thick**, painted like a
+  real door: two panels below, a tall panel with a little window above,
+  hinges on one side and a brass knob at hand height. One press of the build
+  trigger puts the whole thing in — no stacking blocks to size it. Press
+  **X / ☐ / E** while looking at any part of it and the whole door swings
+  open with a wooden creak: closed it keeps the rain (and cows) out, open
+  it's a thin standing panel you walk straight through. Break any half and
+  the whole door comes down. It stands the way you placed it, and it
+  *remembers* which way it opens across saves and restarts.
+- **🪜 Stairs** — a chunky wooden half-step. Walk into one and you simply
+  step up onto it: no jumping, no fiddling, from every side. Rows of them
+  make real staircases, and one makes a friendly kerb anywhere.
+- **🌳 Sapling** — plant one on clear ground, run off to build something,
+  and about half a minute later it grows into a full tree — trunk, leaves
+  and all, with a little sparkle and a toast. Saplings you leave behind
+  keep growing the next time you join. (Chop the tree, plant the next one.)
+
+And the wood shelf is complete: **logs** with bark sides and growth-ring
+ends, **planks**, and **leaves** were already in the palette — now the whole
+tree, from sapling to plank, is buildable by hand.
+
+## The whole barnyard 🐷
+
+The meadow used to have sheep, bunnies, chickens and cows. Now there are
+**eight kinds**, all box-built, all wandering, all harmless, all petable
+with **X / ☐** (they hop and say hello):
+
+- **🐷 Pig** — pink, flat snout, curly tail; goes *oink oink*.
+- **🐴 Horse** — tall, brown, dark mane and tail, white blaze; a proper
+  sliding whinny.
+- **🐱 Cat** — orange, white chest, tail standing straight up; meows.
+- **🦊 Fox** — dark-tipped ears and a big white-tipped tail; yips twice.
+
+Roughly thirty animals live in each world. The kind list is dealt out
+round-robin so every meadow really gets the full zoo, and the shy critters
+(foxes, horses) stay rarer than the farm regulars. Every voice is
+synthesized in code, like every pixel.
 
 ## Everything is painted, blocks and kids alike
 
@@ -136,9 +188,11 @@ different things so both just work).
 There are no flat-coloured cubes in Little Block World: every block is drawn
 into one procedural 32-px atlas at startup — grass with a fringe over dirt,
 dirt clods, stone boulders with cracks, sand grain, bark and growth rings on
-log ends, planks with nails, offset bricks over mortar, leaves with twigs,
-water with waves, the glow-block sun, bouncy springs, sparkle stars, a music
-note, bedrock boulders, scorched crater rims and the dynamite bundle. The
+log ends, planks with real board gaps, staggered joints and nail heads,
+offset bricks over mortar, leaves with twigs, water with waves, the glow-block
+sun, bouncy springs, sparkle stars, a music
+note, bedrock boulders, scorched crater rims, painted doors and the dynamite
+bundle. The
 eight candy colours keep their own bright tint and multiply a near-white
 weave through it, so a Red block still reads as Red — it just looks like
 painted building brick instead of solid plastic. Glass and water are painted
@@ -184,7 +238,7 @@ running out, so children learn to run clear without anyone having to tell them.
   camera shakes, so the kick is felt as well as seen.
 - **Chain reactions.** Sticks near a blast catch light too, so a line of them
   goes off one after another.
-- **Hitting a burning stick with LT / L2 does not take it off** — you bonk the
+- **Hitting a burning stick with RT / R2 does not take it off** — you bonk the
   stub and it pops almost at once, which is the fun way to hurry one along.
 - Sticks are ordinary blocks: they live in the save, other blasts can carve
   them away, and one you left lying around is still burning when you come
@@ -199,7 +253,12 @@ running out, so children learn to run clear without anyone having to tell them.
   the game from a computer at home as below.
 - The terrain you start with is generated from a **seed + world theme**
   (default `20261102`, Meadow). Only player edits (blocks placed/removed,
-  stars collected) are stored — a few KB, not the whole world.
+  stars collected, and — since save **version 2** — doors and the way each
+  one swings) are stored — a few KB, not the whole world.
+- Grown-Up settings that belong to the whole browser — the **split-screen
+  layout** and **sound on/off** — keep their own small `lbw-settings` key
+  and come back after any reload. (Freeze is deliberately *not* remembered:
+  the world always wakes up alive.)
 - Edits are saved through the local server to
   `world-data/world-<seed>-<world>.json` (atomic write + backup + corruption
   recovery), with a browser-cache fallback if the server is briefly
@@ -238,13 +297,13 @@ running out, so children learn to run clear without anyone having to tell them.
 
 ## Testing status (honest)
 
-Automated (Playwright, real Chromium, 33 tests): game loads error-free,
+Automated (Playwright, real Chromium, 42 tests): game loads error-free,
 keyboard-only join, controller join/move/jump/build/cycle, palette with
 D-pad, per-player menu + fly toggle, split-screen activation, 2×2
 four-player grid, independent movement, one player's palette not pausing
 the other, resize re-layout, controller disconnect/resume UI, and world
-persistence across a server-backed reload. New this round: plants render
-from the textured atlas and **LT breaks them** (while water and bedrock
+persistence across a server-backed reload. Plants render
+from the textured atlas and **RT breaks them** (while water and bedrock
 refuse to break and plants never block placement), the Grown-Up menu items
 really work (Freeze stops the whole world dead, split-screen layouts cycle
 through Smart/Left-Right/Up-Down/2×2, Reset World wipes edits, Choose World
@@ -257,7 +316,7 @@ and card removed, the others go full screen, the freed controller can invite a
 new player, and the welcome screen returns when the last one leaves), plus
 clearing controller-asleep players from Grown-Up Settings. Dynamite is covered
 too: placing a stick lights it, the blast carves a crater and scorches the rim
-while bedrock and water shrug it off and the fuse meshes are cleaned up, LT
+while bedrock and water shrug it off and the fuse meshes are cleaned up, RT
 re-lights a burning stick instead of removing it, one blast lights its
 neighbours (chain reaction), and a stick you left in the world is still
 there — still burning — after a reload. The new art is checked too: the
@@ -265,6 +324,21 @@ atlas is decoded in the page and every cell must be drawn and different from
 all the others, painted blocks must really reach the textured mesh channels
 (including see-through glass and water), and the avatars must be wearing
 cloth, denim and a jumper front. And no black hole in the sky, from any angle.
+New this round: a **two-block-high, half-a-block-deep door** gets built with
+one press of the build trigger, stops a walking kid right at the panel (not
+half a block short of it), swings open under the pet button, lets them walk
+through, closes from the other side, comes down as a whole door when any half
+is broken, and reappears after a reload from the v2 save with its swing;
+the **block palette** really walks its grid — left/right step cells, up/down
+jump whole rows and wrap; **releasing the mouse button stops building** (the
+endless auto-placing bug: the swap left `mouseup` on the old mapping, so a
+released right button stayed held forever); stairs **step you up automatically**
+while walking; a planted sapling grows
+into a recorded full tree; **first person** hides a body from its own camera
+via three.js layers while every other camera keeps seeing it; the 10-row
+player menu really **fits inside a half-height stacked pane**; grown-up
+layout + sound settings come back from `lbw-settings` after a reload; and
+all **eight animal kinds** live in every meadow.
 
 ```bash
 npm test          # e2e suite (starts its own server on :3100)
@@ -275,8 +349,9 @@ npm run typecheck
 **Xbox One** pad and a **PS5 DualSense** — both worked fine: joining, both
 sticks, building, palette, menus, split screen and waking a sleeping
 controller. The items below are what to re-check after any input change; the
-brand-new **Leave / Waiting Players** rows and the **jump out of water** fix
-have not had their couch turn yet. Virtual pads in the automated tests drive
+**swapped LT/RT build/break mapping**, the new **door / stairs / sapling**
+blocks, the **first-person visibility fix** and the **Leave / Waiting
+Players** rows all still owe the couch a turn. Virtual pads in the automated tests drive
 the exact same input abstraction (dead zones, edge detection, button mapping
 all shared) — a good regression net, still not a substitute for hardware QA.
 
@@ -287,10 +362,20 @@ all shared) — a good regression net, still not a substitute for hardware QA.
 2. Press A on each pad → two join cards appear. In a card: D-pad changes
    name/color, A joins, B cancels.
 3. Right stick looks around on both pads simultaneously.
-4. RT/LT place and break blocks; LB/RB cycle; Y opens the palette;
+4. **LT places / RT breaks** (the November 2026 swap — check both pads
+   really follow the new mapping); LB/RB cycle; Y opens the palette;
    D-pad + A picks a block while the other kid keeps running around.
-5. Walk up to a flower and hold **LT** — it pops into particles (and the
+5. Walk up to a flower and hold **RT** — it pops into particles (and the
    block behind it survives, so you can also dig the ground under it).
+   Walk up to a sheep and tap **X** — it hops and beeps.
+5b. Place a **door**: it should stand two blocks high out of one press, half
+   a block thick. Look at it (any half) and tap **X**: the whole door swings
+   open with a creak, walk through, tap X from the other side to close it.
+   Break the top half: the whole door comes down. Walk into a **stairs**
+   block: you step up without jumping. Plant a **sapling**, wait a moment:
+   a tree. In the **block palette**, check the D-pad really goes up/down as
+   well as left/right. Check all of this on the pad, not just in the
+   automated tests, and build/break a few times with the swapped triggers.
 6. Walk into a lake and hold **A** — you kick up to the surface, then hop out
    onto the bank instead of paddling in circles (works from the Islands sea too).
 7. Start menu → Fly ON → A rises, X descends, gentle landing.
@@ -309,8 +394,10 @@ all shared) — a good regression net, still not a substitute for hardware QA.
 
 Implemented: a 128 × 128 × 64 voxel world (four world themes + any seed,
 picked on a screen with a live map preview), building, textured plants,
-animals, stars, special blocks, audio, particles, complete controller UX,
-2–4 player split screen, per-world persistence.
+eight kinds of animals, doors, stairs, saplings that grow into trees,
+stars, special blocks, audio, particles, complete controller UX,
+2–4 player split screen, per-world persistence, and remembered
+grown-up settings.
 
 Next (designed for): LAN multiplayer — the architecture already separates
 *local player*, *remote player*, *controller*, *camera*, and *network

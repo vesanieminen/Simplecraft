@@ -13,16 +13,14 @@
 
 import * as THREE from 'three';
 import {
-  ATLAS_BOUNCY, ATLAS_BRICKS, ATLAS_CELL_COUNT, ATLAS_DIRT, ATLAS_DYNAMITE_CAP,
+  ATLAS_BOUNCY, ATLAS_BRICKS, ATLAS_CELL_COUNT, ATLAS_DIRT, ATLAS_DOOR, ATLAS_DOOR_TOP, ATLAS_DYNAMITE_CAP,
   ATLAS_DYNAMITE_SIDE, ATLAS_GLASS, ATLAS_GLOW, ATLAS_GRASS_SIDE, ATLAS_GRASS_TOP,
   ATLAS_LEAVES, ATLAS_LOG_END, ATLAS_LOG_SIDE, ATLAS_MUSIC, ATLAS_PLANKS, ATLAS_ROCK,
   ATLAS_SAND, ATLAS_SCORCH, ATLAS_SPARKLE, ATLAS_STONE, ATLAS_WATER, ATLAS_WEAVE,
+  PLANT_ATLAS_CELLS,
 } from '../core/blocks';
 
-export const PLANT_CELLS = 3; // atlas cells side by side
-export const PLANT_CELL_RED = 0;
-export const PLANT_CELL_YELLOW = 1;
-export const PLANT_CELL_TUFT = 2;
+export const PLANT_CELLS = PLANT_ATLAS_CELLS; // atlas cells side by side
 
 /** number of cells in the block atlas (side by side) */
 export const BLOCK_CELLS = ATLAS_CELL_COUNT;
@@ -91,6 +89,35 @@ function drawTuft(ctx: CanvasRenderingContext2D, ox: number): void {
 
 let cached: THREE.CanvasTexture | null = null;
 
+/**
+ * A baby tree for the sapling block: little trunk, a leafy hand of a crown.
+ * Big enough that a planted sapling reads as "this will be a tree".
+ */
+function drawSapling(ctx: CanvasRenderingContext2D, ox: number): void {
+  // trunk
+  stem(ctx, ox, 14, 20, 32, 3, '#7a5230');
+  stem(ctx, ox, 15, 20, 32, 1, '#a3754a');
+  // two roots flaring into the ground line
+  ctx.fillStyle = '#7a5230';
+  ctx.fillRect(ox + 11, 30, 3, 2);
+  ctx.fillRect(ox + 19, 30, 3, 2);
+  // crown: chunky leaf clusters, bright where the sun hits
+  ctx.fillStyle = '#3f8536';
+  ctx.fillRect(ox + 8, 10, 16, 11);
+  ctx.fillRect(ox + 11, 7, 10, 3);
+  ctx.fillRect(ox + 5, 14, 4, 6);
+  ctx.fillRect(ox + 23, 14, 4, 6);
+  ctx.fillStyle = '#5cae4e';
+  ctx.fillRect(ox + 10, 9, 12, 6);
+  ctx.fillStyle = '#8ade68';
+  ctx.fillRect(ox + 12, 8, 6, 3);
+  ctx.fillRect(ox + 8, 12, 3, 3);
+  // a couple of leaf tips poking out
+  ctx.fillStyle = '#4d9c43';
+  ctx.fillRect(ox + 6, 10, 3, 3);
+  ctx.fillRect(ox + 24, 11, 3, 3);
+}
+
 export function plantAtlasTexture(): THREE.CanvasTexture {
   if (cached) return cached;
   const canvas = document.createElement('canvas');
@@ -101,6 +128,7 @@ export function plantAtlasTexture(): THREE.CanvasTexture {
   drawFlower(ctx, 0, '#ff5f5f', '#ffd23e');
   drawFlower(ctx, S, '#ffd23e', '#e2762d');
   drawTuft(ctx, S * 2);
+  drawSapling(ctx, S * 3);
   const tex = new THREE.CanvasTexture(canvas);
   tex.magFilter = THREE.NearestFilter;
   tex.minFilter = THREE.NearestFilter;
@@ -319,17 +347,30 @@ function drawLogEnd(ctx: CanvasRenderingContext2D, ox: number): void {
   outline(ctx, ox, '#75491f');
 }
 
-/** planks: three boards with grain and a couple of nails */
+/** planks: four boards with real gaps, staggered butt joints, grain and nails */
 function drawPlanks(ctx: CanvasRenderingContext2D, ox: number): void {
-  rect(ctx, ox, 0, 0, S, S, '#e6ba78');
-  for (const y of [0, 11, 21]) {
-    rect(ctx, ox, 0, y, S, 10, '#f0c684');
-    rect(ctx, ox, 0, y + 10, S, 1, '#b0834a');
-    ctx.fillStyle = '#d3a463';
-    for (let i = 0; i < 5; i++) ctx.fillRect(ox + ((i * 7 + y) % S), y + 2 + (i % 3) * 2, 6, 1);
-    ctx.fillStyle = '#8f6a36';
-    ctx.fillRect(ox + 3, y + 2, 1, 1);
-    ctx.fillRect(ox + S - 5, y + 7, 1, 1);
+  rect(ctx, ox, 0, 0, S, S, '#a97e46'); // the dark gap behind the boards
+  for (const y of [0, 8, 16, 24]) {
+    rect(ctx, ox, 0, y, S, 7, '#f2c98c'); // the board
+    rect(ctx, ox, 0, y, S, 1, '#ffe3ae'); // bright top edge
+    rect(ctx, ox, 0, y + 6, S, 1, '#d3a463'); // shaded bottom edge
+    // long pale grain streaks
+    ctx.fillStyle = '#e2b473';
+    for (let i = 0; i < 4; i++) {
+      const gx = (i * 7 + y * 3 + 2) % 24;
+      ctx.fillRect(ox + gx, y + 1 + (i % 3) * 2, 6 + (i % 2) * 4, 1);
+    }
+    // staggered butt joint: where one board ends and the next begins
+    const seam = (y / 8) % 2 === 0 ? 6 : 22;
+    rect(ctx, ox, seam, y, 1, 7, '#a97e46');
+    rect(ctx, ox, seam + 1, y, 1, 7, '#ffe3ae');
+    // nail heads near both ends
+    for (const nx of [3, S - 5]) {
+      ctx.fillStyle = '#7c5a2e';
+      ctx.fillRect(ox + nx, y + 2, 2, 2);
+      ctx.fillStyle = '#fff7e0';
+      ctx.fillRect(ox + nx, y + 2, 1, 1);
+    }
   }
 }
 
@@ -346,6 +387,65 @@ function drawBricks(ctx: CanvasRenderingContext2D, ox: number): void {
       rect(ctx, ox, x + 1, y + 6, 14, 1, '#b03d27');
     }
   }
+}
+
+/** door: wooden boards, two recessed panels, hinges and a round brass knob */
+function drawDoor(ctx: CanvasRenderingContext2D, ox: number): void {
+  rect(ctx, ox, 0, 0, S, S, '#c98d52'); // the door slab
+  for (const x of [2, 10, 18, 26]) rect(ctx, ox, x, 1, 1, S - 2, '#a86e3a'); // board gaps
+  speckle(ctx, ox, '#b87c44', 0.06, 43);
+  rect(ctx, ox, 0, 0, S, 2, '#e0aa70'); // frame top
+  rect(ctx, ox, 0, S - 2, S, 2, '#8a5a2c'); // frame bottom (shadow side)
+  rect(ctx, ox, 0, 0, 2, S, '#e0aa70'); // frame left…
+  rect(ctx, ox, S - 2, 0, 2, S, '#8a5a2c'); // …and right
+  // two recessed panels: light face, dark inset edge
+  for (const [py, ph] of [[5, 11], [19, 9]] as const) {
+    rect(ctx, ox, 5, py, 22, ph, '#d9a766');
+    rect(ctx, ox, 5, py, 22, 1, '#96632f');
+    rect(ctx, ox, 5, py, 1, ph, '#96632f');
+    rect(ctx, ox, 5, py + ph - 1, 22, 1, '#efd0a0');
+    rect(ctx, ox, 26, py, 1, ph, '#efd0a0');
+  }
+  // hinges on the left edge
+  ctx.fillStyle = '#5c4a38';
+  ctx.fillRect(ox + 1, 4, 4, 3);
+  ctx.fillRect(ox + 1, 24, 4, 3);
+  ctx.fillStyle = '#8f7a5f';
+  ctx.fillRect(ox + 1, 4, 4, 1);
+  ctx.fillRect(ox + 1, 24, 4, 1);
+  // brass knob on the right
+  disc(ctx, ox + 27, 16, 2, '#8a5a2c');
+  disc(ctx, ox + 27, 16, 2, '#f2c14e');
+  ctx.fillStyle = '#fff3c4';
+  ctx.fillRect(ox + 26, 15, 1, 1);
+}
+
+/**
+ * The upper half of the two-block door: the same slab and frame, one tall
+ * panel, and a little window so a kid can see who is on the other side.
+ */
+function drawDoorTop(ctx: CanvasRenderingContext2D, ox: number): void {
+  rect(ctx, ox, 0, 0, S, S, '#c98d52'); // the door slab
+  for (const x of [2, 10, 18, 26]) rect(ctx, ox, x, 1, 1, S - 2, '#a86e3a'); // board gaps
+  speckle(ctx, ox, '#b87c44', 0.06, 71);
+  rect(ctx, ox, 0, 0, S, 2, '#e0aa70'); // frame top
+  rect(ctx, ox, 0, S - 2, S, 2, '#8a5a2c'); // frame bottom (shadow side)
+  rect(ctx, ox, 0, 0, 2, S, '#e0aa70'); // frame left…
+  rect(ctx, ox, S - 2, 0, 2, S, '#8a5a2c'); // …and right
+  // one tall recessed panel, same style as the lower half's panels
+  rect(ctx, ox, 5, 5, 22, 22, '#d9a766');
+  rect(ctx, ox, 5, 5, 22, 1, '#96632f');
+  rect(ctx, ox, 5, 5, 1, 22, '#96632f');
+  rect(ctx, ox, 5, 26, 22, 1, '#efd0a0');
+  rect(ctx, ox, 26, 5, 1, 22, '#efd0a0');
+  // the window: dark reveal, pale glass, glazing bars and one bright pane
+  rect(ctx, ox, 9, 9, 14, 14, '#6c4f30');
+  rect(ctx, ox, 10, 10, 12, 12, '#cfe6f2');
+  rect(ctx, ox, 10, 10, 12, 1, '#9fc4d8');
+  rect(ctx, ox, 15, 10, 1, 12, '#7d9fb3');
+  rect(ctx, ox, 10, 15, 12, 1, '#7d9fb3');
+  ctx.fillStyle = '#f4fbff';
+  ctx.fillRect(ox + 11, 11, 3, 3);
 }
 
 // --- see-through and special blocks -----------------------------------------
@@ -492,6 +592,8 @@ const BLOCK_ART: Record<number, CellArt> = {
   [ATLAS_ROCK]: drawRock,
   [ATLAS_SCORCH]: drawScorch,
   [ATLAS_WEAVE]: drawWeave,
+  [ATLAS_DOOR]: drawDoor,
+  [ATLAS_DOOR_TOP]: drawDoorTop,
 };
 
 let cachedBlock: THREE.CanvasTexture | null = null;
