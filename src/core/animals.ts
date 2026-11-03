@@ -368,7 +368,7 @@ export class AnimalWorld {
       if (top < 0 || world.get(bx, top + 1, bz) !== 0) continue;
       const surfaceBlock = world.get(bx, top, bz);
       if (surfaceBlock === WATER) continue;
-      const kind = kinds[Math.floor(rnd() * kinds.length)];
+      const kind = kinds[placed % kinds.length]; // cycle so every kind actually shows up
       const a = new Animal(kind, x, top + 1, z);
       this.animals.push(a);
       scene.add(a.group);
