@@ -7,7 +7,7 @@
 import { BlockId, blockDef, FAVORITES, PALETTE } from '../core/blocks';
 import { AudioKit } from '../core/audio';
 import { computeHeights, themeOf, WORLD_THEMES } from '../core/terrain';
-import { WATER_LEVEL, WORLD_SX, WORLD_SZ } from '../core/world';
+import { SavedWorldInfo, WATER_LEVEL, WORLD_SX, WORLD_SZ } from '../core/world';
 import { ControllerType, FrameControls } from '../input/types';
 import { AVATAR_COLORS, NICKNAMES } from '../players/avatar';
 import { LocalPlayer } from '../players/localPlayer';
@@ -337,6 +337,8 @@ export interface GrownUpActions {
   cycleLayout(): string;
   resetWorld(): void;
   openWorlds(): void;
+  /** the saved-worlds list: play old worlds, delete them, save right now */
+  openMyWorlds(): void;
   /** sends every controller-asleep player home and closes their part of the screen */
   sendWaitingHome(): void;
   /** what the waiting-players row shows */
@@ -359,6 +361,7 @@ export class GrownUpsMenu extends Overlay {
       { icon: '⏸️', label: 'Freeze Game', val: () => (actions.frozen() ? 'ON' : 'OFF'), fn: () => actions.toggleFreeze() },
       { icon: '🔀', label: 'Split Screen', val: () => actions.layout(), fn: () => actions.cycleLayout() },
       { icon: '🌍', label: 'Choose World', fn: () => actions.openWorlds() },
+      { icon: '💾', label: 'My Worlds', fn: () => actions.openMyWorlds() },
       {
         icon: '🗑️',
         label: 'Reset World',
@@ -464,6 +467,8 @@ export class WorldSelectOverlay extends Overlay {
     curSeed: number,
     curTheme: number,
     private onStart: (seed: number, theme: number) => void,
+    /** swap this picker for the saved-worlds list (game owns the swap) */
+    private onSavedWorlds?: () => void,
   ) {
     super(audio, type);
     this.seed = curSeed;
@@ -488,6 +493,7 @@ export class WorldSelectOverlay extends Overlay {
     list.appendChild(mk(() => `🌍 ${WORLD_THEMES[this.theme].icon} ${WORLD_THEMES[this.theme].name}`));
     list.appendChild(mk(() => `🎲 Seed: ${this.seed}`));
     list.appendChild(mk(() => `✨ Surprise me!`));
+    if (this.onSavedWorlds) list.appendChild(mk(() => `📚 My saved worlds`));
     list.appendChild(mk(() => `▶ Start this world!`));
     c.appendChild(list);
 
@@ -496,16 +502,20 @@ export class WorldSelectOverlay extends Overlay {
     this.refresh();
   }
 
+  private label(i: number): string {
+    const savedRow = this.onSavedWorlds ? 3 : -1;
+    if (i === 0) return `🌍 ${WORLD_THEMES[this.theme].icon} ${WORLD_THEMES[this.theme].name}`;
+    if (i === 1) return `🎲 Seed: ${this.seed}`;
+    if (i === 2) return '✨ Surprise me!';
+    if (i === savedRow) return '📚 My saved worlds';
+    return '▶ Start this world!';
+  }
+
   private refresh(): void {
     this.rows.forEach((r, i) => {
       r.classList.toggle('sel', i === this.sel);
       const body = r.querySelector('.mi-body');
-      if (body) {
-        body.textContent = i === 0 ? `🌍 ${WORLD_THEMES[this.theme].icon} ${WORLD_THEMES[this.theme].name}`
-          : i === 1 ? `🎲 Seed: ${this.seed}`
-          : i === 2 ? '✨ Surprise me!'
-          : '▶ Start this world!';
-      }
+      if (body) body.textContent = this.label(i);
     });
     drawWorldPreview(this.canvas, this.seed, this.theme);
   }
@@ -531,6 +541,12 @@ export class WorldSelectOverlay extends Overlay {
         this.seed = Math.floor(Math.random() * 90_000_000) + 1000;
         this.audio.uiSelect();
         changed = true;
+      } else if (this.onSavedWorlds && this.sel === 3) {
+        // the game swaps in the saved-worlds list; this card stays open
+        // until the swap, so no close() here
+        this.audio.uiSelect();
+        this.onSavedWorlds();
+        return;
       } else {
         this.audio.uiSelect();
         this.onStart(this.seed, this.theme);
@@ -540,6 +556,202 @@ export class WorldSelectOverlay extends Overlay {
     }
     if (nav.back) { this.audio.uiBack(); this.close(); return; }
     if (changed || nav.up || nav.down) this.refresh();
+  }
+}
+
+// ------------------------------------------------------------- my worlds
+
+export interface MyWorldsActions {
+  /** every world the game has saved, newest first */
+  list(): Promise<SavedWorldInfo[]>;
+  /** move the whole family into a saved world (everyone respawns at spawn) */
+  play(seed: number, theme: number): void;
+  /** wipe one saved world for good */
+  remove(seed: number, theme: number): Promise<void> | void;
+  /** push the current world to storage right now (autosave keeps it fresh anyway) */
+  saveNow(): Promise<void> | void;
+  /** "New world…" opens the fresh-world picker; the row hides when omitted */
+  openNewWorld?(): void;
+}
+
+/** "just now · 5 min ago · 3 h ago · 2 d ago · 12.3.2026" for the list rows */
+function agoLabel(ts?: number): string {
+  if (!ts) return '';
+  const mins = Math.round((Date.now() - ts) / 60_000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days} d ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
+/**
+ * The saved-worlds list: every (world, seed) the family has ever played,
+ * newest first, each with a live map preview. Highlight a row and press A to
+ * play that world again; Y/△ (F on the keyboard) deletes it — the row asks
+ * twice, like everything destructive. Save Now is here for grown-ups who
+ * want the belt AND braces.
+ */
+export class MyWorldsOverlay extends Overlay {
+  private canvas: HTMLCanvasElement;
+  private listEl: HTMLDivElement;
+  private worlds: SavedWorldInfo[] = [];
+  private rows: { el: HTMLElement; labelEl: HTMLElement; valEl: HTMLElement; label: () => string; info?: SavedWorldInfo; act?: () => void; val?: () => string }[] = [];
+  private loading = true;
+  private sel = 0;
+  /** guards against two in-flight reload()s racing: only the newest may render */
+  private reloadSeq = 0;
+  /** world row index showing 'SURE?' (Y/△ arms it, a second Y deletes); null = disarmed */
+  private armed: number | null = null;
+
+  constructor(
+    audio: AudioKit,
+    type: ControllerType,
+    private curSeed: number,
+    private curTheme: number,
+    private actions: MyWorldsActions,
+  ) {
+    super(audio, type);
+    const c = this.card('My Worlds 💾');
+    this.canvas = document.createElement('canvas');
+    this.canvas.width = WORLD_SX;
+    this.canvas.height = WORLD_SZ;
+    this.canvas.className = 'world-preview';
+    c.appendChild(this.canvas);
+    this.listEl = document.createElement('div');
+    this.listEl.className = 'menu-list';
+    c.appendChild(this.listEl);
+    const k = btnLabels(type);
+    this.keys(c, [[k.ud, 'move'], [k.a, 'choose'], [type === 'keyboard' ? 'F' : 'Y', 'delete'], [k.b, 'back']]);
+    this.rebuild();
+    void this.reload();
+  }
+
+  private async reload(): Promise<void> {
+    // a delete or save kicks off a reload; if two overlap, only the newest
+    // result may touch the rows — a slow-but-stale list must not resurrect
+    // a world that the newer one already dropped
+    const seq = ++this.reloadSeq;
+    const worlds = await this.actions.list().catch(() => [] as SavedWorldInfo[]);
+    if (this.closed || seq !== this.reloadSeq) return;
+    this.loading = false;
+    this.worlds = worlds;
+    this.armed = null;
+    this.rebuild();
+    if (this.sel >= this.rows.length) this.sel = 0;
+    this.refresh();
+  }
+
+  private rebuild(): void {
+    this.listEl.textContent = '';
+    this.rows = [];
+    if (this.loading) {
+      const s = document.createElement('div');
+      s.className = 'sub';
+      s.textContent = 'Loading your worlds…';
+      this.listEl.appendChild(s);
+      return;
+    }
+    const mk = (info: SavedWorldInfo | undefined, label: () => string, act: () => void, val?: () => string): void => {
+      const row = document.createElement('div');
+      row.className = 'menu-item';
+      const labelEl = document.createElement('span');
+      labelEl.textContent = label();
+      const valEl = document.createElement('span');
+      valEl.className = 'mi-val';
+      valEl.textContent = val?.() ?? '';
+      row.append(labelEl, valEl);
+      row.addEventListener('click', act);
+      this.listEl.appendChild(row);
+      this.rows.push({ el: row, labelEl, valEl, label, info, act, val });
+    };
+    this.worlds.forEach((w, i) => {
+      mk(w,
+        () => {
+          const th = themeOf(w.theme);
+          const built = w.mods !== undefined ? ` · ${w.mods} built` : '';
+          return `${th.icon} ${th.name} · seed ${w.seed}${built}`;
+        },
+        () => this.playWorld(w),
+        // Y/△ arms the highlighted row: it swaps "5 min ago" for SURE? until
+        // the cursor moves or the world is deleted
+        () => (this.armed === i ? 'SURE?' : agoLabel(w.savedAt)),
+      );
+    });
+    if (this.worlds.length === 0) {
+      const s = document.createElement('div');
+      s.className = 'sub';
+      s.textContent = 'Nothing saved yet — go build something! 🏗️';
+      this.listEl.appendChild(s);
+    }
+    mk(undefined, () => '💾 Save this world now', () => {
+      this.audio.uiSelect();
+      void Promise.resolve(this.actions.saveNow()).then(() => { if (!this.closed) void this.reload(); });
+    });
+    if (this.actions.openNewWorld) {
+      mk(undefined, () => '🌍 New world…', () => {
+        this.audio.uiSelect();
+        this.close();
+        this.actions.openNewWorld?.();
+      });
+    }
+    mk(undefined, () => '◀ Back', () => { this.audio.uiBack(); this.close(); });
+  }
+
+  /**
+   * Y/△ (F): first press arms the highlighted world row ('SURE?'), the next
+   * one deletes it — two presses for anything that eats a world, same as
+   * Reset World. Moving the cursor disarms.
+   */
+  private tryDelete(): void {
+    const row = this.rows[this.sel];
+    if (!row?.info) return;
+    if (this.armed !== this.sel) {
+      this.armed = this.sel;
+      this.audio.uiSelect();
+      this.refresh();
+      return;
+    }
+    this.armed = null;
+    const w = row.info;
+    void Promise.resolve(this.actions.remove(w.seed, w.theme)).then(() => {
+      if (!this.closed) void this.reload();
+    });
+  }
+
+  private playWorld(w: SavedWorldInfo): void {
+    this.audio.uiSelect();
+    this.actions.play(w.seed, w.theme);
+    this.close();
+  }
+
+  private refresh(): void {
+    this.rows.forEach((r, i) => {
+      r.el.classList.toggle('sel', i === this.sel);
+      r.labelEl.textContent = r.label();
+      r.valEl.textContent = r.val?.() ?? '';
+    });
+    // the map picture follows the cursor: a world row previews that world
+    const w = this.rows[this.sel]?.info;
+    drawWorldPreview(this.canvas, w ? w.seed : this.curSeed, w ? w.theme : this.curTheme);
+  }
+
+  tick(frame: FrameControls, dt: number): void {
+    const nav = this.nav.tick(frame, dt);
+    if (this.rows.length === 0) return;
+    if (nav.down) { this.sel = (this.sel + 1) % this.rows.length; this.audio.uiMove(); }
+    if (nav.up) { this.sel = (this.sel + this.rows.length - 1) % this.rows.length; this.audio.uiMove(); }
+    if (nav.up || nav.down) this.armed = null;
+    if (frame.pressed.has('palette')) this.tryDelete();
+    if (nav.confirm) {
+      const row = this.rows[this.sel];
+      if (row.info) this.playWorld(row.info);
+      else row.act?.();
+    }
+    if (nav.back) { this.audio.uiBack(); this.close(); }
+    if (nav.up || nav.down || nav.confirm || nav.back) this.refresh();
   }
 }
 
