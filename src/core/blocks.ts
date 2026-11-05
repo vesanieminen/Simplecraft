@@ -320,6 +320,25 @@ export function isTexturedBlock(id: BlockId): boolean {
   return id !== AIR && blockDef(id).sideAtlasCell !== undefined;
 }
 
+/**
+ * What material a block is made of, for sound: placing, breaking, landing
+ * and footsteps all borrow their character from it.
+ */
+export type SoundFamily = 'wood' | 'stone' | 'soft' | 'glass' | 'plant';
+
+const SOUND_FAMILIES = new Map<BlockId, SoundFamily>([
+  [WOOD, 'wood'], [PLANKS, 'wood'], [SLAB, 'wood'], [STAIRS, 'wood'], [CHEST, 'wood'], [CHEST_OPEN, 'wood'],
+  [MUSIC, 'wood'], [DYNAMITE, 'wood'],
+  [STONE, 'stone'], [BRICKS, 'stone'], [ROCK, 'stone'],
+  [GRASS, 'soft'], [DIRT, 'soft'], [SAND, 'soft'], [SCORCH, 'soft'], [C_WHITE, 'soft'], [BOUNCY, 'soft'],
+  [GLASS, 'glass'], [GLOW, 'glass'], [SPARKLE, 'glass'],
+  [LEAVES, 'plant'], [FLOWER_RED, 'plant'], [FLOWER_YELLOW, 'plant'], [TALLGRASS, 'plant'], [SAPLING, 'plant'],
+]);
+
+export function soundFamilyOf(id: BlockId): SoundFamily {
+  return SOUND_FAMILIES.get(id) ?? 'wood';
+}
+
 /** is a block id one of the four door states? (interact button flips them) */
 export function isDoorBlock(id: BlockId): boolean {
   return id === DOOR || id === DOOR_OPEN || id === DOOR_TOP || id === DOOR_TOP_OPEN;

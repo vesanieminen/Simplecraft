@@ -42,12 +42,17 @@ export interface StepInput {
 
 export interface StepEvents {
   landed: boolean;
+  /** what the kid landed on (block id) — landing sounds follow the material */
+  landedOn: number;
   bounced: null | number; // bounce velocity
   steppedOnMusic: null | { note: number; x: number; y: number; z: number };
   steppedOnSparkle: boolean;
   splashed: boolean;
   /** one swim stroke just happened (whoosh sound please) */
   stroked: boolean;
+  /** one footfall happened (block id under the foot in footfallOn) */
+  footfall: boolean;
+  footfallOn: number;
 }
 
 export class PlayerEntity {
@@ -77,6 +82,8 @@ export class PlayerEntity {
   coyote = 0;
   /** > 0 while a push-off jump out of the water carries the player up */
   waterJump = 0;
+  /** horizontal distance walked toward the next footstep sound */
+  private footDist = 0;
   /** countdown between swim strokes (sound + reach) */
   private strokeT = 0;
   private wasInAir = false;
@@ -269,6 +276,7 @@ export class PlayerEntity {
     // landing event
     if (res.hitGround && this.wasInAir && !events.bounced) {
       events.landed = true;
+      events.landedOn = world.get(Math.floor(this.pos.x), Math.floor(this.pos.y - 0.1), Math.floor(this.pos.z));
     }
     this.wasInAir = !this.grounded;
 
@@ -276,9 +284,22 @@ export class PlayerEntity {
     if (this.inWaterNow && !this.wasInWater) events.splashed = true;
     this.wasInWater = this.inWaterNow;
 
-    if (this.moving && this.grounded) this.walkPhase += dt * 9.5;
-    else if (swimming) this.walkPhase += dt * 8; // stroke tempo
-    else if (!this.grounded) this.walkPhase += dt * 2;
+    if (this.moving && this.grounded) {
+      this.walkPhase += dt * 9.5;
+      // footsteps: one per stride, with the material under the foot
+      this.footDist += Math.hypot(this.vel.x, this.vel.z) * dt;
+      if (this.footDist >= 1.7) {
+        this.footDist = 0;
+        events.footfall = true;
+        events.footfallOn = world.get(Math.floor(this.pos.x), Math.floor(this.pos.y - 0.1), Math.floor(this.pos.z));
+      }
+    } else if (swimming) this.walkPhase += dt * 8; // stroke tempo
+    else if (!this.grounded) {
+      this.walkPhase += dt * 2;
+      this.footDist = 1.2; // no giant stomp the instant they land
+    } else {
+      this.footDist = 1.2;
+    }
     animateAvatar(this.avatar, this.walkPhase, this.moving && this.grounded, !this.grounded && !swimming, dt, this.crouching, swimming);
     this.syncAvatar(dt);
   }
