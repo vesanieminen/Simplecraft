@@ -436,10 +436,10 @@ test('a player can leave and their half of the split screen closes', async ({ pa
   // the first press on Leave only arms it — kids press everything
   await tap(page, 'menu');
   await page.waitForSelector('.menu-list');
-  await selectRow(page, 9); // Leave
+  await selectRow(page, 10); // Leave
   await tap(page, 'jump');
   expect(await page.evaluate(() => (window as any).__lbw.game.players.length)).toBe(2);
-  expect(await page.evaluate(() => [...document.querySelectorAll('.menu-item')][9].textContent)).toContain('SURE');
+  expect(await page.evaluate(() => [...document.querySelectorAll('.menu-item')][10].textContent)).toContain('SURE');
 
   // the second press lets them go
   await tap(page, 'jump');
@@ -518,7 +518,7 @@ test('when the last player leaves, the welcome screen comes back', async ({ page
 
   await tap(page, 'menu');
   await page.waitForSelector('.menu-list');
-  await selectRow(page, 9); // Leave
+  await selectRow(page, 10); // Leave
   await tap(page, 'jump');
   await tap(page, 'jump');
   await page.waitForFunction('window.__lbw.game.players.length === 0', null, { timeout: 10000 });
@@ -557,7 +557,7 @@ async function selectRow(page: Page, index: number): Promise<void> {
 async function openGrownUpsMenu(page: Page): Promise<void> {
   await tap(page, 'menu');
   await page.waitForSelector('.menu-list');
-  await selectRow(page, 8); // Grown-Ups
+  await selectRow(page, 9); // Grown-Ups
   await tap(page, 'jump');
   await page.waitForTimeout(300);
   expect(await selectedRow(page)).toBe(0);
@@ -722,6 +722,116 @@ test('kids can jump out of the water onto the shore', async ({ page }) => {
       }
     }
   }, { ...lake, grass: ids.GRASS, air: ids.AIR });
+  await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); }); // land the refill before the next page boots
+});
+
+test('swimming: paddling like a proper kid — stroke, surface float, kick-up and lean forward', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+
+  // a deep pond right in front (same recipe as the shore-jump test)
+  const lake = await page.evaluate((b: { water: number; grass: number; air: number }) => {
+    const game = (window as any).__lbw.game;
+    const S = game.world;
+    const e = game.players[0].entity;
+    const cx = Math.round(e.pos.x), cz = Math.round(e.pos.z);
+    const base = S.surfaceY(cx, cz);
+    const deep = 6;
+    for (let dx = -3; dx <= 3; dx++) {
+      for (let dz = -4; dz <= 4; dz++) {
+        for (let y = base - deep; y <= base + 3; y++) S.set(cx + dx, y, cz + dz, b.air);
+        if (dz <= -2) {
+          for (let y = base - deep; y <= base; y++) S.set(cx + dx, y, cz + dz, b.grass);
+        } else {
+          for (let y = base - deep; y <= base - 1; y++) S.set(cx + dx, y, cz + dz, b.water);
+        }
+      }
+    }
+    e.pos.set(cx + 0.5, base + 1, cz - 2.5);
+    e.vel.set(0, 0, 0);
+    e.yaw = 0;
+    return { cx, cz, base };
+  }, { water: ids.WATER, grass: ids.GRASS, air: ids.AIR });
+
+  // paddle in — the swim pose takes over
+  await page.evaluate(() => (window as any).__testPad.setMove(0, -1));
+  await page.waitForFunction('window.__lbw.game.players[0].entity.swimmingNow === true', null, { timeout: 15000 });
+  await frames(page, 30);
+
+  // body leans forward into the water, arms stroke: the avatar group is tilted
+  const tilt = await page.evaluate(() => (window as any).__lbw.game.players[0].entity.avatar.group.rotation.x);
+  expect(tilt).toBeGreaterThan(0.9);
+
+  // strokes are happening on a rhythm
+  const strokes = await page.evaluate(() => (window as any).__lbw.game.lastStroke.size);
+  expect(strokes).toBeGreaterThan(0);
+
+  // the lean must follow WHERE THE KID FACES: the body's head direction
+  // (local +Y in world space) sampled at two yaws has to swivel with them.
+  // three's default 'XYZ' Euler order pitches about the WORLD x-axis, which
+  // kept the head pointing one fixed way for every yaw (the old bug).
+  const headDirAt = (yaw: number) =>
+    page.evaluate((y: number) => {
+      const e = (window as any).__lbw.game.players[0].entity;
+      e.yaw = y;
+      e.syncAvatar(0.016);
+      e.avatar.group.updateMatrixWorld(true);
+      const el = e.avatar.body.matrixWorld.elements; // column 2 = world dir of local +Y
+      return { x: el[4], y: el[5], z: el[6] };
+    }, yaw);
+  const headSouth = await headDirAt(0);
+  const headEast = await headDirAt(Math.PI / 2);
+  const headShift = Math.hypot(
+    headSouth.x - headEast.x, headSouth.y - headEast.y, headSouth.z - headEast.z,
+  );
+  expect(headShift).toBeGreaterThan(0.8); // face-down lean swivels with the kid
+  await frames(page, 10); // let the paddle resume from that yaw
+
+  // surface float: stop swimming and the kid bobs near the surface, not
+  // plunging to the bottom
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+  await frames(page, 45);
+  const bob = await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    return { y: e.pos.y, vy: e.vel.y, head: e.inWaterNow };
+  });
+  expect(bob.y).toBeGreaterThan(lake.base - 1.7); // stayed near the surface
+  expect(bob.vy).toBeGreaterThan(-1.2); // …and sinking like a leaf, not a stone
+
+  // holding jump kicks up and out of the pond, and the body rights itself on land
+  await page.evaluate(() => {
+    (window as any).__lbw.game.players[0].entity.yaw = Math.PI;
+    (window as any).__testPad.set('jump', true);
+    (window as any).__testPad.setMove(0, -1);
+  });
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 30000 });
+  await page.evaluate(() => {
+    (window as any).__testPad.set('jump', false);
+    (window as any).__testPad.setMove(0, 0);
+  });
+  await frames(page, 40);
+  const upRight = await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    return { tilt: e.avatar.group.rotation.x, swimming: e.swimmingNow };
+  });
+  expect(upRight.swimming).toBe(false);
+  expect(upRight.tilt).toBeLessThan(0.2); // standing tall again on the shore
+
+  // fill the pond in so it cannot confuse later tests
+  await page.evaluate((arg: { cx: number; cz: number; base: number; grass: number; air: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let dx = -4; dx <= 4; dx++) {
+      for (let dz = -5; dz <= 5; dz++) {
+        for (let y = arg.base - 6; y <= arg.base + 3; y++) {
+          S.set(arg.cx + dx, y, arg.cz + dz, y <= arg.base ? arg.grass : arg.air);
+        }
+      }
+    }
+  }, { ...lake, grass: ids.GRASS, air: ids.AIR });
+  await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); }); // land the refill before the next page boots
 });
 
 test('sounds carry the material: stone clacks, dirt thuds, water splashes, feet pitter-patter', async ({ page }) => {
@@ -917,9 +1027,23 @@ test('sand obeys gravity: tumbles down, sinks through water, squashes plants and
       (window as any).__lbw.game.world.get(c.x, c.y, c.z) === c.id,
     { x, y, z, id }, { timeout: 15000 });
 
-  // 1) sand dropped in mid-air falls straight down and settles on the ground
+  // 1) sand dropped in mid-air falls straight down and settles on the ground.
+  // An in-page sampler proves the fall is ANIMATED: SandFalls keeps glide
+  // cubes in the scene while sand moves (a teleport would show none).
+  await page.evaluate(() => {
+    const g = (window as any).__lbw.game;
+    (window as any).__sawFalls = 0;
+    (window as any).__fallSampler = setInterval(
+      () => { if (g.sandFalls.count > 0) (window as any).__sawFalls++; }, 50);
+  });
   await setCell(x0, gy + 4, z0, ids.SAND);
   await waitForBlock(x0, gy + 1, z0, ids.SAND);
+  const sawFalls = await page.evaluate(() => {
+    clearInterval((window as any).__fallSampler);
+    return (window as any).__sawFalls;
+  });
+  expect(sawFalls).toBeGreaterThan(0); // the fall was animated, not just teleported
+  await page.waitForFunction('window.__lbw.game.sandFalls.count === 0', null, { timeout: 5000 });
   expect(await blockAt(x0, gy + 2, z0)).toBe(ids.AIR);
 
   // 2) dig the ground out under a sand block: it follows one cell down
@@ -974,7 +1098,7 @@ test('sand obeys gravity: tumbles down, sinks through water, squashes plants and
 async function setFreeze(page: Page, on: boolean): Promise<void> {
   await tap(page, 'menu');
   await page.waitForSelector('.menu-list');
-  await selectRow(page, 8); // Grown-Ups
+  await selectRow(page, 9); // Grown-Ups
   await tap(page, 'jump');
   await selectRow(page, 0); // Freeze Game
   if ((await page.evaluate(() => (window as any).__lbw.game.frozen)) !== on) await tap(page, 'jump');
@@ -1018,7 +1142,7 @@ test('grown-up menu: freeze pauses the world, split screen cycles, reset clears 
   // --- Split Screen cycles through every layout, Reset World wipes edits
   await tap(page, 'menu');
   await page.waitForSelector('.menu-list');
-  await selectRow(page, 8);
+  await selectRow(page, 9); // Grown-Ups
   await tap(page, 'jump');
 
   await selectRow(page, 1); // Split Screen
@@ -1276,7 +1400,7 @@ test('menu sub-screens receive controller input (Help screen opens and closes on
   await joinWithPad(page);
   await tap(page, 'menu');
   await page.waitForSelector('.menu-list');
-  await selectRow(page, 6); // Help
+  await selectRow(page, 7); // Help
   await tap(page, 'jump');
   await page.waitForSelector('.pad-help');
   expect(await page.evaluate(() => (window as any).__lbw.game.overlays.size)).toBe(1);
@@ -1792,6 +1916,75 @@ test('the kids are dressed: knitted jumpers, denim legs, a faced head', async ({
   expect(cloth.textures).toBeGreaterThanOrEqual(3); // knit, denim and the jumper front differ
 });
 
+test('costumes: pick one with LB/RB at join, swap anytime in the menu', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  // wake the join card and keep it open (no confirm tap yet)
+  const pad = await page.evaluate(() => (window as any).__lbw.addVirtualPad());
+  void pad;
+  await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    const src = [...game.input.sources.values()].find((s: any) => s.kind === 'virtual' && !game.sourceToPlayer.has(s.id));
+    (window as any).__testPad = src;
+    src.tap('jump');
+  });
+  await page.waitForFunction('window.__lbw.game.pendingJoins.size > 0');
+
+  await expect(page.locator('.model-name')).toHaveText(/Kid/);
+  await tap(page, 'nextBlock'); // LB/RB (Q/R on keyboard) cycle costumes
+  await tap(page, 'nextBlock');
+  await expect(page.locator('.model-name')).toHaveText(/Robot/);
+
+  await tap(page, 'jump'); // join as the Robot
+  await page.waitForFunction('window.__lbw.game.players.length === 1');
+
+  const stats = () => page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    let meshes = 0;
+    let ownColour = 0;
+    const want = (e.colorHex as string).slice(1).toLowerCase();
+    e.avatar.group.traverse((o: any) => {
+      if (!o.isMesh) return;
+      meshes++;
+      const mats: any[] = Array.isArray(o.material) ? o.material : [o.material];
+      if (mats.some((m) => m?.color && m.color.getHexString() === want)) ownColour++;
+    });
+    return {
+      model: e.model,
+      inScene: !!e.avatar.group.parent,
+      meshes,
+      ownColour,
+      tail: !!e.avatar.tail,
+    };
+  });
+
+  const robot = await stats();
+  expect(robot.model).toBe('robot');
+  expect(robot.inScene).toBe(true);
+  expect(robot.meshes).toBeGreaterThan(10); // antenna, ear bolts, boots…
+  expect(robot.ownColour).toBeGreaterThan(0); // the player colour survived the costume
+
+  // the Costume row in the player menu cycles every model without page errors
+  await tap(page, 'menu');
+  await page.waitForSelector('.menu-list');
+  await selectRow(page, 6); // Costume
+  const order = ['wizard', 'dino', 'cat', 'knight', 'kid', 'astronaut'];
+  for (const want of order) {
+    await tap(page, 'jump');
+    const s = await stats();
+    expect(s.model).toBe(want);
+    expect(s.inScene).toBe(true); // the rebuilt avatar slid back into the scene
+    expect(s.meshes).toBeGreaterThanOrEqual(9); // the classic body is 9 pieces…
+    if (want !== 'kid') expect(s.meshes).toBeGreaterThan(9); // …costumes add bits on top
+    expect(s.ownColour).toBeGreaterThan(0);
+    if (want === 'dino' || want === 'cat') expect(s.tail).toBe(true);
+  }
+  await page.evaluate(() => (window as any).__testPad.set('back', true));
+  await frames(page, 2);
+  await page.evaluate(() => (window as any).__testPad.set('back', false));
+  await page.waitForSelector('.menu-list', { state: 'detached' });
+});
+
 // ------------------------------------- animals, doors, slabs, stairs, chests, saplings
 
 /** flattens a strip of the starting meadow and faces the player down it */
@@ -2243,10 +2436,29 @@ test('treasure chests: every world hides them, and the pet button trades a lid f
   await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
   await clearRunway(page);
 
-  // a chest can also be built: it is one squat cell, not a two-cell door
-  const chest = await placeSelected(page, ids.CHEST);
+  // chests are not in the palette any more — you find them in the world. So
+  // drop one into the cell the kid is aiming at (terrain-style) and check it
+  // is one squat cell, not a two-cell door like the build path used to allow
+  const chest = await page.evaluate((chestId: number) => {
+    const game = (window as any).__lbw.game;
+    const t = game.players[0].target;
+    const c = { x: t.px, y: t.py, z: t.pz };
+    game.world.set(c.x, c.y, c.z, chestId);
+    return c;
+  }, ids.CHEST);
   expect(await blockAtCell(page, chest)).toBe(ids.CHEST);
   expect(await blockAtCell(page, chest, 1)).toBe(ids.AIR);
+
+  // and confirm the palette really no longer offers the chest
+  await tap(page, 'palette');
+  await page.waitForSelector('.palette-grid');
+  const chestInPalette = await page.evaluate((chestId: number) => {
+    return [...document.querySelectorAll('.palette-cell')].some(
+      (c) => Number((c as HTMLElement).dataset.id) === chestId,
+    );
+  }, ids.CHEST);
+  expect(chestInPalette).toBe(false);
+  await tap(page, 'back'); // close the palette again
 
   const tally = () => page.evaluate(() => {
     const game = (window as any).__lbw.game;
@@ -2421,7 +2633,7 @@ test('the player menu fits inside a half-height stacked pane — no overflow', a
 
   await tap(page, 'menu');
   await page.waitForSelector('.menu-list');
-  await selectRow(page, 9); // the LAST row (Leave) — the one that used to hang off the pane
+  await selectRow(page, 10); // the LAST row (Leave) — the one that used to hang off the pane
 
   const fit = await page.evaluate(() => {
     const pane = document.querySelectorAll('.pane')[0].getBoundingClientRect();
@@ -2429,7 +2641,7 @@ test('the player menu fits inside a half-height stacked pane — no overflow', a
     const last = rows[rows.length - 1].getBoundingClientRect();
     return { count: rows.length, lastTop: last.top, lastBottom: last.bottom, paneTop: pane.top, paneBottom: pane.bottom };
   });
-  expect(fit.count).toBe(10);
+  expect(fit.count).toBe(11);
   expect(fit.lastTop).toBeGreaterThanOrEqual(fit.paneTop - 1);
   expect(fit.lastBottom).toBeLessThanOrEqual(fit.paneBottom + 1);
 });
@@ -2448,7 +2660,7 @@ test('grown-up settings — split layout and sound — come back after a reload'
   await tap(page, 'back');
   await tap(page, 'menu');
   await page.waitForSelector('.menu-list');
-  await selectRow(page, 7); // Sound
+  await selectRow(page, 8); // Sound
   await tap(page, 'jump');
   expect(await page.evaluate(() => (window as any).__lbw.game.audio.muted)).toBe(true);
 

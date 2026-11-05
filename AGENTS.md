@@ -64,6 +64,19 @@ event. Renaming a storage key orphans the family's existing saves.
   colour, so a player's colour survives. The torso is a six-material box —
   BoxGeometry face order is +x −x +y −y +z −z, and +z is the front that gets
   the collar/pocket/buttons.
+- Costumes (`AVATAR_MODELS` in `players/avatar.ts`): one skeleton for every
+  model — the arm/leg pivots, head and face stay exactly where
+  `animateAvatar`/`syncAvatar` expect them, costumes only add boxes (helmet,
+  hat, tail…) and re-tint materials, and each keeps ≥1 mesh in the player's
+  own colour (the e2e 'costumes' test counts them). The Kid model is the
+  classic 9-mesh body and must stay byte-identical — 'the kids are dressed'
+  counts its textures. Costume tails ride `AvatarParts.tail` (animateAvatar
+  wags it). Pick at join with prevBlock/nextBlock on the JoinCard; swap in
+  play via the PlayerMenu 'Costume' row → `PlayerEntity.cycleModel()`, which
+  rebuilds the avatar and re-parents it (the per-frame `applyAvatarLayers`
+  sorts split-screen layers out; don't cache AvatarParts anywhere).
+  PlayerMenu rows are index-pinned in several tests — inserting a row shifts
+  Grown-Ups/Leave/Help indices in `tests/e2e/game.spec.ts`.
 - Dynamite: the stick is a real voxel (`DYNAMITE`), so it saves, blocks things
   and can be carved by another blast; `DynamiteManager` only owns the animated
   fuse rig (tagged `group.userData.fuse` for leak checks), the blast and the
@@ -71,6 +84,24 @@ event. Renaming a storage key orphans the family's existing saves.
   clock in headless Chromium — never `waitForTimeout` for an explosion, poll
   `game.dynamite.blastCount`. Blasts never touch `y <= 0`, `unbreakable`
   blocks or water, and `SCORCH` is deliberately not in the palette.
+- Swimming (`players/playerEntity.ts`): buoyancy is a *levelled float*, not a
+  speed cap — `physics.submergedFraction` samples four heights up the body and
+  the vertical target is `(frac - SWIM_TRIM) * 2.2`, so deep under drifts you
+  up and shallow water lets you wade; a passive kid settles head-out at the
+  surface instead of sinking to the bottom (a pure "cap fall speed" swim made
+  walk-ins plunge to the pond floor). Hold jump to kick (`SWIM_UP_V`); the
+  surface push-off jump only fires once `headClearOfWater` (the existing
+  shore-escape rule, keep it). Strokes tick `events.stroked` every
+  `STROKE_SECONDS` → `Game.lastStroke` dedups → `audio.swimStroke`. The avatar
+  leans face-down (`syncAvatar` rotation.x ≈ 1.2) with a breaststroke/flutter
+  pose from `animateAvatar(..., swimming)`. The avatar group MUST keep
+  `rotation.order = 'YXZ'` (set in `createAvatar`): three's default 'XYZ'
+  pitches about the WORLD x-axis, so the lean stayed stuck pointing one fixed
+  direction instead of following the facing. The swimming test samples the
+  body's world +Y at two yaws to keep that honest. Any test that edits terrain near
+  spawn and is followed by a test that re-boots must `await game.saveNow()`
+  after the refill — autosave is debounced 1.5 s and a fast page swap loses it
+  (this bit the shore-jump → swimming handoff).
 - Crouch (Minecraft sneak): **tap B/◯ in the world** (keyboard Ctrl) toggles
   it; menus keep B as Back. `PlayerEntity.crouching` → squat AABB
   (`physics.CROUCH_H` 0.95 — fits a one-block gap), 42 % walk speed, jump
@@ -140,14 +171,25 @@ event. Renaming a storage key orphans the family's existing saves.
   change (buttons, blasts, tests, the sim itself) and `SandGravity.notify`
   tracks the sand at/above that cell, so digging under a cliff cascades:
   each cell's own `set` re-notifies the one above. One cell per step
-  (~8/s), water sinks through (displaced water rides up), cross plants are
-  squashed (`crushed` hook forgets the sapling), and it never occupies a
-  cell a player overlaps — it just rests over their head with `sandThud`.
-  Terrain writes cells directly (no hook), so natural sand never falls
-  until something changes under it — same as floating sand in Minecraft.
+  (~8/s, `STEP_SECONDS`), water sinks through (displaced water rides up),
+  cross plants are squashed (`crushed` hook forgets the sapling), and it
+  never occupies a cell a player overlaps — it just rests over their head
+  with `sandThud`. Terrain writes cells directly (no hook), so natural sand
+  never falls until something changes under it — same as floating sand in
+  Minecraft. **Falls are animated** (`render/sandFalls.ts`, `Game.sandFalls`):
+  each `moved` hook glide spawns/continues one atlas-textured cube per block,
+  eased one cell per `STEP_SECONDS` in game time; the voxel stays authoritative
+  (physics/saves) while the mesher skips the in-flight cell via
+  `chunks.skipSand` (= `sandFalls.hidden`) so a block never draws twice — the
+  cube alone is the block mid-fall, and finishing the glide dirties the chunk
+  (`world.touchAt`) so the voxel takes over seamlessly. e2e: an in-page sampler
+  asserts `sandFalls.count` rises during a fall and returns to 0 after.
 - Treasure chests: the loot roll is `core/treasure.ts` (weights + messages),
   the effects live in `Game.grantTreasure` (no inventory, so prizes happen to
   the world: star counters, `starField.spawnAt` stars, `playerEntity.zoomTime`
   / `boingTime`, `animals.spawn`). Opened = `CHEST_OPEN` in the voxel, so it
-  needs no extra save field. Terrain hides `CHESTS_PER_WORLD` chests in
-  `generateTerrain` step 6 — remember `idx` strides y by 1, not by `WORLD_SY`.
+  needs no extra save field — once a lid is up it is open in that world
+  forever, and an empty one toasts `EMPTY_CHEST_MESSAGE`. Chests are NOT in
+  `PALETTE`/`FAVORITES` on purpose: they are only *found* in the environment,
+  never built. Terrain hides `CHESTS_PER_WORLD` chests in `generateTerrain`
+  step 6 — remember `idx` strides y by 1, not by `WORLD_SY`.
