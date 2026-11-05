@@ -55,9 +55,7 @@ export function solidBoxesOf(world: World, x: number, y: number, z: number): Aab
   if (h <= 0) return [];
   if (isDoorClosedBlock(id)) {
     const facing = world.doorFacing.get(worldIdx(x, y, z)) ?? 0;
-    return [facing === 0
-      ? { x: x + 0.25, y, z, w: 0.5, h: 1, d: 1 }
-      : { x, y, z: z + 0.25, w: 1, h: 1, d: 0.5 }];
+    return [doorPanelAabb(x, y, z, facing)];
   }
   return [{ x, y, z, w: 1, h, d: 1 }];
 }
@@ -134,30 +132,56 @@ function stepLift(world: World, box: Aabb, axis: 'x' | 'z', dir: number): number
 }
 
 /**
- * Snap the box out of everything it is currently overlapping along one
- * horizontal axis, onto the NEAREST solid face in the direction of travel.
- * For plain cubes this is the old cell-edge clamp; for a closed door the
- * kid stops right at the visible panel instead of half a block short of it.
+ * The closed door's standing panel: half a block deep, one cell tall, lying
+ * in the wall's plane (facing 0 = thin along x, 1 = thin along z). Physics,
+ * the mesher and the "who is standing in the doorway" check all agree on
+ * this one box.
  */
-function faceSnap(world: World, box: Aabb, axis: 'x' | 'z', dir: number): void {
+export function doorPanelAabb(x: number, y: number, z: number, facing: number): Aabb {
+  return facing === 0
+    ? { x: x + 0.25, y, z, w: 0.5, h: 1, d: 1 }
+    : { x, y, z: z + 0.25, w: 1, h: 1, d: 0.5 };
+}
+
+/**
+ * Snap the box out of everything it is currently overlapping along one
+ * horizontal axis. For each overlapping box there are two ways out along
+ * that axis: back off the face it walked into, or be pushed out the far
+ * face. We try them in order of SHORTEST move and take the first that
+ * actually clears — a kid who grazes a wall nudges back a hair, and a kid
+ * the world somehow buried inside something gets out by the smallest hop,
+ * never a full-cell shove along the long axis of a door panel (that shove
+ * used to launch players through the invisible wall at the map edge).
+ */
+function faceSnap(world: World, box: Aabb, axis: 'x' | 'z'): void {
   const x0 = Math.floor(box.x), x1 = Math.floor(box.x + box.w - 1e-6);
   const y0 = Math.floor(box.y), y1 = Math.floor(box.y + box.h - 1e-6);
   const z0 = Math.floor(box.z), z1 = Math.floor(box.z + box.d - 1e-6);
-  let best = dir > 0 ? Infinity : -Infinity;
+  const cur = axis === 'x' ? box.x : box.z;
+  const depth = axis === 'x' ? box.w : box.d;
+  const cands: number[] = [];
   for (let x = x0; x <= x1; x++) {
     for (let y = y0; y <= y1; y++) {
       for (let z = z0; z <= z1; z++) {
         for (const b of solidBoxesOf(world, x, y, z)) {
-          if (!b || !boxesOverlap(box, b)) continue;
-          if (axis === 'x') best = dir > 0 ? Math.min(best, b.x - box.w - EPS) : Math.max(best, b.x + b.w + EPS);
-          else best = dir > 0 ? Math.min(best, b.z - box.d - EPS) : Math.max(best, b.z + b.d + EPS);
+          if (!boxesOverlap(box, b)) continue;
+          const lo = axis === 'x' ? b.x : b.z;
+          const size = axis === 'x' ? b.w : b.d;
+          cands.push(lo - depth - EPS, lo + size + EPS);
         }
       }
     }
   }
-  if (!Number.isFinite(best)) return; // cannot find a face (should not happen): leave as is
-  if (axis === 'x') box.x = best;
-  else box.z = best;
+  if (cands.length === 0) return; // cannot find a face (should not happen): leave as is
+  cands.sort((a, b) => Math.abs(a - cur) - Math.abs(b - cur));
+  const set = (v: number): void => { if (axis === 'x') box.x = v; else box.z = v; };
+  for (const c of cands) {
+    set(c);
+    if (!collides(world, box)) return; // found the nearest clear face
+  }
+  // nothing single-axis clears it (buried in multiple blocks): do not shove —
+  // stay put; velocity is zeroed anyway, and other systems resolve this.
+  set(cur);
 }
 
 /** how far above their feet a kid auto-steps up without jumping */
@@ -189,7 +213,7 @@ export function moveAabb(world: World, box: Aabb, vx: number, vy: number, vz: nu
       hitWall = true;
       // stop right at the solid face we walked into — the cell edge for a
       // cube, the visible half-deep panel for a closed door
-      if (vx !== 0) faceSnap(world, box, 'x', vx > 0 ? 1 : -1);
+      if (vx !== 0) faceSnap(world, box, 'x');
       vx = 0;
     }
   }
@@ -215,7 +239,7 @@ export function moveAabb(world: World, box: Aabb, vx: number, vy: number, vz: nu
       // as above: a stairs step, not a wall
     } else {
       hitWall = true;
-      if (vz !== 0) faceSnap(world, box, 'z', vz > 0 ? 1 : -1);
+      if (vz !== 0) faceSnap(world, box, 'z');
       vz = 0;
     }
   }

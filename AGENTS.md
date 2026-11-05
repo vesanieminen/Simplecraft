@@ -100,6 +100,14 @@ event. Renaming a storage key orphans the family's existing saves.
   cube made its neighbours drop the shared face and the terrain around every
   chest went see-through. AO still uses `isOpaqueBlock`. The regression test
   counts quads in one chunk's `textured` channel through `__lbw.chunkGeometry`.
+- Doors: closing one **makes room first** — `Game.makeRoomForDoor` nudges any
+  player overlapping the soon-to-be panel out along the panel's thin axis
+  (the walk-through direction) to the nearer clear side, and refuses the
+  close when nobody fits or an animal loiters in the doorway. Defence in
+  depth: `physics.faceSnap` resolves an embedded box by SHORTEST displacement
+  (back off or come through), so no block change can shove a kid a full
+  cell sideways and through the ±0.35 map-edge clamp (the old "door pushed
+  me out of the world" bug). Regression test spams a door in the edge column.
 - Treasure chests: the loot roll is `core/treasure.ts` (weights + messages),
   the effects live in `Game.grantTreasure` (no inventory, so prizes happen to
   the world: star counters, `starField.spawnAt` stars, `playerEntity.zoomTime`
