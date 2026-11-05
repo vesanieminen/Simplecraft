@@ -73,6 +73,7 @@ export class InputManager {
         pressed,
         released,
         anyPressed: pressed.size > 0,
+        kind: src.kind,
       });
       this.prevHeld.set(id, held);
     }
