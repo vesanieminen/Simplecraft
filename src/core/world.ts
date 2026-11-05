@@ -103,7 +103,15 @@ export class World {
     if (recordMod) this.mods.set(i, id);
     this.touchChunksAt(x, z);
     this.revision++;
+    if (this.onCellChanged) this.onCellChanged(x, y, z, id);
   }
+
+  /**
+   * Fires whenever a cell's block id actually changes — from a build button,
+   * an explosion, a test harness or the simulations themselves. Gravity sand
+   * listens here so *every* change of support is noticed, whoever caused it.
+   */
+  onCellChanged: ((x: number, y: number, z: number, id: BlockId) => void) | null = null;
 
   private touchChunksAt(x: number, z: number): void {
     const cx = Math.floor(x / CHUNK);
