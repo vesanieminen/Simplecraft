@@ -135,7 +135,7 @@ milestone; see Roadmap. Today, each computer gets the same saved world.)
 | Y / △ | Open the block palette (before anyone joins: choose a world) |
 | D-pad | Navigate menus |
 | Start / Options | Player menu (fly, camera, **costume**, home, help…) |
-| B / ◯ | Back / close |
+| B / ◯ | **Crouch** (sneak: slow, squat, never walks off ledges — tap again to stand) · Back / close in menus |
 
 Everything is doable with a controller only — joining, palettes, menus,
 settings, help, everything. The block palette is a real grid: **left/right**
@@ -144,7 +144,7 @@ want is four presses, not twenty.
 
 ## Keyboard & mouse (optional)
 
-WASD move · arrow keys look · Space jump · RMB place · LMB break ·
+WASD move · arrow keys look · Space jump · Ctrl crouch · RMB place · LMB break ·
 Q/R cycle blocks · F palette · E pet animals / open doors · Esc menu · Enter confirm.
 
 *(The build/break buttons were swapped in November 2026 — kids build far
