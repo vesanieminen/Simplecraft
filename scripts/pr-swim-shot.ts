@@ -81,6 +81,13 @@ await page.evaluate(() => {
     orig(...args);
     if (lp.ghost) lp.ghost.visible = false;
     if (lp.outline) lp.outline.visible = false;
+    if ((window as any).__sideCam) {
+      // park the camera at the waterline beside the swimmer: a side profile
+      // shows the face-down lean far better than the trailing behind-view
+      const e = lp.entity;
+      lp.camera.position.set(e.pos.x, e.pos.y + 1.05, e.pos.z + 3.0);
+      lp.camera.lookAt(e.pos.x, e.pos.y + 0.45, e.pos.z);
+    }
   };
 });
 await page.waitForFunction('window.__lbw.game.players[0].entity.inWaterNow === true', null, { timeout: 15000 });
@@ -90,8 +97,17 @@ await page.evaluate(() => {
   const e = (window as any).__lbw.game.players[0].entity;
   e.vel.y = 2.2; // mid-kick, head about to clear the waterline
   e.walkPhase += 1.1; // mid-stroke arms
+  (window as any).__sideCam = true; // swing the camera to the waterline side-view
 });
-await page.waitForTimeout(420);
+await page.waitForTimeout(250);
+console.log('swim state:', await page.evaluate(() => {
+  const e = (window as any).__lbw.game.players[0].entity;
+  const g = e.avatar.group;
+  return {
+    x: g.rotation.x.toFixed(2), y: g.rotation.y.toFixed(2), order: g.rotation.order,
+    swim: e.swimmingNow, inWater: e.inWaterNow, vy: e.vel.y.toFixed(2),
+  };
+}));
 await page.screenshot({ path: `${outDir}/swimming.jpg`, type: 'jpeg', quality: 92 });
 
 await browser.close();

@@ -81,7 +81,11 @@ event. Renaming a storage key orphans the family's existing saves.
   shore-escape rule, keep it). Strokes tick `events.stroked` every
   `STROKE_SECONDS` → `Game.lastStroke` dedups → `audio.swimStroke`. The avatar
   leans face-down (`syncAvatar` rotation.x ≈ 1.2) with a breaststroke/flutter
-  pose from `animateAvatar(..., swimming)`. Any test that edits terrain near
+  pose from `animateAvatar(..., swimming)`. The avatar group MUST keep
+  `rotation.order = 'YXZ'` (set in `createAvatar`): three's default 'XYZ'
+  pitches about the WORLD x-axis, so the lean stayed stuck pointing one fixed
+  direction instead of following the facing. The swimming test samples the
+  body's world +Y at two yaws to keep that honest. Any test that edits terrain near
   spawn and is followed by a test that re-boots must `await game.saveNow()`
   after the refill — autosave is debounced 1.5 s and a fast page swap loses it
   (this bit the shore-jump → swimming handoff).

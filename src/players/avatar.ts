@@ -173,6 +173,10 @@ export function createAvatar(colorHex: string): AvatarParts {
   const light = color.clone().lerp(new THREE.Color(0xffffff), 0.35);
 
   const group = new THREE.Group();
+  // yaw-then-pitch: the swim lean must rotate WITH the facing. With three's
+  // default 'XYZ' order, rotation.x pitches about the WORLD x-axis, so the
+  // face-down lean pointed one fixed direction no matter where the kid looked.
+  group.rotation.order = 'YXZ';
   const body = new THREE.Group();
   group.add(body);
 

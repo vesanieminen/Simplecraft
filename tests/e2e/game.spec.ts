@@ -769,6 +769,27 @@ test('swimming: paddling like a proper kid — stroke, surface float, kick-up an
   const strokes = await page.evaluate(() => (window as any).__lbw.game.lastStroke.size);
   expect(strokes).toBeGreaterThan(0);
 
+  // the lean must follow WHERE THE KID FACES: the body's head direction
+  // (local +Y in world space) sampled at two yaws has to swivel with them.
+  // three's default 'XYZ' Euler order pitches about the WORLD x-axis, which
+  // kept the head pointing one fixed way for every yaw (the old bug).
+  const headDirAt = (yaw: number) =>
+    page.evaluate((y: number) => {
+      const e = (window as any).__lbw.game.players[0].entity;
+      e.yaw = y;
+      e.syncAvatar(0.016);
+      e.avatar.group.updateMatrixWorld(true);
+      const el = e.avatar.body.matrixWorld.elements; // column 2 = world dir of local +Y
+      return { x: el[4], y: el[5], z: el[6] };
+    }, yaw);
+  const headSouth = await headDirAt(0);
+  const headEast = await headDirAt(Math.PI / 2);
+  const headShift = Math.hypot(
+    headSouth.x - headEast.x, headSouth.y - headEast.y, headSouth.z - headEast.z,
+  );
+  expect(headShift).toBeGreaterThan(0.8); // face-down lean swivels with the kid
+  await frames(page, 10); // let the paddle resume from that yaw
+
   // surface float: stop swimming and the kid bobs near the surface, not
   // plunging to the bottom
   await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
