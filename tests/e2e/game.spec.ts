@@ -2258,10 +2258,19 @@ test('treasure chests: every world hides them, and the pet button trades a lid f
   });
   const before = await tally();
 
-  // look down at the chest and press the pet button: the lid comes up
-  await page.evaluate(() => {
-    (window as any).__lbw.game.players[0].entity.pitch = -0.5;
-  });
+  // look at the chest and press the pet button: the lid comes up. Aim
+  // exactly at the chest's middle rather than assuming a fixed pitch:
+  // shared CI shard worlds have uneven ground near spawn, where the chest
+  // can land a cell or two farther than expected and a fixed downward
+  // pitch then hits the floor in front of it and removeTarget never
+  // becomes the chest (observed in CI).
+  await page.evaluate((c: Cell) => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    const dx = c.x + 0.5 - e.pos.x, dz = c.z + 0.5 - e.pos.z;
+    const dy = c.y + 0.45 - (e.pos.y + e.headHeight);
+    e.yaw = Math.atan2(dx, dz);
+    e.pitch = Math.atan2(dy, Math.hypot(dx, dz));
+  }, chest);
   await page.waitForFunction((cids: number[]) => {
     const t = (window as any).__lbw.game.players[0].removeTarget;
     return t !== null && cids.includes(t.block);
