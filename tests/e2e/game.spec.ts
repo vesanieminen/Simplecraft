@@ -966,9 +966,23 @@ test('sand obeys gravity: tumbles down, sinks through water, squashes plants and
       (window as any).__lbw.game.world.get(c.x, c.y, c.z) === c.id,
     { x, y, z, id }, { timeout: 15000 });
 
-  // 1) sand dropped in mid-air falls straight down and settles on the ground
+  // 1) sand dropped in mid-air falls straight down and settles on the ground.
+  // An in-page sampler proves the fall is ANIMATED: SandFalls keeps glide
+  // cubes in the scene while sand moves (a teleport would show none).
+  await page.evaluate(() => {
+    const g = (window as any).__lbw.game;
+    (window as any).__sawFalls = 0;
+    (window as any).__fallSampler = setInterval(
+      () => { if (g.sandFalls.count > 0) (window as any).__sawFalls++; }, 50);
+  });
   await setCell(x0, gy + 4, z0, ids.SAND);
   await waitForBlock(x0, gy + 1, z0, ids.SAND);
+  const sawFalls = await page.evaluate(() => {
+    clearInterval((window as any).__fallSampler);
+    return (window as any).__sawFalls;
+  });
+  expect(sawFalls).toBeGreaterThan(0); // the fall was animated, not just teleported
+  await page.waitForFunction('window.__lbw.game.sandFalls.count === 0', null, { timeout: 5000 });
   expect(await blockAt(x0, gy + 2, z0)).toBe(ids.AIR);
 
   // 2) dig the ground out under a sand block: it follows one cell down
