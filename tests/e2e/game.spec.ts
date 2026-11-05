@@ -1553,6 +1553,7 @@ test('a stick you left lying around is still there after a reload, fuse and all'
   await joinWithPad(page);
   await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 10000 });
   const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  await clearRunway(page); // CI's shared save can litter the aiming row
   const cell = await plantStick(page, 60);
 
   const want = await page.evaluate((c: Cell) => {
@@ -1902,6 +1903,74 @@ test('doors: two blocks high and half a block deep — build, pat open, walk thr
   expect(after.top).toBe(ids.DOOR_TOP);
   expect(after.swingBottom === 0 || after.swingBottom === 1).toBe(true);
   expect(after.swingTop).toBe(after.swingBottom);
+});
+
+test('doors never shove a kid out of the world: spam close while standing in the doorway at the map edge', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+
+  // a stone island hard against the WEST map edge with the door in the edge
+  // column, swung so its near side is the void: exactly the setup the family
+  // found — the old physics closed the panel inside the kid and faceSnap
+  // shoved them along the panel's long axis, over the invisible wall.
+  await page.evaluate((b: { door: number; doorTop: number; stone: number }) => {
+    const game = (window as any).__lbw.game;
+    const { sy, sz } = (window as any).__lbw.dims;
+    for (let x = 0; x <= 5; x++) {
+      for (let z = 0; z <= 4; z++) {
+        for (let y = 8; y <= 12; y++) game.world.set(x, y, z, b.stone);
+        for (let y = 13; y <= 16; y++) game.world.set(x, y, z, 0);
+      }
+    }
+    game.world.set(0, 13, 2, b.door);
+    game.world.set(0, 14, 2, b.doorTop);
+    game.world.doorFacing.set((0 * sz + 2) * sy + 13, 0); // thin along x: the void is one shove away
+    game.world.doorFacing.set((0 * sz + 2) * sy + 14, 0);
+    const e = game.players[0].entity;
+    e.pos.set(1.5, 13, 2.25);
+    e.vel.set(0, 0, 0);
+    e.yaw = -Math.PI / 2; // face the edge — and the door
+    e.pitch = -0.35;
+  }, { door: ids.DOOR, doorTop: ids.DOOR_TOP, stone: ids.STONE });
+
+  await page.waitForFunction((bids: number[]) => {
+    const t = (window as any).__lbw.game.players[0].removeTarget;
+    return t !== null && bids.includes(t.block);
+  }, [ids.DOOR, ids.DOOR_TOP], { timeout: 8000 });
+
+  // step into the doorway and spam the pet button
+  await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    e.pos.set(0.5, 13, 2.25);
+    e.vel.set(0, 0, 0);
+  });
+  const dims = await page.evaluate(() => (window as any).__lbw.dims);
+  for (let i = 0; i < 6; i++) {
+    await tap(page, 'interact');
+    const p = await page.evaluate(() => {
+      const e = (window as any).__lbw.game.players[0].entity;
+      return { x: e.pos.x, y: e.pos.y, z: e.pos.z };
+    });
+    // never flung around: stays within arm's reach of the doorway, on top of
+    // the island, inside the invisible wall — no respawns, no map-edge roulette
+    expect(Math.hypot(p.x - 0.5, p.z - 2.5)).toBeLessThan(2.5);
+    expect(p.y).toBeGreaterThanOrEqual(12.5);
+    expect(p.x).toBeGreaterThanOrEqual(0.35);
+    expect(p.z).toBeGreaterThanOrEqual(0.35);
+    expect(p.x).toBeLessThan(dims.sx - 0.35);
+    expect(p.z).toBeLessThan(dims.sz - 0.35);
+  }
+
+  // whoever holds the door at the end, the kid stands clear of the panel
+  const end = await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    return { bottom: game.world.get(0, 13, 2), x: game.players[0].entity.pos.x };
+  });
+  expect([ids.DOOR, ids.DOOR_OPEN]).toContain(end.bottom);
+  if (end.bottom === ids.DOOR) expect(end.x).toBeGreaterThan(0.78); // east of the shut panel
 });
 
 /** the block id in a cell (`dy` cells above it) */
