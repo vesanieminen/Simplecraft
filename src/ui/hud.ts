@@ -11,7 +11,7 @@ const BTN_LABELS: Record<ControllerType, Record<string, string>> = {
   xbox: { a: 'A', b: 'B', x: 'X', y: 'Y', lb: 'LB', rb: 'RB', lt: 'LT', rt: 'RT', start: 'Start' },
   playstation: { a: '✕', b: '◯', x: '☐', y: '△', lb: 'L1', rb: 'R1', lt: 'L2', rt: 'R2', start: 'Options' },
   generic: { a: 'A', b: 'B', x: 'X', y: 'Y', lb: 'L1', rb: 'R1', lt: 'L2', rt: 'R2', start: 'Menu' },
-  keyboard: { a: 'Space', b: 'Esc', x: 'E', y: 'F', lb: 'Q', rb: 'R', lt: 'R-Click', rt: 'L-Click', start: 'Esc' },
+  keyboard: { a: 'Space', b: 'Ctrl', x: 'E', y: 'F', lb: 'Q', rb: 'R', lt: 'R-Click', rt: 'L-Click', start: 'Esc' },
 };
 
 export class Hud {
@@ -70,7 +70,7 @@ export class Hud {
     // LT-position button builds, RT-position breaks (2026-11 control swap —
     // on keyboard that means R-Click builds, L-Click breaks)
     this.hints.textContent =
-      `${b.lt} build · ${b.rt} break · ${b.a} jump · ${b.x} pet / open · ${b.y} blocks · ${b.start} menu`;
+      `${b.lt} build · ${b.rt} break · ${b.a} jump · ${b.b} sneak · ${b.x} pet / open · ${b.y} blocks · ${b.start} menu`;
 
     this.root.append(this.nameTag, this.stars, this.flyTag, this.boostTag, this.crosshair, pod, this.hints);
   }
