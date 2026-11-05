@@ -296,6 +296,16 @@ export function isSolidBlock(id: BlockId): boolean {
 export function isOpaqueBlock(id: BlockId): boolean {
   return id !== AIR && blockDef(id).opaque;
 }
+/**
+ * Does this block cover the whole face it shares with a neighbouring cell?
+ * Only such a neighbour may make a block skip its own face: a slab, a stair, a
+ * door panel or a squat treasure chest stops short of the cell border, so
+ * skipping the shared face would leave a hole you can see straight through the
+ * world. (Face culling only — ambient occlusion still treats a chest as solid.)
+ */
+export function isFullCellBlock(id: BlockId): boolean {
+  return isOpaqueBlock(id) && solidHeightOf(id) >= 1;
+}
 export function isCrossBlock(id: BlockId): boolean {
   return id !== AIR && !!blockDef(id).cross;
 }

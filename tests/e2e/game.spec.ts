@@ -1465,6 +1465,59 @@ test('every block is painted from the atlas, not flat-tinted', async ({ page }) 
   expect(channels.uved).toBe(true);
 });
 
+/**
+ * Hidden-face culling may only skip a face the neighbour really covers. A
+ * treasure chest is 0.85 of a cell tall, a slab half, a step two boxes: their
+ * neighbours used to treat them as whole cubes and drop the shared face, which
+ * left a see-through hole in the terrain around every chest in the world.
+ */
+test('a partial block keeps its neighbours faces, so nothing around it is see-through', async ({ page }) => {
+  await boot(page);
+  const quads = await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    const S = game.world;
+    const ids = (window as any).__lbw.ids;
+    const chunk = (window as any).__lbw.dims.chunk;
+    const mid = Math.floor((window as any).__lbw.dims.sx / 2);
+    // a 3x3x3 cube of planks floating in clear air, wholly inside one chunk,
+    // with one cell in the middle that is not a cube
+    const cx = Math.floor(mid / chunk) * chunk + 1;
+    const cz = cx;
+    const y0 = S.surfaceY(cx + 1, cz + 1) + 4;
+    const build = (oddCell: number): number => {
+      for (let dx = -1; dx <= 3; dx++) {
+        for (let dz = -1; dz <= 3; dz++) {
+          for (let dy = 0; dy <= 4; dy++) S.set(cx + dx, y0 + dy, cz + dz, 0, false);
+        }
+      }
+      for (let dx = 0; dx < 3; dx++) {
+        for (let dz = 0; dz < 3; dz++) {
+          for (let dy = 0; dy < 3; dy++) {
+            const middle = dx === 1 && dy === 1 && dz === 1;
+            S.set(cx + dx, y0 + dy, cz + dz, middle ? oddCell : ids.PLANKS, false);
+          }
+        }
+      }
+      const geo = (window as any).__lbw.chunkGeometry(S, Math.floor(cx / chunk), Math.floor(cz / chunk));
+      return geo.textured ? geo.textured.getAttribute('position').count / 6 : 0; // 6 vertices per quad
+    };
+    return {
+      allCubes: build(ids.PLANKS),
+      chest: build(ids.CHEST),
+      openChest: build(ids.CHEST_OPEN),
+      slab: build(ids.SLAB),
+      stairs: build(ids.STAIRS),
+    };
+  });
+  // the six planks around the odd-shaped cell each keep the face they share with
+  // it, whatever the middle looks like (it adds its own short lid / tread too)
+  for (const name of ['chest', 'openChest', 'slab', 'stairs'] as const) {
+    expect(quads[name] - quads.allCubes, `${name} swallowed a neighbour face`).toBeGreaterThanOrEqual(6);
+  }
+  // and the two chests are the same shape, so they cost the same faces
+  expect(quads.openChest).toBe(quads.chest);
+});
+
 test('the kids are dressed: knitted jumpers, denim legs, a faced head', async ({ page }) => {
   await boot(page);
   await joinWithPad(page);
