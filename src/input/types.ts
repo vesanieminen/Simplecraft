@@ -7,11 +7,11 @@
 export type Action =
   | 'jump' | 'back' | 'interact' | 'palette' | 'menu'
   | 'place' | 'remove' | 'prevBlock' | 'nextBlock'
-  | 'up' | 'down' | 'left' | 'right';
+  | 'up' | 'down' | 'left' | 'right' | 'crouch';
 
 export const ALL_ACTIONS: Action[] = [
   'jump', 'back', 'interact', 'palette', 'menu', 'place', 'remove', 'prevBlock', 'nextBlock',
-  'up', 'down', 'left', 'right',
+  'up', 'down', 'left', 'right', 'crouch',
 ];
 
 export type ControllerType = 'xbox' | 'playstation' | 'generic' | 'keyboard';
