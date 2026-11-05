@@ -6,10 +6,11 @@
 
 import * as THREE from 'three';
 import { AudioKit } from './core/audio';
-import { AnimalWorld } from './core/animals';
+import { AnimalWorld, ANIMAL_KINDS } from './core/animals';
 import {
-  blockDef, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, isDoorBlock, isDoorTopBlock,
-  isExplosiveBlock, isSolidBlock, ROCK, SAPLING, WATER,
+  blockDef, CHEST, CHEST_OPEN, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, isChestBlock,
+  isDoorBlock, isDoorTopBlock, isExplosiveBlock, isSolidBlock, isStairsBlock,
+  ROCK, rotateStairFacing, SAPLING, StairFacing, STAIRS, WATER,
 } from './core/blocks';
 import { StarField } from './core/collectibles';
 import { BlastInfo, DynamiteManager } from './core/dynamite';
@@ -17,6 +18,7 @@ import { ParticleSystem } from './core/particles';
 import { RayHit } from './core/raycast';
 import { blockAabb, boxesOverlap, playerAabb } from './core/physics';
 import { DEFAULT_SEED, generateTerrain, plantTree, themeOf, WORLD_THEMES } from './core/terrain';
+import { BOOST_SECONDS, EMPTY_CHEST_MESSAGE, rollTreasure, Treasure } from './core/treasure';
 import { idx as worldIdx, SavedWorldInfo, World, WorldSaveData, WORLD_SX, WORLD_SY, WORLD_SZ } from './core/world';
 import { InputManager } from './input/inputManager';
 import { KeyboardSource } from './input/keyboard';
@@ -641,6 +643,86 @@ export class Game {
     this.world.revision++; // the swing itself is a change: let autosave catch it
   }
 
+  /**
+   * Which way a new stair points: the TALL half is the far side of the cell, so
+   * the step climbs away from whoever is building it and the riser leans against
+   * the wall they were aiming at. When the cell is right under their feet, the
+   * way they are looking decides instead.
+   */
+  private stairFacingFromAim(lp: LocalPlayer, hit: RayHit): StairFacing {
+    const dx = hit.px + 0.5 - lp.entity.pos.x;
+    const dz = hit.pz + 0.5 - lp.entity.pos.z;
+    if (Math.hypot(dx, dz) < 0.4) {
+      const yaw = lp.entity.yaw; // forward is (sin yaw, cos yaw), as in playerEntity
+      return Math.abs(Math.sin(yaw)) >= Math.abs(Math.cos(yaw))
+        ? (Math.sin(yaw) > 0 ? 0 : 1)
+        : (Math.cos(yaw) > 0 ? 2 : 3);
+    }
+    return Math.abs(dx) >= Math.abs(dz) ? (dx > 0 ? 0 : 1) : (dz > 0 ? 2 : 3);
+  }
+
+  /** the pet button aimed at a step: spin it a quarter turn on the spot */
+  private rotateStairs(hit: RayHit): void {
+    const was = this.world.getStairFacing(hit.x, hit.y, hit.z);
+    this.world.setStairFacing(hit.x, hit.y, hit.z, rotateStairFacing(was as StairFacing));
+    this.audio.place();
+    this.particles.burst(hit.x + 0.5, hit.y + 0.6, hit.z + 0.5, 0xf2c98c, 5, 0.5);
+  }
+
+  /**
+   * The pet button on a treasure chest: the lid comes up and a random treasure
+   * tumbles out (see core/treasure.ts). The chest keeps its open look, so
+   * nobody shakes the same chest for a second pile of gold.
+   */
+  private openChest(lp: LocalPlayer, hit: RayHit): void {
+    const { x, y, z } = hit;
+    if (this.world.get(x, y, z) !== CHEST) {
+      // lid already up: the treasure is this chest's only treasure
+      this.audio.uiBack();
+      this.particles.burst(x + 0.5, y + 0.9, z + 0.5, 0xcbb8a5, 5, 0.5);
+      this.ui.toast(EMPTY_CHEST_MESSAGE, 2600);
+      return;
+    }
+    this.world.set(x, y, z, CHEST_OPEN);
+    const treasure = rollTreasure();
+    this.grantTreasure(lp, treasure, x, y, z);
+    this.audio.collect();
+    this.audio.sparkle();
+    this.particles.burst(x + 0.5, y + 1.05, z + 0.5, 0xffd24a, 24, 1.5);
+    this.ui.toast(`${treasure.icon} ${treasure.message}`, 3200);
+  }
+
+  /** what each treasure does to the world — there is no inventory, so the prize happens here */
+  private grantTreasure(lp: LocalPlayer, t: Treasure, x: number, y: number, z: number): void {
+    switch (t.id) {
+      case 'stars':
+      case 'gem':
+        lp.entity.starsCount += t.amount ?? 1;
+        break;
+      case 'starburst':
+        for (let k = 0; k < 3; k++) {
+          const a = k * (Math.PI * 2 / 3);
+          this.starField.spawnAt(
+            x + 0.5 + Math.cos(a) * 0.7, y + 1.9 + k * 0.45, z + 0.5 + Math.sin(a) * 0.7,
+          );
+        }
+        break;
+      case 'zoom':
+        lp.entity.zoomTime = BOOST_SECONDS;
+        break;
+      case 'boing':
+        lp.entity.boingTime = BOOST_SECONDS;
+        break;
+      case 'animal': {
+        const kind = ANIMAL_KINDS[Math.floor(Math.random() * ANIMAL_KINDS.length)];
+        const friend = this.animals.spawn(kind, x + 0.5, y + 1, z + 0.5);
+        friend.pet();
+        this.audio.animal(kind);
+        break;
+      }
+    }
+  }
+
   /** plant one, look away, look back: a tree */
   private growSaplings(): void {
     for (const [i, planted] of [...this.saplings]) {
@@ -708,10 +790,15 @@ export class Game {
         const toSet: [number, number, number, number][] =
           door ? [[px, py, pz, DOOR], [px, py + 1, pz, DOOR_TOP]] : [[px, py, pz, id]];
         const facing = door ? this.doorFacingFromAim(lp, hit) : 0;
+        const stairs = id === STAIRS;
+        const stairFacing = stairs ? this.stairFacingFromAim(lp, hit) : 0;
         for (const [cx, cy, cz, cid] of toSet) {
           this.world.set(cx, cy, cz, cid);
           const i = worldIdx(cx, cy, cz);
           if (door) this.world.doorFacing.set(i, facing);
+          // a stair remembers which way it points; anything built over one forgets it
+          if (stairs) this.world.stairFacing.set(i, stairFacing);
+          else this.world.stairFacing.delete(i);
           if (blockDef(cid).sparkle) this.sparkleBlocks.add(i);
         }
         this.audio.place();
@@ -756,6 +843,7 @@ export class Game {
           this.world.set(hit.x, y, hit.z, 0);
           const i = worldIdx(hit.x, y, hit.z);
           this.world.doorFacing.delete(i);
+          this.world.stairFacing.delete(i);
           this.sparkleBlocks.delete(i);
           this.saplings.delete(i);
           const c = blockDef(b).color;
@@ -765,11 +853,20 @@ export class Game {
         void lp;
       },
       interact: (lp: LocalPlayer): void => {
-        // doors come first: the pet button is the family's "do something nice"
-        // button, and a door straight ahead is more pressing than an animal
+        // doors and chests come first: the pet button is the family's "do
+        // something nice" button, and a door or a treasure chest straight ahead
+        // is more pressing than an animal. Aimed at a step, it spins it around.
         const aim = lp.removeTarget;
         if (aim && isDoorBlock(aim.block) && aim.dist <= 4.5) {
           this.toggleDoor(lp, aim);
+          return;
+        }
+        if (aim && isChestBlock(aim.block) && aim.dist <= 4.5) {
+          this.openChest(lp, aim);
+          return;
+        }
+        if (aim && isStairsBlock(aim.block) && aim.dist <= 4.5) {
+          this.rotateStairs(aim);
           return;
         }
         this.animals.petNearest(lp.entity.pos.x, lp.entity.pos.y + 0.8, lp.entity.pos.z, 2.4);
@@ -789,6 +886,7 @@ export class Game {
       this.sparkleBlocks.delete(i);
       this.saplings.delete(i);
       this.world.doorFacing.delete(i);
+      this.world.stairFacing.delete(i);
       // a blast that ate the bottom half of a door would leave the upper half
       // hanging in the air, so bring it down too
       const [x, y, z] = unidx(i);
@@ -1209,6 +1307,8 @@ export class Game {
     '🗼 Build a tall tower!',
     '🐑 Make a home for an animal!',
     '⭐ Find a glowing star!',
+    '🗝️ Find a treasure chest!',
+    '🪜 Build a staircase!',
     '🍬 Land on a bouncy block!',
     '🎵 Step on a music block!',
   ];

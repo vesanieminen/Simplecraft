@@ -23,6 +23,7 @@ interface WorldSave {
   mods: Record<string, number>;
   collectedStars: number[];
   doorFacing?: Record<string, number>;
+  stairFacing?: Record<string, number>;
   savedAt?: number;
 }
 
@@ -37,7 +38,7 @@ interface SavedWorldInfo {
 function validSave(x: unknown): x is WorldSave {
   if (!x || typeof x !== 'object') return false;
   const s = x as WorldSave;
-  if (s.version !== 1 && s.version !== 2) return false;
+  if (s.version !== 1 && s.version !== 2 && s.version !== 3) return false;
   if (typeof s.seed !== 'number' || !Number.isInteger(s.seed)) return false;
   if (s.theme !== undefined && (typeof s.theme !== 'number' || !Number.isInteger(s.theme) || s.theme < 0 || s.theme > 64)) return false;
   if (!s.mods || typeof s.mods !== 'object') return false;
@@ -53,6 +54,13 @@ function validSave(x: unknown): x is WorldSave {
       const i = Number(k);
       if (!Number.isInteger(i) || i < 0 || i > 4_200_000) return false;
       if (v !== 0 && v !== 1) return false;
+    }
+  }
+  if (s.stairFacing !== undefined) {
+    for (const [k, v] of Object.entries(s.stairFacing)) {
+      const i = Number(k);
+      if (!Number.isInteger(i) || i < 0 || i > 4_200_000) return false;
+      if (v !== 0 && v !== 1 && v !== 2 && v !== 3) return false;
     }
   }
   if (s.savedAt !== undefined && typeof s.savedAt !== 'number') return false;
@@ -158,8 +166,9 @@ async function main(): Promise<void> {
         const mods = { ...prev.mods, ...incoming.mods };
         const collectedStars = [...new Set([...prev.collectedStars, ...incoming.collectedStars])].sort((a, b) => a - b);
         const doorFacing = { ...prev.doorFacing, ...incoming.doorFacing };
+        const stairFacing = { ...prev.stairFacing, ...incoming.stairFacing };
         writeWorld({
-          version: 2, seed: incoming.seed, theme, mods, collectedStars, doorFacing,
+          version: 3, seed: incoming.seed, theme, mods, collectedStars, doorFacing, stairFacing,
           savedAt: Math.max(prev.savedAt ?? 0, incoming.savedAt ?? 0) || Date.now(),
         });
       }

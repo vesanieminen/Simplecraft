@@ -13,7 +13,8 @@
 
 import * as THREE from 'three';
 import {
-  ATLAS_BOUNCY, ATLAS_BRICKS, ATLAS_CELL_COUNT, ATLAS_DIRT, ATLAS_DOOR, ATLAS_DOOR_TOP, ATLAS_DYNAMITE_CAP,
+  ATLAS_BOUNCY, ATLAS_BRICKS, ATLAS_CELL_COUNT, ATLAS_CHEST_BOTTOM, ATLAS_CHEST_LID,
+  ATLAS_CHEST_OPEN_SIDE, ATLAS_CHEST_OPEN_TOP, ATLAS_CHEST_SIDE, ATLAS_DIRT, ATLAS_DOOR, ATLAS_DOOR_TOP, ATLAS_DYNAMITE_CAP,
   ATLAS_DYNAMITE_SIDE, ATLAS_GLASS, ATLAS_GLOW, ATLAS_GRASS_SIDE, ATLAS_GRASS_TOP,
   ATLAS_LEAVES, ATLAS_LOG_END, ATLAS_LOG_SIDE, ATLAS_MUSIC, ATLAS_PLANKS, ATLAS_ROCK,
   ATLAS_SAND, ATLAS_SCORCH, ATLAS_SPARKLE, ATLAS_STONE, ATLAS_WATER, ATLAS_WEAVE,
@@ -448,6 +449,111 @@ function drawDoorTop(ctx: CanvasRenderingContext2D, ox: number): void {
   ctx.fillRect(ox + 11, 11, 3, 3);
 }
 
+// --- the treasure chest ------------------------------------------------------
+
+/** wooden boards for a chest face: warm base, darker gaps between the boards */
+function chestBoards(ctx: CanvasRenderingContext2D, ox: number, base: string, gap: string, seed: number): void {
+  rect(ctx, ox, 0, 0, S, S, base);
+  for (const x of [1, 9, 17, 25]) rect(ctx, ox, x, 0, 1, S, gap);
+  speckle(ctx, ox, gap, 0.05, seed);
+}
+
+/** a handful of gold coins, the whole point of the chest (`dy` slides the pile) */
+function goldPile(ctx: CanvasRenderingContext2D, ox: number, dy = 0): void {
+  disc(ctx, ox + 11, 25 + dy, 5, '#e0a52e');
+  disc(ctx, ox + 21, 24 + dy, 6, '#f2c14e');
+  disc(ctx, ox + 16, 27 + dy, 5, '#ffd23e');
+  disc(ctx, ox + 8, 21 + dy, 3, '#ffd23e');
+  disc(ctx, ox + 25, 20 + dy, 3, '#e0a52e');
+  ctx.fillStyle = '#fff6ac';
+  for (const [x, y] of [[9, 22], [20, 21], [15, 25]] as const) ctx.fillRect(ox + x, y + dy, 2, 2);
+}
+
+/**
+ * The shut chest's four sides: boards, a lighter lid band across the top, iron
+ * corners and a big brass lock dead centre, so every side says "treasure".
+ */
+function drawChestSide(ctx: CanvasRenderingContext2D, ox: number): void {
+  chestBoards(ctx, ox, '#c08a4e', '#96632f', 61);
+  rect(ctx, ox, 0, 0, S, 9, '#d9a766'); // the lid
+  rect(ctx, ox, 0, 9, S, 1, '#7a4d22'); // where the lid meets the box
+  rect(ctx, ox, 0, 0, S, 1, '#efd0a0');
+  // iron corners and a strap down to the lock
+  ctx.fillStyle = '#6b7482';
+  for (const [x, y] of [[0, 10], [S - 3, 10], [0, S - 4], [S - 3, S - 4]] as const) {
+    ctx.fillRect(ox + x, y, 3, 4);
+  }
+  rect(ctx, ox, 14, 9, 4, 5, '#f2c14e');
+  rect(ctx, ox, 14, 13, 4, 1, '#a8762a'); // the hasp's hinge line
+  // the lock: brass plate, dark keyhole, bright edge
+  rect(ctx, ox, 11, 14, 10, 9, '#8a5a2c');
+  rect(ctx, ox, 12, 15, 8, 7, '#f2c14e');
+  rect(ctx, ox, 12, 15, 8, 1, '#fff3c4');
+  disc(ctx, ox + 16, 18, 2, '#5c3d1c');
+  ctx.fillStyle = '#5c3d1c';
+  ctx.fillRect(ox + 15, 18, 2, 3);
+  outline(ctx, ox, '#6e4520');
+}
+
+/** the lid seen from above: pale boards with a brass strap and rivets down the middle */
+function drawChestLid(ctx: CanvasRenderingContext2D, ox: number): void {
+  rect(ctx, ox, 0, 0, S, S, '#e8bf86');
+  for (const y of [1, 8, 15, 22, 29]) rect(ctx, ox, 0, y, S, 1, '#c99a5f');
+  rect(ctx, ox, 13, 0, 6, S, '#f2c14e');
+  rect(ctx, ox, 13, 0, 1, S, '#fff3c4');
+  rect(ctx, ox, 18, 0, 1, S, '#a8762a');
+  ctx.fillStyle = '#8a5a2c';
+  for (const y of [3, 14, 26]) ctx.fillRect(ox + 15, y, 2, 2);
+  ctx.fillStyle = '#ffd23e';
+  for (const y of [3, 14, 26]) ctx.fillRect(ox + 15, y, 1, 1);
+  outline(ctx, ox, '#7a4d22');
+}
+
+/** the underside: dark boards crossed by iron braces */
+function drawChestBottom(ctx: CanvasRenderingContext2D, ox: number): void {
+  chestBoards(ctx, ox, '#6b472a', '#4c331d', 73);
+  rect(ctx, ox, 0, 6, S, 3, '#5c6470');
+  rect(ctx, ox, 0, 23, S, 3, '#5c6470');
+  rect(ctx, ox, 6, 0, 3, S, '#5c6470');
+  rect(ctx, ox, 23, 0, 3, S, '#5c6470');
+  ctx.fillStyle = '#98a3b2';
+  for (const [x, y] of [[7, 7], [24, 7], [7, 24], [24, 24]] as const) ctx.fillRect(ox + x, y, 1, 1);
+  outline(ctx, ox, '#33241a');
+}
+
+/** the chest with the lid up: the lid standing along the top, gold spilling out */
+function drawChestOpenSide(ctx: CanvasRenderingContext2D, ox: number): void {
+  chestBoards(ctx, ox, '#a97b45', '#7a4d22', 83);
+  rect(ctx, ox, 0, 0, S, 7, '#d9a766'); // the lid swung up
+  rect(ctx, ox, 0, 7, S, 1, '#7a4d22');
+  rect(ctx, ox, 0, 8, S, 2, '#f2c14e'); // its brass edge
+  // the dark inside, lit by what is in it
+  rect(ctx, ox, 2, 11, 28, 12, '#33241a');
+  rect(ctx, ox, 2, 11, 28, 1, '#5c4230');
+  goldPile(ctx, ox, -6);
+  ctx.fillStyle = '#fff6ac';
+  for (const [x, y] of [[6, 12], [25, 14]] as const) ctx.fillRect(ox + x, y, 1, 3);
+  outline(ctx, ox, '#6e4520');
+}
+
+/** the same chest seen from above: dark rim, a heaped-up pile of gold and gems */
+function drawChestOpenTop(ctx: CanvasRenderingContext2D, ox: number): void {
+  rect(ctx, ox, 0, 0, S, S, '#33241a');
+  rect(ctx, ox, 3, 3, 26, 26, '#6e4520');
+  rect(ctx, ox, 5, 5, 22, 22, '#2b1f16');
+  goldPile(ctx, ox);
+  disc(ctx, ox + 16, 17, 4, '#f2c14e');
+  disc(ctx, ox + 16, 17, 2, '#fff3c4');
+  // two cut gems glinting in the pile
+  for (const [x, y, c] of [[8, 15, '#6fd3e8'], [24, 14, '#ff7ab8']] as const) {
+    ctx.fillStyle = c;
+    ctx.fillRect(ox + x, y, 3, 3);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(ox + x, y, 1, 1);
+  }
+  outline(ctx, ox, '#1f1710');
+}
+
 // --- see-through and special blocks -----------------------------------------
 
 /** leaves: chunky green lumps with darker veins and gaps */
@@ -594,6 +700,11 @@ const BLOCK_ART: Record<number, CellArt> = {
   [ATLAS_WEAVE]: drawWeave,
   [ATLAS_DOOR]: drawDoor,
   [ATLAS_DOOR_TOP]: drawDoorTop,
+  [ATLAS_CHEST_SIDE]: drawChestSide,
+  [ATLAS_CHEST_LID]: drawChestLid,
+  [ATLAS_CHEST_BOTTOM]: drawChestBottom,
+  [ATLAS_CHEST_OPEN_SIDE]: drawChestOpenSide,
+  [ATLAS_CHEST_OPEN_TOP]: drawChestOpenTop,
 };
 
 let cachedBlock: THREE.CanvasTexture | null = null;

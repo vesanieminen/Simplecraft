@@ -1,10 +1,12 @@
 /**
- * Feature screenshots: the world picker (with its live map preview) and a
- * close-up of the textured plants.
- * Run against a dev server on :3100 (fresh world data recommended):
- *   rm -rf /tmp/opencode/lbw-test-world
- *   NODE_ENV=development PORT=3100 LBW_DATA_DIR=/tmp/opencode/lbw-test-world npx tsx server/index.ts &
+ * Feature screenshots: the world picker (with its live map preview), a close-up
+ * of the textured plants, every block in the atlas, a stick of dynamite and a
+ * staircase with a treasure chest on it.
+ * Run against a dev server (fresh world data recommended):
+ *   rm -rf /tmp/opencode/lbw-shot-world
+ *   NODE_ENV=development PORT=3100 LBW_DATA_DIR=/tmp/opencode/lbw-shot-world npx tsx server/index.ts &
  *   npx tsx scripts/feature-shots.ts
+ * (LBW_SHOT_URL points the shots at another port if 3100 is busy)
  */
 import { chromium } from '@playwright/test';
 import fs from 'node:fs';
@@ -126,7 +128,11 @@ await page.evaluate(() => {
   const wall: number[][] = [
     [1, 2, 3, 4, 5, 6, 7, 8], // grass dirt stone sand wood planks bricks glass
     [9, 10, 14, 15, 16, 17, 18, 27], // leaves water glow bouncy sparkle music red dynamite
+    // the "not a cube" shape language: slab, step, chest shut, chest open
+    [32, 35, 36, 37],
   ];
+  // the step in the shape row (second cell) shows the camera its tread
+  game.world.setStairFacing(bx, by + 2, mid - 3, 0);
   const bx = mid + 9;
   const by = S.surfaceY(bx, mid) + 1;
   // clear the air between the camera and the wall, and the wall's own cells
@@ -169,6 +175,53 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(2600);
 await page.screenshot({ path: `${outDir}/dynamite.jpg`, type: 'jpeg', quality: 92 });
+
+// ---- 5. slabs, stairs and a treasure chest: a build a kid could walk up ----
+await page.evaluate(() => {
+  const game = (window as any).__lbw.game;
+  const S = game.world;
+  const ids = (window as any).__lbw.ids;
+  const mid = Math.floor(((window as any).__lbw.dims.sx) / 2);
+  const bx = mid + 10;
+  const by = S.surfaceY(bx, mid) + 1; // the first free cell above the meadow floor
+  // flatten the stand for the build
+  for (let x = bx - 12; x <= bx + 2; x++) {
+    for (let z = mid - 5; z <= mid + 3; z++) {
+      for (let y = by; y <= by + 5; y++) if (S.get(x, y, z) !== 0) S.set(x, y, z, 0);
+    }
+  }
+  const deck = by + 3; // top of the platform, where the chest sits
+  for (let x = bx - 4; x <= bx - 1; x++) {
+    for (let z = mid - 2; z <= mid + 1; z++) {
+      for (let y = by; y <= deck - 1; y++) S.set(x, y, z, ids.PLANKS);
+    }
+  }
+  // three steps climbing to the deck: one block over, one block up, riser away
+  for (let i = 0; i < 3; i++) {
+    const x = bx - 5 - i, y = deck - 1 - i;
+    for (let z = mid - 2; z <= mid + 1; z++) {
+      S.set(x, y, z, ids.STAIRS);
+      S.setStairFacing(x, y, z, 0); // tall half towards the deck
+    }
+  }
+  // slabs pave the approach, where the meadow is flat
+  for (let x = bx - 11; x <= bx - 8; x++) {
+    for (let z = mid - 2; z <= mid + 1; z++) {
+      if (S.surfaceY(x, z) + 1 === by) S.set(x, by, z, ids.SLAB);
+    }
+  }
+  S.set(bx - 2, deck, mid - 1, ids.CHEST);
+
+  const p = game.players[0];
+  p.firstPerson = true;
+  // stood on the top step, looking across the deck at the lid
+  p.entity.pos.set(bx - 4.8, deck - 0.5, mid - 0.5);
+  p.entity.yaw = Math.PI / 2; // face +x: up the steps, at the chest
+  p.entity.pitch = -0.1;
+  p.entity.vel.set(0, 0, 0);
+});
+await page.waitForTimeout(2500);
+await page.screenshot({ path: `${outDir}/steps.jpg`, type: 'jpeg', quality: 92 });
 
 console.log('saved', fs.readdirSync(outDir).join(', '));
 await browser.close();

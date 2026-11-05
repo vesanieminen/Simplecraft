@@ -14,6 +14,9 @@ export const JUMP_V = 8.9;
 export const WALK_SPEED = 5.0;
 export const FLY_SPEED = 7.2;
 export const FLY_VERT = 4.6;
+/** treasure boosts: zoomy boots run this much faster, boing boots jump this much higher */
+export const ZOOM_MUL = 1.5;
+export const BOING_MUL = 1.4;
 
 const JUMP_BUFFER = 0.16; // a jump pressed just before landing still counts
 const SWIM_UP_V = 3.2; // hold jump to kick up through the water
@@ -49,6 +52,13 @@ export class PlayerEntity {
   walkPhase = 0;
   moving = false;
   starsCount = 0;
+  /**
+   * Treasure boosts, counted down in seconds of game time: `zoomTime` while
+   * zoomy boots are running fast, `boingTime` while boing boots are jumping
+   * high. A treasure chest sets them; the HUD shows a tag while they last.
+   */
+  zoomTime = 0;
+  boingTime = 0;
 
   jumpBuffer = 0;
   coyote = 0;
@@ -76,6 +86,8 @@ export class PlayerEntity {
 
   step(world: World, input: StepInput, events: StepEvents): void {
     const dt = Math.min(input.dt, 0.05);
+    this.zoomTime = Math.max(0, this.zoomTime - dt);
+    this.boingTime = Math.max(0, this.boingTime - dt);
     this.inWaterNow = inWater(world, this.aabb);
     this.waterJump = Math.max(0, this.waterJump - dt);
     // a push-off leap is a real jump: buoyancy is off while it lasts
@@ -88,7 +100,8 @@ export class PlayerEntity {
     const fwd = -input.moveY; // stick up (-1) means forward
     const fx = sin * fwd - cos * input.moveX;
     const fz = cos * fwd + sin * input.moveX;
-    const speed = this.flying ? FLY_SPEED : swimming ? WALK_SPEED * 0.55 : WALK_SPEED;
+    const speed = (this.flying ? FLY_SPEED : swimming ? WALK_SPEED * 0.55 : WALK_SPEED)
+      * (this.zoomTime > 0 ? ZOOM_MUL : 1);
     const tvx = fx * speed, tvz = fz * speed;
     const accel = 1 - Math.exp(-(this.grounded || this.flying ? 14 : 6) * dt);
     this.vel.x += (tvx - this.vel.x) * accel;
@@ -110,7 +123,7 @@ export class PlayerEntity {
       if (input.jump) this.jumpBuffer = JUMP_BUFFER;
       this.coyote = 0; // no stale land-jump while paddling
       if (this.jumpBuffer > 0 && headClearOfWater(world, this.aabb)) {
-        this.vel.y = WATER_JUMP_V;
+        this.vel.y = WATER_JUMP_V * (this.boingTime > 0 ? BOING_MUL : 1);
         this.jumpBuffer = 0;
         this.waterJump = WATER_JUMP_TIME;
         events.splashed = true; // a splash on the way out
@@ -123,7 +136,7 @@ export class PlayerEntity {
       this.jumpBuffer = Math.max(0, this.jumpBuffer - dt);
       this.coyote = this.grounded ? 0.12 : Math.max(0, this.coyote - dt);
       if (this.jumpBuffer > 0 && this.coyote > 0) {
-        this.vel.y = JUMP_V;
+        this.vel.y = JUMP_V * (this.boingTime > 0 ? BOING_MUL : 1);
         this.jumpBuffer = 0;
         this.coyote = 0;
       }

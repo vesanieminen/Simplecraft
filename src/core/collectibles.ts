@@ -16,9 +16,16 @@ export interface Star {
 
 export class StarField {
   stars: Star[] = [];
+  /** stars that are not part of the generated world (chest treasure) get their own indices */
+  private nextTreasureIndex = 10_000;
+
+  private readonly geo = new THREE.OctahedronGeometry(0.3, 0);
+  private readonly mat = new THREE.MeshBasicMaterial({ color: 0xffe14d });
+  private readonly glowGeo = new THREE.OctahedronGeometry(0.46, 0);
+  private readonly glowMat = new THREE.MeshBasicMaterial({ color: 0xfff3a8, transparent: true, opacity: 0.35 });
 
   constructor(
-    scene: THREE.Scene,
+    private scene: THREE.Scene,
     private world: World,
     spawnX: number,
     spawnZ: number,
@@ -28,10 +35,6 @@ export class StarField {
       seed = (seed * 1103515245 + 12345) & 0x7fffffff;
       return seed / 0x7fffffff;
     };
-    const geo = new THREE.OctahedronGeometry(0.3, 0);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xffe14d });
-    const glowGeo = new THREE.OctahedronGeometry(0.46, 0);
-    const glowMat = new THREE.MeshBasicMaterial({ color: 0xfff3a8, transparent: true, opacity: 0.35 });
 
     let placed = 0;
     let tries = 0;
@@ -51,8 +54,8 @@ export class StarField {
         placed++;
         continue;
       }
-      const mesh = new THREE.Mesh(geo, mat);
-      const glow = new THREE.Mesh(glowGeo, glowMat);
+      const mesh = new THREE.Mesh(this.geo, this.mat);
+      const glow = new THREE.Mesh(this.glowGeo, this.glowMat);
       const pos = new THREE.Vector3(x, y, z);
       mesh.position.copy(pos);
       glow.position.copy(pos);
@@ -60,6 +63,23 @@ export class StarField {
       this.stars.push({ index, pos, mesh, glow });
       placed++;
     }
+  }
+
+  /**
+   * A treasure star that popped out of a chest: it hangs over the spot and is
+   * collected exactly like the stars the world came with.
+   */
+  spawnAt(x: number, y: number, z: number): Star {
+    const index = this.nextTreasureIndex++;
+    const mesh = new THREE.Mesh(this.geo, this.mat);
+    const glow = new THREE.Mesh(this.glowGeo, this.glowMat);
+    const pos = new THREE.Vector3(x, y, z);
+    mesh.position.copy(pos);
+    glow.position.copy(pos);
+    this.scene.add(mesh, glow);
+    const star: Star = { index, pos, mesh, glow };
+    this.stars.push(star);
+    return star;
   }
 
   update(time: number): void {

@@ -334,11 +334,16 @@ export class Animal {
   }
 }
 
+/** every kind the world (and a treasure chest) can hand out */
+export const ANIMAL_KINDS: AnimalKind[] = [
+  'sheep', 'bunny', 'chicken', 'cow', 'pig', 'horse', 'cat', 'fox',
+];
+
 export class AnimalWorld {
   animals: Animal[] = [];
 
   constructor(
-    scene: THREE.Scene,
+    private scene: THREE.Scene,
     private world: World,
     private particles: ParticleSystem,
     private audio: AudioKit,
@@ -378,6 +383,18 @@ export class AnimalWorld {
 
   update(dt: number): void {
     for (const a of this.animals) a.update(dt, this.world);
+  }
+
+  /**
+   * Put a brand-new animal in the world — the treasure chest that turns out to
+   * hold a living friend. It adopts the spot it lands on and wanders from there
+   * exactly like the animals the world came with.
+   */
+  spawn(kind: AnimalKind, x: number, y: number, z: number): Animal {
+    const a = new Animal(kind, x, y, z);
+    this.animals.push(a);
+    this.scene.add(a.group);
+    return a;
   }
 
   /** pet the animal closest to the given position within radius */

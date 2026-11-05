@@ -33,6 +33,11 @@ export interface WorldSaveData {
    * stands where the kid meant it to. Added in version 2.
    */
   doorFacing?: Record<string, number>;
+  /**
+   * Which way each stair points: flat index -> which half of the cell is the
+   * tall part (see core/blocks.ts StairFacing). Added in version 3.
+   */
+  stairFacing?: Record<string, number>;
   /** wall-clock ms of the last write, for the "My Worlds" last-played list */
   savedAt?: number;
 }
@@ -57,6 +62,8 @@ export class World {
   collectedStars = new Set<number>();
   /** flat index -> swing axis of a placed door (0: thin along x, 1: thin along z) */
   readonly doorFacing = new Map<number, number>();
+  /** flat index -> which half of a stair cell is the tall part (see StairFacing) */
+  readonly stairFacing = new Map<number, number>();
   /** bumped on every change so listeners (autosave) can debounce */
   revision = 0;
 
@@ -74,6 +81,7 @@ export class World {
     this.mods.clear();
     this.collectedStars.clear();
     this.doorFacing.clear();
+    this.stairFacing.clear();
     this.revision++;
   }
 
@@ -117,6 +125,31 @@ export class World {
     }
   }
 
+  /**
+   * A voxel changed *shape* but kept its block id (a stair spun around): the
+   * chunk around it needs remeshing and the save needs to notice.
+   */
+  touchAt(x: number, z: number): void {
+    this.touchChunksAt(x, z);
+    this.revision++;
+  }
+
+  /** which way a stair cell points (0 for any cell that is not stairs) */
+  getStairFacing(x: number, y: number, z: number): number {
+    return this.stairFacing.get(idx(x, y, z)) ?? 0;
+  }
+
+  /**
+   * Point a stair cell a new way. Its block id does not change, so this is the
+   * only way the mesher and the autosave hear about the spin.
+   */
+  setStairFacing(x: number, y: number, z: number, facing: number): void {
+    const i = idx(x, y, z);
+    if (this.stairFacing.get(i) === facing) return;
+    this.stairFacing.set(i, facing);
+    this.touchAt(x, z);
+  }
+
   isSolid(x: number, y: number, z: number): boolean {
     return isSolidBlock(this.get(Math.floor(x), Math.floor(y), Math.floor(z)));
   }
@@ -149,6 +182,14 @@ export class World {
         }
       }
     }
+    if (save.stairFacing) {
+      for (const [k, v] of Object.entries(save.stairFacing)) {
+        const i = Number(k);
+        if (Number.isInteger(i) && i >= 0 && i < this.data.length && v >= 0 && v <= 3) {
+          this.stairFacing.set(i, v);
+        }
+      }
+    }
     this.markAllDirty();
   }
 
@@ -157,13 +198,16 @@ export class World {
     for (const [i, v] of this.mods) mods[String(i)] = v;
     const doorFacing: Record<string, number> = {};
     for (const [i, v] of this.doorFacing) doorFacing[String(i)] = v;
+    const stairFacing: Record<string, number> = {};
+    for (const [i, v] of this.stairFacing) stairFacing[String(i)] = v;
     return {
-      version: 2,
+      version: 3,
       seed: this.seed,
       theme: this.theme,
       mods,
       collectedStars: [...this.collectedStars].sort((a, b) => a - b),
       doorFacing,
+      stairFacing,
     };
   }
 }
