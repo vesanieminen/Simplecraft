@@ -269,3 +269,15 @@ export function headClearOfWater(world: World, box: Aabb): boolean {
     Math.floor(box.x + box.w / 2), Math.floor(box.y + PLAYER_H - 0.1), Math.floor(box.z + box.d / 2),
   ) !== WATER;
 }
+
+/**
+ * How much of the body (0..1) is under water, sampled up the middle of the
+ * player. Buoyancy hangs off this: deep under pushes you up, shallow water
+ * just lets you wade and settle.
+ */
+export function submergedFraction(world: World, box: Aabb): number {
+  const x = Math.floor(box.x + box.w / 2), z = Math.floor(box.z + box.d / 2);
+  let wet = 0;
+  for (const dy of [0.2, 0.7, 1.15, 1.6]) if (world.get(x, Math.floor(box.y + dy), z) === WATER) wet++;
+  return wet / 4;
+}

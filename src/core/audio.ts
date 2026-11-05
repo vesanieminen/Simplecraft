@@ -129,6 +129,12 @@ export class AudioKit {
 
   // ------------------------------------------------------------- dynamite
 
+  /** a swim stroke underwater: a muffled pull of water, both arms through */
+  swimStroke(): void {
+    this.noise(0.18, 0.09, 620);
+    this.tone('sine', 190, 240, 0.14, 0.045);
+  }
+
   /** the fuse catching: paper thud, then a long hiss */
   dynamiteLight(): void {
     this.tone('triangle', 250, 170, 0.09, 0.18);

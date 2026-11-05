@@ -241,20 +241,30 @@ export function createAvatar(colorHex: string): AvatarParts {
   return { group, body, leftArm, rightArm, leftLeg, rightLeg, ring, shadow };
 }
 
-export function animateAvatar(parts: AvatarParts, walkPhase: number, moving: boolean, airborne: boolean, dt: number): void {
+export function animateAvatar(
+  parts: AvatarParts, walkPhase: number, moving: boolean, airborne: boolean, dt: number,
+  swimming = false,
+): void {
   const target = moving ? Math.sin(walkPhase) : Math.sin(walkPhase) * 0.15;
-  const armA = airborne ? 1.1 : target * 0.85;
-  const legA = airborne ? -0.5 : target * 0.9;
+  let armA = airborne ? 1.1 : target * 0.85;
+  let legA = airborne ? -0.5 : target * 0.9;
+  let sym = false; // breaststroke moves both arms together, not in stride
+  if (swimming) {
+    const s = Math.sin(walkPhase * 1.3);
+    armA = -0.9 - s * 0.7; // reach forward, pull back under
+    legA = 0.15 + Math.sin(walkPhase * 2.6) * 0.55; // flutter kick
+    sym = true;
+  }
   const lerpK = 1 - Math.exp(-14 * dt);
   parts.leftArm.rotation.x += (armA - parts.leftArm.rotation.x) * lerpK;
-  parts.rightArm.rotation.x += (-armA - parts.rightArm.rotation.x) * lerpK;
+  parts.rightArm.rotation.x += ((sym ? armA : -armA) - parts.rightArm.rotation.x) * lerpK;
   parts.leftLeg.rotation.x += (legA - parts.leftLeg.rotation.x) * lerpK;
-  parts.rightLeg.rotation.x += (-legA - parts.rightLeg.rotation.x) * lerpK;
+  parts.rightLeg.rotation.x += ((sym ? legA : -legA) - parts.rightLeg.rotation.x) * lerpK;
   if (airborne) {
     parts.leftArm.rotation.z = -0.5;
     parts.rightArm.rotation.z = 0.5;
   } else {
-    parts.leftArm.rotation.z = 0;
-    parts.rightArm.rotation.z = 0;
+    parts.leftArm.rotation.z = swimming ? 0.35 : 0; // elbows out while paddling
+    parts.rightArm.rotation.z = swimming ? -0.35 : 0;
   }
 }

@@ -62,6 +62,20 @@ event. Renaming a storage key orphans the family's existing saves.
   clock in headless Chromium — never `waitForTimeout` for an explosion, poll
   `game.dynamite.blastCount`. Blasts never touch `y <= 0`, `unbreakable`
   blocks or water, and `SCORCH` is deliberately not in the palette.
+- Swimming (`players/playerEntity.ts`): buoyancy is a *levelled float*, not a
+  speed cap — `physics.submergedFraction` samples four heights up the body and
+  the vertical target is `(frac - SWIM_TRIM) * 2.2`, so deep under drifts you
+  up and shallow water lets you wade; a passive kid settles head-out at the
+  surface instead of sinking to the bottom (a pure "cap fall speed" swim made
+  walk-ins plunge to the pond floor). Hold jump to kick (`SWIM_UP_V`); the
+  surface push-off jump only fires once `headClearOfWater` (the existing
+  shore-escape rule, keep it). Strokes tick `events.stroked` every
+  `STROKE_SECONDS` → `Game.lastStroke` dedups → `audio.swimStroke`. The avatar
+  leans face-down (`syncAvatar` rotation.x ≈ 1.2) with a breaststroke/flutter
+  pose from `animateAvatar(..., swimming)`. Any test that edits terrain near
+  spawn and is followed by a test that re-boots must `await game.saveNow()`
+  after the refill — autosave is debounced 1.5 s and a fast page swap loses it
+  (this bit the shore-jump → swimming handoff).
 - Sky/camera invariant: the sky dome (radius `SKY_RADIUS`) is parented to a group
   centred on the **middle** of the world — the coordinate origin is a map
   *corner*, so centring the dome there puts its far side past the far plane and

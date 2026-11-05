@@ -722,7 +722,97 @@ test('kids can jump out of the water onto the shore', async ({ page }) => {
       }
     }
   }, { ...lake, grass: ids.GRASS, air: ids.AIR });
+  await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); }); // land the refill before the next page boots
 });
+
+test('swimming: paddling like a proper kid — stroke, surface float, kick-up and lean forward', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+
+  // a deep pond right in front (same recipe as the shore-jump test)
+  const lake = await page.evaluate((b: { water: number; grass: number; air: number }) => {
+    const game = (window as any).__lbw.game;
+    const S = game.world;
+    const e = game.players[0].entity;
+    const cx = Math.round(e.pos.x), cz = Math.round(e.pos.z);
+    const base = S.surfaceY(cx, cz);
+    const deep = 6;
+    for (let dx = -3; dx <= 3; dx++) {
+      for (let dz = -4; dz <= 4; dz++) {
+        for (let y = base - deep; y <= base + 3; y++) S.set(cx + dx, y, cz + dz, b.air);
+        if (dz <= -2) {
+          for (let y = base - deep; y <= base; y++) S.set(cx + dx, y, cz + dz, b.grass);
+        } else {
+          for (let y = base - deep; y <= base - 1; y++) S.set(cx + dx, y, cz + dz, b.water);
+        }
+      }
+    }
+    e.pos.set(cx + 0.5, base + 1, cz - 2.5);
+    e.vel.set(0, 0, 0);
+    e.yaw = 0;
+    return { cx, cz, base };
+  }, { water: ids.WATER, grass: ids.GRASS, air: ids.AIR });
+
+  // paddle in — the swim pose takes over
+  await page.evaluate(() => (window as any).__testPad.setMove(0, -1));
+  await page.waitForFunction('window.__lbw.game.players[0].entity.swimmingNow === true', null, { timeout: 15000 });
+  await frames(page, 30);
+
+  // body leans forward into the water, arms stroke: the avatar group is tilted
+  const tilt = await page.evaluate(() => (window as any).__lbw.game.players[0].entity.avatar.group.rotation.x);
+  expect(tilt).toBeGreaterThan(0.9);
+
+  // strokes are happening on a rhythm
+  const strokes = await page.evaluate(() => (window as any).__lbw.game.lastStroke.size);
+  expect(strokes).toBeGreaterThan(0);
+
+  // surface float: stop swimming and the kid bobs near the surface, not
+  // plunging to the bottom
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+  await frames(page, 45);
+  const bob = await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    return { y: e.pos.y, vy: e.vel.y, head: e.inWaterNow };
+  });
+  expect(bob.y).toBeGreaterThan(lake.base - 1.7); // stayed near the surface
+  expect(bob.vy).toBeGreaterThan(-1.2); // …and sinking like a leaf, not a stone
+
+  // holding jump kicks up and out of the pond, and the body rights itself on land
+  await page.evaluate(() => {
+    (window as any).__lbw.game.players[0].entity.yaw = Math.PI;
+    (window as any).__testPad.set('jump', true);
+    (window as any).__testPad.setMove(0, -1);
+  });
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 30000 });
+  await page.evaluate(() => {
+    (window as any).__testPad.set('jump', false);
+    (window as any).__testPad.setMove(0, 0);
+  });
+  await frames(page, 40);
+  const upRight = await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    return { tilt: e.avatar.group.rotation.x, swimming: e.swimmingNow };
+  });
+  expect(upRight.swimming).toBe(false);
+  expect(upRight.tilt).toBeLessThan(0.2); // standing tall again on the shore
+
+  // fill the pond in so it cannot confuse later tests
+  await page.evaluate((arg: { cx: number; cz: number; base: number; grass: number; air: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let dx = -4; dx <= 4; dx++) {
+      for (let dz = -5; dz <= 5; dz++) {
+        for (let y = arg.base - 6; y <= arg.base + 3; y++) {
+          S.set(arg.cx + dx, y, arg.cz + dz, y <= arg.base ? arg.grass : arg.air);
+        }
+      }
+    }
+  }, { ...lake, grass: ids.GRASS, air: ids.AIR });
+  await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); }); // land the refill before the next page boots
+});
+
 /** opens Grown-Up Settings, switches Freeze, and closes the menu again */
 async function setFreeze(page: Page, on: boolean): Promise<void> {
   await tap(page, 'menu');

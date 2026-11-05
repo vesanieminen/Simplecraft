@@ -107,10 +107,11 @@ export class Game {
   saplings = new Map<number, number>();
   saplingGrowSeconds = 30;
   private lastLandSound = new Map<number, number>();
+  private lastStroke = new Map<number, number>();
   private stepEvents = {
     landed: false, bounced: null as number | null,
     steppedOnMusic: null as null | { note: number; x: number; y: number; z: number },
-    steppedOnSparkle: false, splashed: false,
+    steppedOnSparkle: false, splashed: false, stroked: false,
   };
   private rafId = 0;
 
@@ -392,11 +393,16 @@ export class Game {
       this.particles.burst(e.pos.x, e.pos.y + 0.3, e.pos.z, 0x7fd0f0, 8, 0.6);
       this.audio.land();
     }
+    if (ev.stroked && this.time - (this.lastStroke.get(e.id) ?? -9) > 0.5) {
+      this.lastStroke.set(e.id, this.time);
+      this.audio.swimStroke();
+    }
     ev.landed = false;
     ev.bounced = null;
     ev.steppedOnMusic = null;
     ev.steppedOnSparkle = false;
     ev.splashed = false;
+    ev.stroked = false;
   }
 
   private openMenu(p: LocalPlayer): void {
