@@ -16,7 +16,7 @@ import {
 import { idx, World, WORLD_SY, WORLD_SZ } from './world';
 
 /** game seconds between drop steps — sand falls ~8 cells a second */
-const STEP_SECONDS = 0.12;
+export const STEP_SECONDS = 0.12;
 /** how many cells one step may move, so a demolished sandcastle never spikes the frame */
 const STEP_BUDGET = 48;
 
@@ -27,6 +27,8 @@ export interface SandHooks {
   landed(x: number, y: number, z: number): void;
   /** falling sand squashed a plant (flower, tallgrass, sapling) on the way down */
   crushed(x: number, y: number, z: number, id: BlockId): void;
+  /** a cell just dropped one step: render a smooth fall from yFrom to yTo */
+  moved(x: number, yFrom: number, yTo: number, z: number): void;
 }
 
 /** flat index back to x/y/z — the inverse of World.idx */
@@ -120,6 +122,7 @@ export class SandGravity {
         w.set(x, y - 1, z, SAND);
         w.set(x, y, z, AIR);
       }
+      this.hooks.moved(x, y, y - 1, z);
       this.falling.delete(i);
       this.moved.delete(i);
       this.falling.add(j);

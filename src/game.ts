@@ -28,8 +28,9 @@ import { ControllerType, InputSource, FrameControls, emptyFrame } from './input/
 import { VirtualPadSource } from './input/virtual';
 import { LocalPlayer } from './players/localPlayer';
 import { PlayerEntity } from './players/playerEntity';
-import { AVATAR_COLORS, NICKNAMES } from './players/avatar';
+import { AVATAR_COLORS, AVATAR_MODELS, modelDef, NICKNAMES } from './players/avatar';
 import { ChunkMeshManager } from './render/chunkMeshes';
+import { SandFalls } from './render/sandFalls';
 import { createSky, SKY_CLEAR, SKY_FAR, SkyEnv } from './render/sky';
 import { SplitLayout, ViewportManager } from './render/viewportManager';
 import { Hud } from './ui/hud';
@@ -102,6 +103,8 @@ export class Game {
   dynamite!: DynamiteManager;
   /** sand obeys gravity: unsupported sand tumbles straight down */
   sand!: SandGravity;
+  /** render-only cubes that glide the tumbling sand smoothly down */
+  sandFalls!: SandFalls;
   /** water flows: sources push, travelling water spreads, shallows and dries */
   water!: WaterFlow;
   /**
@@ -113,12 +116,13 @@ export class Game {
   saplings = new Map<number, number>();
   saplingGrowSeconds = 30;
   private lastLandSound = new Map<number, number>();
+  private lastStroke = new Map<number, number>();
   /** game time of the last "standing in the doorway" toast, so door-spam does not strobe it */
   private lastDoorWarnAt = -10;
   private stepEvents = {
     landed: false, bounced: null as number | null,
     steppedOnMusic: null as null | { note: number; x: number; y: number; z: number },
-    steppedOnSparkle: false, splashed: false,
+    steppedOnSparkle: false, splashed: false, stroked: false,
   };
   private rafId = 0;
 
@@ -179,7 +183,16 @@ export class Game {
         this.saplings.delete(worldIdx(x, y, z));
         this.particles.burst(x + 0.5, y + 0.5, z + 0.5, 0x9fd06a, 5, 0.6);
       },
+      moved: (x, yFrom, yTo, z) => this.sandFalls.glide(x, yFrom, yTo, z),
     });
+    // the voxel moves instantly (physics/saves stay true); SandFalls draws the
+    // same block gliding between the cells so the fall reads as a fall. The
+    // mesher skips a cell while its cube is in flight (chunks.skipSand), and
+    // SandFalls touches the chunk back when the cube reaches the ground.
+    this.sandFalls = new SandFalls(
+      this.scene, this.chunks.materials.textured, (x, z) => this.world.touchAt(x, z),
+    );
+    this.chunks.skipSand = this.sandFalls.hidden;
     // water finds its level: the same change hook drives flow spreading and
     // draining, so digging a trench into the sea floods it cell by cell
     this.water = new WaterFlow(this.world);
@@ -281,7 +294,7 @@ export class Game {
     if (this.players.length + this.pendingJoins.size >= MAX_PLAYERS) return;
     if (this.pendingJoins.has(s.id)) return;
     const card = new JoinCard(this.audio, s.controllerType, this.players.length + this.pendingJoins.size + 1,
-      (colorIdx, nameIdx) => this.confirmJoin(s, colorIdx, nameIdx));
+      (colorIdx, nameIdx, modelIdx) => this.confirmJoin(s, colorIdx, nameIdx, modelIdx));
     const cam = new THREE.PerspectiveCamera(70, 1, 0.1, SKY_FAR);
     const pane = this.players.length + this.pendingJoins.size;
     this.pendingJoins.set(s.id, { source: s, card, camera: cam, angle: Math.random() * 6 });
@@ -291,16 +304,17 @@ export class Game {
     this.ui.toast('Say hello to a new friend!');
   }
 
-  private confirmJoin(s: InputSource, colorIdx: number, nameIdx: number): void {
+  private confirmJoin(s: InputSource, colorIdx: number, nameIdx: number, modelIdx: number): void {
     this.pendingJoins.delete(s.id);
     const idx = this.players.length;
     const color = AVATAR_COLORS[colorIdx % AVATAR_COLORS.length];
     const name = NICKNAMES[nameIdx % NICKNAMES.length];
+    const model = AVATAR_MODELS[((modelIdx % AVATAR_MODELS.length) + AVATAR_MODELS.length) % AVATAR_MODELS.length];
     const spawn = this.spawnPoint.clone();
     spawn.x += Math.cos(idx * Math.PI / 2) * 2.2;
     spawn.z += Math.sin(idx * Math.PI / 2) * 2.2;
     const entity = new PlayerEntity(
-      this.nextEntityId(), name, color.hex, spawn,
+      this.nextEntityId(), name, color.hex, spawn, model.id,
     );
     entity.yaw = Math.atan2(this.spawnPoint.x - spawn.x, this.spawnPoint.z - spawn.z);
     this.scene.add(entity.avatar.group);
@@ -422,11 +436,16 @@ export class Game {
       this.particles.burst(e.pos.x, e.pos.y + 0.3, e.pos.z, 0x7fd0f0, 8, 0.6);
       this.audio.land();
     }
+    if (ev.stroked && this.time - (this.lastStroke.get(e.id) ?? -9) > 0.5) {
+      this.lastStroke.set(e.id, this.time);
+      this.audio.swimStroke();
+    }
     ev.landed = false;
     ev.bounced = null;
     ev.steppedOnMusic = null;
     ev.steppedOnSparkle = false;
     ev.splashed = false;
+    ev.stroked = false;
   }
 
   private openMenu(p: LocalPlayer): void {
@@ -437,6 +456,11 @@ export class Game {
       {
         toggleFly: () => { p.entity.flying = !p.entity.flying; p.entity.vel.y = 0; },
         toggleCamera: () => { p.firstPerson = !p.firstPerson; },
+        cycleCostume: () => {
+          const m = p.entity.cycleModel();
+          const def = modelDef(m);
+          this.ui.toast(`${p.entity.name} is now a ${def.name}! ${def.icon}`);
+        },
         goHome: () => { p.respawnAt(this.spawnPoint.clone()); },
         toggleSound: () => { this.audio.setMuted(!this.audio.muted); this.saveSettings(); },
         openHelp: () => {
@@ -1235,6 +1259,7 @@ export class Game {
     this.saplings.clear();
     this.dynamite.clear(); // no half-burnt sticks from the old world, please
     this.sand.reset();
+    this.sandFalls.clear();
     this.water.reset(); // forget old floods; a fresh world's sea starts still
     // living things and lit fuses that came with a save wake up, same as at boot
     for (const [i, b] of this.world.mods) {
@@ -1321,6 +1346,7 @@ export class Game {
       this.starField.update(this.time);
       this.dynamite.update(dt);
       this.sand.update(dt);
+      this.sandFalls.update(dt);
       this.water.update(dt);
       this.growSaplings();
 

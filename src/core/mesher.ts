@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import {
   ATLAS_CELL_COUNT, ATLAS_DOOR, ATLAS_PLANKS, ATLAS_WATER, blockDef, isCrossBlock, isDoorBlock,
   isDoorClosedBlock, isFullCellBlock, isOpaqueBlock, isStairsBlock, isTranslucentBlock, isWaterId,
-  PLANT_ATLAS_CELLS, StairFacing, stairBoxes, VoxelBox, WATER, WATER_FLOW, waterTop,
+  PLANT_ATLAS_CELLS, SAND, StairFacing, stairBoxes, VoxelBox, WATER, WATER_FLOW, waterTop,
 } from './blocks';
 import { CHUNK, idx as worldIdx, WORLD_SY, World } from './world';
 
@@ -151,7 +151,11 @@ class GeomBuilder {
   }
 }
 
-export function buildChunkGeometry(world: World, cx: number, cz: number): ChunkGeometry {
+export function buildChunkGeometry(
+  world: World, cx: number, cz: number,
+  /** sand cells currently gliding (rendered by SandFalls cubes instead) */
+  skipSand?: Set<number>,
+): ChunkGeometry {
   const opaque = new GeomBuilder();
   const transp = new GeomBuilder();
   const cross = new GeomBuilder();
@@ -165,6 +169,7 @@ export function buildChunkGeometry(world: World, cx: number, cz: number): ChunkG
       for (let y = 0; y < WORLD_SY; y++) {
         const id = world.get(x, y, z);
         if (id === 0) continue;
+        if (skipSand?.has(worldIdx(x, y, z)) && id === SAND) continue; // in flight
         const def = blockDef(id);
 
         if (isCrossBlock(id)) {
