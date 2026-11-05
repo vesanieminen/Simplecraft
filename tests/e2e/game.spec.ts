@@ -735,15 +735,25 @@ test('sand obeys gravity: tumbles down, sinks through water, squashes plants and
 
   // flat, known ground for the test columns (three rows deep), and the kid
   // stands on the south edge row: safely clear of every falling column
-  // until part 5 asks for their head
-  await page.evaluate((arg: { x0: number; z0: number; gy: number; stone: number; air: number }) => {
+  // until part 5 asks for their head. Any standing water bordering the
+  // runway (shallow ponds dot the meadow) is boxed out with stone first, so
+  // the water sim can never flow into the test columns mid-assertion.
+  await page.evaluate((arg: { x0: number; z0: number; gy: number; stone: number; air: number; water: number; flow: number }) => {
     const S = (window as any).__lbw.game.world;
+    for (let x = arg.x0 - 2; x <= arg.x0 + 8; x++) {
+      for (let z = arg.z0 - 2; z <= arg.z0 + 2; z++) {
+        for (let y = arg.gy - 1; y <= arg.gy + 6; y++) {
+          const b = S.get(x, y, z);
+          if (b === arg.water || b === arg.flow) S.set(x, y, z, arg.stone);
+        }
+      }
+    }
     for (let x = arg.x0 - 1; x <= arg.x0 + 7; x++) {
       for (let z = arg.z0 - 1; z <= arg.z0 + 1; z++) {
         for (let y = arg.gy; y <= arg.gy + 6; y++) S.set(x, y, z, y === arg.gy ? arg.stone : arg.air);
       }
     }
-  }, { x0, z0, gy, stone: ids.STONE, air: ids.AIR });
+  }, { x0, z0, gy, stone: ids.STONE, air: ids.AIR, water: ids.WATER, flow: ids.WATER_FLOW });
   await page.evaluate((arg: { x: number; y: number; z: number }) => {
     const e = (window as any).__lbw.game.players[0].entity;
     e.pos.set(arg.x, arg.y, arg.z);

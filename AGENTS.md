@@ -128,9 +128,9 @@ event. Renaming a storage key orphans the family's existing saves.
   sand: each 0.2 s step re-reads every dirty cell's best supply (a side
   neighbour one level deeper, or water falling in from **above keeps its depth**),
   >`MAX_WATER_LEVEL` (6) drains to AIR. Sideways spread is `level+1`, capped at
-  6, and only onto cells with something to sit on (solid or water) — a waterfall
-  stays a clean column instead of a floating fan. Reach is strictly bounded — no
-  support loops, the shallowest cell always
+  6 and unconditional — water reaching a ledge edge **pours over it** like the
+  big game (an elevated source fans out; accepted as MC-like). Reach is
+  strictly bounded: the shallowest cell always
   needs a deeper one. Cutting a chain makes levels **climb** (each flow cell
   `notify`s its neighbours when its own level changes, incl. shallowing) until
   they fall past the cap and dry, cell by cell. `world.set` deletes the level
