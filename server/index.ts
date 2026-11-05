@@ -24,6 +24,7 @@ interface WorldSave {
   collectedStars: number[];
   doorFacing?: Record<string, number>;
   stairFacing?: Record<string, number>;
+  waterLevels?: Record<string, number>;
   savedAt?: number;
 }
 
@@ -38,7 +39,7 @@ interface SavedWorldInfo {
 function validSave(x: unknown): x is WorldSave {
   if (!x || typeof x !== 'object') return false;
   const s = x as WorldSave;
-  if (s.version !== 1 && s.version !== 2 && s.version !== 3) return false;
+  if (s.version !== 1 && s.version !== 2 && s.version !== 3 && s.version !== 4) return false;
   if (typeof s.seed !== 'number' || !Number.isInteger(s.seed)) return false;
   if (s.theme !== undefined && (typeof s.theme !== 'number' || !Number.isInteger(s.theme) || s.theme < 0 || s.theme > 64)) return false;
   if (!s.mods || typeof s.mods !== 'object') return false;
@@ -167,8 +168,9 @@ async function main(): Promise<void> {
         const collectedStars = [...new Set([...prev.collectedStars, ...incoming.collectedStars])].sort((a, b) => a - b);
         const doorFacing = { ...prev.doorFacing, ...incoming.doorFacing };
         const stairFacing = { ...prev.stairFacing, ...incoming.stairFacing };
+        const waterLevels = { ...prev.waterLevels, ...incoming.waterLevels };
         writeWorld({
-          version: 3, seed: incoming.seed, theme, mods, collectedStars, doorFacing, stairFacing,
+          version: 4, seed: incoming.seed, theme, mods, collectedStars, doorFacing, stairFacing, waterLevels,
           savedAt: Math.max(prev.savedAt ?? 0, incoming.savedAt ?? 0) || Date.now(),
         });
       }

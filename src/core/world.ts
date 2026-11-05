@@ -4,7 +4,7 @@
  * the base world can always be regenerated from the seed + theme.
  */
 
-import { AIR, BlockId, ROCK, isSolidBlock, WATER } from './blocks';
+import { AIR, BlockId, ROCK, isSolidBlock, isWaterId, WATER_FLOW } from './blocks';
 
 export const WORLD_SX = 128;
 export const WORLD_SY = 64; // height
@@ -38,6 +38,13 @@ export interface WorldSaveData {
    * tall part (see core/blocks.ts StairFacing). Added in version 3.
    */
   stairFacing?: Record<string, number>;
+  /**
+   * Travelling water (core/water.ts): flat index -> flow depth (0 deepest by
+   * the source, shallower as it spreads). Added in version 4. WATER sources
+   * themselves (the sea, and any a kid places from the palette) are eternal —
+   * floods are steered by breaking the *flowing* cells or filling them in.
+   */
+  waterLevels?: Record<string, number>;
   /** wall-clock ms of the last write, for the "My Worlds" last-played list */
   savedAt?: number;
 }
@@ -64,6 +71,8 @@ export class World {
   readonly doorFacing = new Map<number, number>();
   /** flat index -> which half of a stair cell is the tall part (see StairFacing) */
   readonly stairFacing = new Map<number, number>();
+  /** flat index -> flow depth of a WATER_FLOW cell (0 deep … 6 nearly puddle) */
+  readonly waterLevel = new Map<number, number>();
   /** bumped on every change so listeners (autosave) can debounce */
   revision = 0;
 
@@ -82,6 +91,7 @@ export class World {
     this.collectedStars.clear();
     this.doorFacing.clear();
     this.stairFacing.clear();
+    this.waterLevel.clear();
     this.revision++;
   }
 
@@ -100,10 +110,19 @@ export class World {
     const i = idx(x, y, z);
     if (this.data[i] === id) return;
     this.data[i] = id;
+    // whatever stood here, its flow-depth (if any) is history — the water
+    // manager re-reads/re-stores what the new cell needs
+    this.waterLevel.delete(i);
     if (recordMod) this.mods.set(i, id);
     this.touchChunksAt(x, z);
     this.revision++;
     if (this.onCellChanged) this.onCellChanged(x, y, z, id);
+  }
+
+  /** flow depth of a WATER_FLOW cell; -1 for anything else (sources are depth 0) */
+  flowLevelAt(x: number, y: number, z: number): number {
+    if (this.get(x, y, z) !== WATER_FLOW) return -1;
+    return this.waterLevel.get(idx(x, y, z)) ?? 6;
   }
 
   /**
@@ -166,7 +185,7 @@ export class World {
   surfaceY(x: number, z: number): number {
     for (let y = WORLD_SY - 1; y >= 0; y--) {
       const b = this.get(x, y, z);
-      if (b !== AIR && b !== WATER) return y;
+      if (b !== AIR && !isWaterId(b)) return y;
     }
     return -1;
   }
@@ -198,6 +217,14 @@ export class World {
         }
       }
     }
+    if (save.waterLevels) {
+      for (const [k, v] of Object.entries(save.waterLevels)) {
+        const i = Number(k);
+        if (Number.isInteger(i) && i >= 0 && i < this.data.length && v >= 0 && v <= 6) {
+          this.waterLevel.set(i, v);
+        }
+      }
+    }
     this.markAllDirty();
   }
 
@@ -208,14 +235,17 @@ export class World {
     for (const [i, v] of this.doorFacing) doorFacing[String(i)] = v;
     const stairFacing: Record<string, number> = {};
     for (const [i, v] of this.stairFacing) stairFacing[String(i)] = v;
+    const waterLevels: Record<string, number> = {};
+    for (const [i, v] of this.waterLevel) waterLevels[String(i)] = v;
     return {
-      version: 3,
+      version: 4,
       seed: this.seed,
       theme: this.theme,
       mods,
       collectedStars: [...this.collectedStars].sort((a, b) => a - b),
       doorFacing,
       stairFacing,
+      waterLevels,
     };
   }
 }

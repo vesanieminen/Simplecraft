@@ -4,7 +4,7 @@
  */
 
 import {
-  AIR, isDoorClosedBlock, isStairsBlock, solidHeightOf, StairFacing, stairBoxes, VoxelBox, WATER,
+  AIR, isDoorClosedBlock, isStairsBlock, isWaterId, solidHeightOf, StairFacing, stairBoxes, VoxelBox,
 } from './blocks';
 import { idx as worldIdx, World } from './world';
 
@@ -285,9 +285,9 @@ export function bodyBlock(world: World, box: Aabb): number {
 }
 
 export function inWater(world: World, box: Aabb): boolean {
-  return bodyBlock(world, box) === WATER || world.get(
+  return isWaterId(bodyBlock(world, box)) || isWaterId(world.get(
     Math.floor(box.x + box.w / 2), Math.floor(box.y + 0.2), Math.floor(box.z + box.d / 2),
-  ) === WATER;
+  ));
 }
 
 /**
@@ -296,9 +296,9 @@ export function inWater(world: World, box: Aabb): boolean {
  * submerged kids cannot (they have to kick up to the surface first).
  */
 export function headClearOfWater(world: World, box: Aabb): boolean {
-  return world.get(
+  return !isWaterId(world.get(
     Math.floor(box.x + box.w / 2), Math.floor(box.y + box.h - 0.1), Math.floor(box.z + box.d / 2),
-  ) !== WATER;
+  ));
 }
 
 /**
@@ -309,6 +309,6 @@ export function headClearOfWater(world: World, box: Aabb): boolean {
 export function submergedFraction(world: World, box: Aabb): number {
   const x = Math.floor(box.x + box.w / 2), z = Math.floor(box.z + box.d / 2);
   let wet = 0;
-  for (const dy of [0.2, 0.7, 1.15, 1.6]) if (world.get(x, Math.floor(box.y + dy), z) === WATER) wet++;
+  for (const dy of [0.2, 0.7, 1.15, 1.6]) if (isWaterId(world.get(x, Math.floor(box.y + dy), z))) wet++;
   return wet / 4;
 }

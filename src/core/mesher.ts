@@ -7,7 +7,7 @@
 import * as THREE from 'three';
 import {
   ATLAS_CELL_COUNT, ATLAS_DOOR, ATLAS_PLANKS, blockDef, isCrossBlock, isDoorBlock,
-  isDoorClosedBlock, isFullCellBlock, isOpaqueBlock, isStairsBlock, isTranslucentBlock,
+  isDoorClosedBlock, isFullCellBlock, isOpaqueBlock, isStairsBlock, isTranslucentBlock, isWaterId,
   PLANT_ATLAS_CELLS, SAND, StairFacing, stairBoxes, VoxelBox,
 } from './blocks';
 import { CHUNK, idx as worldIdx, WORLD_SY, World } from './world';
@@ -222,6 +222,7 @@ export function buildChunkGeometry(
           const n = world.get(nx, ny, nz);
           if (isFullCellBlock(n)) continue; // that neighbour already covers this face
           if (n === id) continue; // water-water, glass-glass: hide interior
+          if (isWaterId(id) && isWaterId(n)) continue; // source next to flow: keep ONE face
 
           // base tint for this face
           let base = def.color;

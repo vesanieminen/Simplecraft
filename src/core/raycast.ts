@@ -4,6 +4,8 @@
  */
 
 import { AIR, BlockId, blockDef, WATER } from './blocks';
+// WATER (a source) stays off-limits to the break button; travelling water
+// (WATER_FLOW) CAN be broken — scooping up the flow is how kids steer a flood.
 import { World } from './world';
 
 export interface Vec3 {

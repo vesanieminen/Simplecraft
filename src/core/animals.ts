@@ -5,7 +5,7 @@
  */
 
 import * as THREE from 'three';
-import { WATER } from './blocks';
+import { isWaterId } from './blocks';
 import { World, WORLD_SX, WORLD_SZ } from './world';
 import { ParticleSystem } from './particles';
 import { AudioKit } from './audio';
@@ -328,7 +328,7 @@ export class Animal {
     const bx = Math.floor(x), bz = Math.floor(z);
     const top = world.surfaceY(bx, bz);
     if (top < 0) return false;
-    if (world.get(bx, top + 1, bz) === WATER || world.get(bx, top + 1, bz) !== 0) return false;
+    if (isWaterId(world.get(bx, top + 1, bz)) || world.get(bx, top + 1, bz) !== 0) return false;
     const cur = world.surfaceY(Math.floor(this.pos.x), Math.floor(this.pos.z));
     return Math.abs(top - cur) <= 1;
   }
@@ -372,7 +372,7 @@ export class AnimalWorld {
       const top = world.surfaceY(bx, bz);
       if (top < 0 || world.get(bx, top + 1, bz) !== 0) continue;
       const surfaceBlock = world.get(bx, top, bz);
-      if (surfaceBlock === WATER) continue;
+      if (isWaterId(surfaceBlock)) continue;
       const kind = kinds[placed % kinds.length]; // cycle so every kind actually shows up
       const a = new Animal(kind, x, top + 1, z);
       this.animals.push(a);

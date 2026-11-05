@@ -159,7 +159,8 @@ Flowers, sunflowers and grass tufts are real textured plants: each one is a
 pair of crossed quads painted from a procedural 32-px atlas (drawn in code,
 still no image files). They sway in with the world, you walk straight through
 them — and **RT / R2 breaks them**, because the break button also targets
-things that aren't solid. Water and bedrock stay indestructible, and plants
+things that aren't solid. Water sources and bedrock stay indestructible
+(travelling water can be broken — see the water section), and plants
 never get in the way when you place a block (the two aim at slightly
 different things so both just work).
 
@@ -287,6 +288,30 @@ your head is clear of the water, that same button *pushes you out* — a real
 jump, so you hop onto the bank or the rim of a pool instead of paddling in
 circles. Fully submerged, kick up to the surface first. If a bank is more than
 a block above the water, place a block or dig a step to make a stair.
+
+## Water flows 💧
+
+Water now behaves like the big game. The sea is made of **source** blocks:
+eternal, and unbreakable — you will never drain the ocean or fall through it.
+But dig into the shore and the sea **flows in**: water pours straight down at
+full depth, spreads sideways one cell per tick getting one step shallower as
+it goes, and stops dead six cells from any source. A channel you dig into a
+pond fills up visibly, cell by cell, and a waterfall keeps its depth all the
+way down the cliff.
+
+- **Flowing water is real shallow water.** Each travelling cell remembers how
+  deep its supply is and is drawn that shallow — a puddle, a knee-deep sheet,
+  a full block by the source. Pools read as one body of water, not a stack of
+  boxes.
+- **Break the flow to fight a flood.** Travelling water *can* be broken with
+  RT / R2: scoop a gap across your trench and everything beyond it loses its
+  chain to a source and dries up, cell by cell. Or just fill the trench with
+  blocks. Sources never break.
+- **Water is in the palette now.** Place a source and give your fort a moat —
+  that source is eternal too, so plan the moat before you dig it.
+- Sand sinks through it (and the displaced water rides up), flowers get
+  washed over, and a fresh world's sea sits perfectly still until somebody
+  changes something under it.
 
 ## Dynamite 🧨
 
