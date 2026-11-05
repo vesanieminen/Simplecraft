@@ -182,11 +182,15 @@ export class PlayerEntity {
       const targetVy = input.jump ? SWIM_UP_V
         : Math.max(SWIM_SINK_V, Math.min(SWIM_UP_V, (submergedFraction(world, this.aabb) - SWIM_TRIM) * 2.2));
       this.vel.y += (targetVy - this.vel.y) * (1 - Math.exp(-6 * dt));
-      // strokes: a pull every strokeT, with a muffled whoosh
+      // strokes: a pull every strokeT, with a muffled whoosh — but only while
+      // the kid is actually paddling. Floating about in the water is quiet
+      // (Nov 2026: the endless underwater whoosh whenever anyone was wet got
+      // a complaint; the entry/exit splashes stay)
+      const paddling = input.jump || Math.hypot(input.moveX, input.moveY) > 0.1;
       this.strokeT -= dt;
       if (this.strokeT <= 0) {
         this.strokeT = STROKE_SECONDS;
-        events.stroked = true;
+        if (paddling) events.stroked = true;
       }
       // climbing out of a lake: buoyancy alone can never lift a whole block, so
       // once the head is clear of the surface the jump button becomes a real

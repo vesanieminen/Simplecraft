@@ -92,7 +92,9 @@ event. Renaming a storage key orphans the family's existing saves.
   walk-ins plunge to the pond floor). Hold jump to kick (`SWIM_UP_V`); the
   surface push-off jump only fires once `headClearOfWater` (the existing
   shore-escape rule, keep it). Strokes tick `events.stroked` every
-  `STROKE_SECONDS` → `Game.lastStroke` dedups → `audio.swimStroke`. The avatar
+  `STROKE_SECONDS` **only while paddling** (move/jump input — idle floating
+  is quiet, Nov 2026 complaint; the swimming test asserts `lastStroke`
+  freezes while floating) → `Game.lastStroke` dedups → `audio.swimStroke`. The avatar
   leans face-down (`syncAvatar` rotation.x ≈ 1.2) with a breaststroke/flutter
   pose from `animateAvatar(..., swimming)`. The avatar group MUST keep
   `rotation.order = 'YXZ'` (set in `createAvatar`): three's default 'XYZ'

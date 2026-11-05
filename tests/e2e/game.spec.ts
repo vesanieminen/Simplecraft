@@ -791,15 +791,25 @@ test('swimming: paddling like a proper kid — stroke, surface float, kick-up an
   await frames(page, 10); // let the paddle resume from that yaw
 
   // surface float: stop swimming and the kid bobs near the surface, not
-  // plunging to the bottom
-  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
-  await frames(page, 45);
+  // plunging to the bottom — and the water goes quiet: idle floating must
+  // not keep firing stroke pulls (the endless whoosh was the complaint)
+  await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    (window as any).__testPad.setMove(0, 0);
+    (window as any).__floatStroke = game.lastStroke.get(game.players[0].entity.id) ?? -9;
+  });
+  await page.waitForTimeout(2500); // several stroke intervals of just floating
   const bob = await page.evaluate(() => {
     const e = (window as any).__lbw.game.players[0].entity;
-    return { y: e.pos.y, vy: e.vel.y, head: e.inWaterNow };
+    const game = (window as any).__lbw.game;
+    return {
+      y: e.pos.y, vy: e.vel.y, head: e.inWaterNow,
+      stroke: game.lastStroke.get(e.id) ?? -9, before: (window as any).__floatStroke,
+    };
   });
   expect(bob.y).toBeGreaterThan(lake.base - 1.7); // stayed near the surface
   expect(bob.vy).toBeGreaterThan(-1.2); // …and sinking like a leaf, not a stone
+  expect(bob.stroke).toBe(bob.before); // …and not one stroke pull while floating
 
   // holding jump kicks up and out of the pond, and the body rights itself on land
   await page.evaluate(() => {
