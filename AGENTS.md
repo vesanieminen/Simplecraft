@@ -14,9 +14,18 @@ event. Renaming a storage key orphans the family's existing saves.
 - **Never push directly to `main`.** Always work on a feature branch and open
   a pull request; the human tests the PR build before it is merged.
 - Branch names: `feature/…`, `fix/…`, `chore/…`.
-- Before opening or updating a PR, run:
-  `npm run typecheck` · `npm test` (Playwright e2e, starts its own server on
-  :3100) · `npm run build`.
+- **CI-first testing (user's standing instruction — do not re-ask):** the
+  e2e suite runs in CI as **four parallel shards** plus a static job
+  (`typecheck` + `build`) on every PR and every push to `main`
+  (`.github/workflows/test.yml`). Do **not** burn agent time running the
+  whole `npm test` suite locally. Instead:
+  1. Run `npm run typecheck` and `npm run build` locally (fast) before pushing.
+  2. While iterating on a feature, run only the relevant tests locally:
+     `rm -rf /tmp/opencode/lbw-test-world && npx playwright test -g "<test name>"`.
+  3. **Push the branch and open the PR early** (as soon as the first real
+     commit exists) so CI starts working right away; add commits as work
+     continues — CI reruns on every push. Watch with `gh pr checks --watch`.
+  CI is the full-suite runner; local runs are for quick feedback loops.
 - Push the branch and open/update the PR with `gh pr create` / `gh pr push`
   style flows (`gh pr create --head <branch>`), then report the PR URL.
 - Merging is the human's call — do not merge or squash-merge unless asked.
@@ -108,6 +117,16 @@ event. Renaming a storage key orphans the family's existing saves.
   entry/exit is `audio.splash()`, chests are `chestOpen()`. `AudioKit.recent`
   is a 30-entry ring of sound names — the headless e2e asserts the wiring
   through it (`sounds carry the material` test).
+- Sand obeys gravity (`core/sand.ts`, `Game.sand`): a cell **changed** id is
+  what drives it — `World.onCellChanged` fires from `world.set` for every
+  change (buttons, blasts, tests, the sim itself) and `SandGravity.notify`
+  tracks the sand at/above that cell, so digging under a cliff cascades:
+  each cell's own `set` re-notifies the one above. One cell per step
+  (~8/s), water sinks through (displaced water rides up), cross plants are
+  squashed (`crushed` hook forgets the sapling), and it never occupies a
+  cell a player overlaps — it just rests over their head with `sandThud`.
+  Terrain writes cells directly (no hook), so natural sand never falls
+  until something changes under it — same as floating sand in Minecraft.
 - Treasure chests: the loot roll is `core/treasure.ts` (weights + messages),
   the effects live in `Game.grantTreasure` (no inventory, so prizes happen to
   the world: star counters, `starField.spawnAt` stars, `playerEntity.zoomTime`

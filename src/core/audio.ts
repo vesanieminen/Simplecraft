@@ -225,6 +225,12 @@ export class AudioKit {
     this.noise(0.08, 0.12, 650, 0.17);
   }
 
+  /** falling sand settling: a soft sandy thud */
+  sandThud(): void {
+    this.noise(0.14, 0.14, 700);
+    this.tone('sine', 120, 60, 0.12, 0.08, 0.01);
+  }
+
   // ------------------------------------------------------------- dynamite
 
   /** the fuse catching: paper thud, then a long hiss */

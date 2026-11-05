@@ -778,6 +778,98 @@ test('sounds carry the material: stone clacks, dirt thuds, water splashes, feet 
     }
   }, { fx: site.fx, fz: site.fz, gy: site.gy, grass: ids.GRASS, air: ids.AIR });
 });
+
+test('sand obeys gravity: tumbles down, sinks through water, squashes plants and lands soft on kids', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  const site = await clearRunway(page);
+  const gy = site.gy, x0 = site.fx - 3, z0 = site.fz;
+
+  // flat, known ground for the test columns (three rows deep), and the kid
+  // stands on the south edge row: safely clear of every falling column
+  // until part 5 asks for their head
+  await page.evaluate((arg: { x0: number; z0: number; gy: number; stone: number; air: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let x = arg.x0 - 1; x <= arg.x0 + 7; x++) {
+      for (let z = arg.z0 - 1; z <= arg.z0 + 1; z++) {
+        for (let y = arg.gy; y <= arg.gy + 6; y++) S.set(x, y, z, y === arg.gy ? arg.stone : arg.air);
+      }
+    }
+  }, { x0, z0, gy, stone: ids.STONE, air: ids.AIR });
+  await page.evaluate((arg: { x: number; y: number; z: number }) => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    e.pos.set(arg.x, arg.y, arg.z);
+    e.vel.set(0, 0, 0);
+  }, { x: x0 + 0.5, y: gy + 1, z: z0 - 0.5 });
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+
+  const blockAt = (x: number, y: number, z: number) =>
+    page.evaluate((c: { x: number; y: number; z: number }) =>
+      (window as any).__lbw.game.world.get(c.x, c.y, c.z), { x, y, z });
+  const setCell = (x: number, y: number, z: number, id: number) =>
+    page.evaluate((c: { x: number; y: number; z: number; id: number }) =>
+      (window as any).__lbw.game.world.set(c.x, c.y, c.z, c.id), { x, y, z, id });
+  const waitForBlock = (x: number, y: number, z: number, id: number) =>
+    page.waitForFunction((c: { x: number; y: number; z: number; id: number }) =>
+      (window as any).__lbw.game.world.get(c.x, c.y, c.z) === c.id,
+    { x, y, z, id }, { timeout: 15000 });
+
+  // 1) sand dropped in mid-air falls straight down and settles on the ground
+  await setCell(x0, gy + 4, z0, ids.SAND);
+  await waitForBlock(x0, gy + 1, z0, ids.SAND);
+  expect(await blockAt(x0, gy + 2, z0)).toBe(ids.AIR);
+
+  // 2) dig the ground out under a sand block: it follows one cell down
+  await setCell(x0, gy, z0, ids.AIR);
+  await waitForBlock(x0, gy, z0, ids.SAND);
+  expect(await blockAt(x0, gy + 1, z0)).toBe(ids.AIR);
+
+  // 3) sand sinks THROUGH water and settles on the bottom of the puddle
+  const bx = x0 + 2;
+  await setCell(bx, gy + 1, z0, ids.WATER);
+  await setCell(bx, gy + 3, z0, ids.SAND);
+  await waitForBlock(bx, gy + 1, z0, ids.SAND);
+  expect(await blockAt(bx, gy + 2, z0)).toBe(ids.WATER); // the water it displaced rode up
+
+  // 4) falling sand squashes the tallgrass in its way
+  const cx = x0 + 4;
+  const pageErrs: string[] = [];
+  page.on('pageerror', (e) => pageErrs.push(String(e)));
+  await setCell(cx, gy + 1, z0, ids.TALLGRASS);
+  await setCell(cx, gy + 3, z0, ids.SAND);
+  await waitForBlock(cx, gy + 1, z0, ids.SAND);
+
+  // 5) a kid standing under it: the sand stops right over their head, harmlessly
+  const dx = x0 + 6;
+  await page.evaluate((arg: { x: number; y: number; z: number }) => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    e.pos.set(arg.x + 0.5, arg.y + 1, arg.z + 0.5);
+    e.vel.set(0, 0, 0);
+  }, { x: dx, y: gy, z: z0 });
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  await setCell(dx, gy + 5, z0, ids.SAND);
+  await waitForBlock(dx, gy + 3, z0, ids.SAND); // resting above the head, never in it
+  const kid = await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    return { y: e.pos.y, inWater: e.inWaterNow };
+  });
+  expect(kid.y).toBeCloseTo(gy + 1, 1); // not crushed, not launched, not teleported
+  expect(kid.inWater).toBe(false);
+  expect(pageErrs, pageErrs.join('\n')).toEqual([]);
+
+  // tidy up so later tests still find clean grass near spawn
+  await page.evaluate((arg: { x0: number; z0: number; gy: number; grass: number; air: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let x = arg.x0 - 1; x <= arg.x0 + 7; x++) {
+      for (let z = arg.z0 - 1; z <= arg.z0 + 1; z++) {
+        for (let y = arg.gy; y <= arg.gy + 6; y++) S.set(x, y, arg.z0, y === arg.gy ? arg.grass : arg.air);
+      }
+    }
+  }, { x0, z0, gy, grass: ids.GRASS, air: ids.AIR });
+});
 /** opens Grown-Up Settings, switches Freeze, and closes the menu again */
 async function setFreeze(page: Page, on: boolean): Promise<void> {
   await tap(page, 'menu');
