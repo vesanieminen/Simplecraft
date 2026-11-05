@@ -88,8 +88,9 @@ npm start
 1. Plug in two controllers (Xbox, PlayStation, or any standard pad).
 2. Open the game in a browser. (Optional: press **Y / △** first to pick a
    world — see [Choosing your world](#choosing-your-world).)
-3. **Player 1 presses any button** on their controller → pick a color and
-   name → press **A / ✕** to join.
+3. **Player 1 presses any button** on their controller → pick a color, name
+   and **costume** (**LB/RB** on the join card cycles Kid, Astronaut, Robot,
+   Wizard, Dino, Cat and Knight) → press **A / ✕** to join.
 4. **Player 2 presses any button** on the *other* controller → join card
    appears in a new half of the screen → confirm.
 5. Split screen activates automatically. Side-by-side on wide screens,
@@ -128,12 +129,12 @@ milestone; see Roadmap. Today, each computer gets the same saved world.)
 | A / ✕ | Jump (hold while flying = up) |
 | LT / L2 | Place block |
 | RT / R2 | Break block |
-| LB / L1 | Previous block |
-| RB / R1 | Next block |
+| LB / L1 | Previous block · previous costume on the join card |
+| RB / R1 | Next block · next costume on the join card |
 | X / ☐ | Pet animals · open/close doors (hold while flying = down) |
 | Y / △ | Open the block palette (before anyone joins: choose a world) |
 | D-pad | Navigate menus |
-| Start / Options | Player menu (fly, camera, home, help…) |
+| Start / Options | Player menu (fly, camera, **costume**, home, help…) |
 | B / ◯ | Back / close |
 
 Everything is doable with a controller only — joining, palettes, menus,

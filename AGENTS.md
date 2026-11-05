@@ -64,6 +64,19 @@ event. Renaming a storage key orphans the family's existing saves.
   colour, so a player's colour survives. The torso is a six-material box —
   BoxGeometry face order is +x −x +y −y +z −z, and +z is the front that gets
   the collar/pocket/buttons.
+- Costumes (`AVATAR_MODELS` in `players/avatar.ts`): one skeleton for every
+  model — the arm/leg pivots, head and face stay exactly where
+  `animateAvatar`/`syncAvatar` expect them, costumes only add boxes (helmet,
+  hat, tail…) and re-tint materials, and each keeps ≥1 mesh in the player's
+  own colour (the e2e 'costumes' test counts them). The Kid model is the
+  classic 9-mesh body and must stay byte-identical — 'the kids are dressed'
+  counts its textures. Costume tails ride `AvatarParts.tail` (animateAvatar
+  wags it). Pick at join with prevBlock/nextBlock on the JoinCard; swap in
+  play via the PlayerMenu 'Costume' row → `PlayerEntity.cycleModel()`, which
+  rebuilds the avatar and re-parents it (the per-frame `applyAvatarLayers`
+  sorts split-screen layers out; don't cache AvatarParts anywhere).
+  PlayerMenu rows are index-pinned in several tests — inserting a row shifts
+  Grown-Ups/Leave/Help indices in `tests/e2e/game.spec.ts`.
 - Dynamite: the stick is a real voxel (`DYNAMITE`), so it saves, blocks things
   and can be carved by another blast; `DynamiteManager` only owns the animated
   fuse rig (tagged `group.userData.fuse` for leak checks), the blast and the
