@@ -107,6 +107,11 @@ export class LocalPlayer {
       this.entity.pitch = Math.max(-maxPitch, Math.min(maxPitch, this.entity.pitch));
     }
 
+    // ---- crouch (B / Circle / Ctrl): tap to crouch, tap again to stand ----
+    if (!worldMenuBlock && (frame.pressed.has('crouch') || frame.pressed.has('back'))) {
+      this.entity.toggleCrouch(this.world);
+    }
+
     // ---- step simulation ----
     const stepInput = worldMenuBlock
       ? { moveX: 0, moveY: 0, jump: false, flyUp: false, flyDown: false, dt }
@@ -142,7 +147,7 @@ export class LocalPlayer {
   }
 
   private updateTarget(): void {
-    const head = new THREE.Vector3(this.entity.pos.x, this.entity.pos.y + 1.45, this.entity.pos.z);
+    const head = new THREE.Vector3(this.entity.pos.x, this.entity.pos.y + this.entity.headHeight, this.entity.pos.z);
     const dir = this.aimDir();
     const right = new THREE.Vector3(Math.cos(this.entity.yaw), 0, -Math.sin(this.entity.yaw));
     const up = new THREE.Vector3(0, 1, 0);
@@ -184,7 +189,7 @@ export class LocalPlayer {
 
   private updateCamera(dt: number): void {
     const e = this.entity;
-    const head = new THREE.Vector3(e.pos.x, e.pos.y + 1.45, e.pos.z);
+    const head = new THREE.Vector3(e.pos.x, e.pos.y + e.headHeight, e.pos.z);
     const dir = this.aimDir();
     const k = 1 - Math.exp(-22 * dt);
     if (this.firstPerson) {
@@ -233,5 +238,6 @@ export class LocalPlayer {
     this.entity.pos.copy(p);
     this.entity.vel.set(0, 0, 0);
     this.entity.flying = false;
+    this.entity.crouching = false;
   }
 }

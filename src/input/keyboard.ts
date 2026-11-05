@@ -14,6 +14,8 @@ const KEY_ACTIONS: Record<string, Action> = {
   KeyE: 'interact',
   KeyQ: 'prevBlock',
   KeyR: 'nextBlock',
+  ControlLeft: 'crouch',
+  ControlRight: 'crouch',
   ArrowUp: 'up',
   ArrowDown: 'down',
   ArrowLeft: 'left',

@@ -15,10 +15,12 @@ export interface Aabb {
 
 export const PLAYER_W = 0.62;
 export const PLAYER_H = 1.72;
+/** the squat hitbox while crouching: short enough to crawl a one-block gap */
+export const CROUCH_H = 0.95;
 const EPS = 1e-4;
 
-export function playerAabb(px: number, py: number, pz: number): Aabb {
-  return { x: px - PLAYER_W / 2, y: py, z: pz - PLAYER_W / 2, w: PLAYER_W, h: PLAYER_H, d: PLAYER_W };
+export function playerAabb(px: number, py: number, pz: number, h: number = PLAYER_H): Aabb {
+  return { x: px - PLAYER_W / 2, y: py, z: pz - PLAYER_W / 2, w: PLAYER_W, h, d: PLAYER_W };
 }
 
 export function blockAabb(x: number, y: number, z: number): Aabb {
@@ -168,6 +170,11 @@ export function aabbOverlapsSolid(world: World, a: Aabb): boolean {
   return collides(world, a);
 }
 
+/** would a standing player fit at these feet? (low ceilings say no) */
+export function canStandAt(world: World, px: number, py: number, pz: number): boolean {
+  return !collides(world, playerAabb(px, py, pz, PLAYER_H));
+}
+
 export interface MoveResult {
   vx: number; vy: number; vz: number;
   hitGround: boolean; hitCeil: boolean; hitWall: boolean;
@@ -266,6 +273,6 @@ export function inWater(world: World, box: Aabb): boolean {
  */
 export function headClearOfWater(world: World, box: Aabb): boolean {
   return world.get(
-    Math.floor(box.x + box.w / 2), Math.floor(box.y + PLAYER_H - 0.1), Math.floor(box.z + box.d / 2),
+    Math.floor(box.x + box.w / 2), Math.floor(box.y + box.h - 0.1), Math.floor(box.z + box.d / 2),
   ) !== WATER;
 }
