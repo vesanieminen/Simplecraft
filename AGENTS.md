@@ -71,6 +71,15 @@ event. Renaming a storage key orphans the family's existing saves.
   clock in headless Chromium — never `waitForTimeout` for an explosion, poll
   `game.dynamite.blastCount`. Blasts never touch `y <= 0`, `unbreakable`
   blocks or water, and `SCORCH` is deliberately not in the palette.
+- Crouch (Minecraft sneak): **tap B/◯ in the world** (keyboard Ctrl) toggles
+  it; menus keep B as Back. `PlayerEntity.crouching` → squat AABB
+  (`physics.CROUCH_H` 0.95 — fits a one-block gap), 42 % walk speed, jump
+  while crouched stands up first (and jumps; refused under a low ceiling),
+  toggle-up is refused under a low ceiling, and `step` undoes any horizontal
+  move that would leave the feet unsupported while crouched on the ground —
+  kids never walk off ledges. Camera/aim eye height comes from
+  `entity.headHeight`; the avatar squats via `group.scale.y` in
+  `animateAvatar`. Flight force-clears crouch.
 - Sky/camera invariant: the sky dome (radius `SKY_RADIUS`) is parented to a group
   centred on the **middle** of the world — the coordinate origin is a map
   *corner*, so centring the dome there puts its far side past the far plane and
@@ -91,8 +100,9 @@ event. Renaming a storage key orphans the family's existing saves.
   split screen, waking a sleeping pad). Virtual pads in tests drive the same
   input abstraction, so they are a good regression net — but re-check the
   README's manual checklist with real pads after any input change (newly added
-  Leave / Waiting-Players rows, the water-jump fix and the slab / real-stairs /
-  treasure-chest blocks still owe the couch a turn).
+  Leave / Waiting-Players rows, the water-jump fix, the slab / real-stairs /
+  treasure-chest blocks and the new B/◯ **crouch toggle** still owe the couch
+  a turn).
 - Partial blocks share one shape language: `BlockDef.solidHeight` is both the
   squat box the mesher paints (`mesher.addTexturedSubBox`) and the box
   `physics.solidBoxesOf` collides with (slab 0.5, treasure chest 0.85). Stairs

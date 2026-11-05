@@ -5,7 +5,10 @@
 
 import * as THREE from 'three';
 import { blockDef } from '../core/blocks';
-import { inWater, moveAabb, playerAabb, grounded as groundedTest, headClearOfWater, MoveResult } from '../core/physics';
+import {
+  canStandAt, CROUCH_H, inWater, moveAabb, PLAYER_H, playerAabb,
+  grounded as groundedTest, headClearOfWater, MoveResult,
+} from '../core/physics';
 import { World, WORLD_SX, WORLD_SZ, WORLD_SY } from '../core/world';
 import { AvatarParts, animateAvatar, createAvatar } from './avatar';
 
@@ -14,6 +17,8 @@ export const JUMP_V = 8.9;
 export const WALK_SPEED = 5.0;
 export const FLY_SPEED = 7.2;
 export const FLY_VERT = 4.6;
+/** creeping along while crouched (like Minecraft: barely a shuffle) */
+export const CROUCH_MUL = 0.42;
 /** treasure boosts: zoomy boots run this much faster, boing boots jump this much higher */
 export const ZOOM_MUL = 1.5;
 export const BOING_MUL = 1.4;
@@ -49,6 +54,8 @@ export class PlayerEntity {
   flying = false;
   grounded = false;
   inWaterNow = false;
+  /** Minecraft-style sneak: squat hitbox, slow creep, ledge protection */
+  crouching = false;
   walkPhase = 0;
   moving = false;
   starsCount = 0;
@@ -81,7 +88,25 @@ export class PlayerEntity {
   }
 
   get aabb() {
-    return playerAabb(this.pos.x, this.pos.y, this.pos.z);
+    return playerAabb(this.pos.x, this.pos.y, this.pos.z, this.crouching ? CROUCH_H : PLAYER_H);
+  }
+
+  /** the avatar/camera head height, standing or crouched */
+  get headHeight(): number {
+    return this.crouching ? 0.82 : 1.45;
+  }
+
+  /**
+   * B/Circle in the world, or Ctrl on the keyboard: crouch, or stand up
+   * again if there is headroom. Under a low ceiling the tap is ignored
+   * (Minecraft keeps you ducked) — tapping again after leaving works.
+   */
+  toggleCrouch(world: World): void {
+    if (this.crouching) {
+      if (canStandAt(world, this.pos.x, this.pos.y, this.pos.z)) this.crouching = false;
+    } else {
+      this.crouching = true;
+    }
   }
 
   step(world: World, input: StepInput, events: StepEvents): void {
@@ -100,7 +125,8 @@ export class PlayerEntity {
     const fwd = -input.moveY; // stick up (-1) means forward
     const fx = sin * fwd - cos * input.moveX;
     const fz = cos * fwd + sin * input.moveX;
-    const speed = (this.flying ? FLY_SPEED : swimming ? WALK_SPEED * 0.55 : WALK_SPEED)
+    const speed = (this.flying ? FLY_SPEED : swimming ? WALK_SPEED * 0.55
+      : this.crouching ? WALK_SPEED * CROUCH_MUL : WALK_SPEED)
       * (this.zoomTime > 0 ? ZOOM_MUL : 1);
     const tvx = fx * speed, tvz = fz * speed;
     const accel = 1 - Math.exp(-(this.grounded || this.flying ? 14 : 6) * dt);
@@ -109,6 +135,7 @@ export class PlayerEntity {
     this.moving = Math.hypot(this.vel.x, this.vel.z) > 0.6;
 
     if (this.flying) {
+      this.crouching = false; // no sneaking mid-flight, thanks
       let vy = 0;
       if (input.jump || input.flyUp) vy += FLY_VERT;
       if (input.flyDown) vy -= FLY_VERT;
@@ -129,13 +156,17 @@ export class PlayerEntity {
         events.splashed = true; // a splash on the way out
       }
     } else {
+      // crouch + jump = stand up and go, unless a low ceiling says stay down
+      if (input.jump && this.crouching && canStandAt(world, this.pos.x, this.pos.y, this.pos.z)) {
+        this.crouching = false;
+      }
       this.vel.y -= GRAVITY * dt;
       if (this.vel.y < -30) this.vel.y = -30;
       // forgiving jumping
       if (input.jump) this.jumpBuffer = JUMP_BUFFER;
       this.jumpBuffer = Math.max(0, this.jumpBuffer - dt);
       this.coyote = this.grounded ? 0.12 : Math.max(0, this.coyote - dt);
-      if (this.jumpBuffer > 0 && this.coyote > 0) {
+      if (!this.crouching && this.jumpBuffer > 0 && this.coyote > 0) {
         this.vel.y = JUMP_V * (this.boingTime > 0 ? BOING_MUL : 1);
         this.jumpBuffer = 0;
         this.coyote = 0;
@@ -143,7 +174,17 @@ export class PlayerEntity {
     }
 
     const box = this.aabb;
+    const preX = box.x, preZ = box.z;
+    const wasGrounded = this.grounded;
     const res: MoveResult = moveAabb(world, box, this.vel.x, this.vel.y, this.vel.z, dt);
+    // sneak edge protection (Minecraft): a crouched kid never walks off a
+    // ledge — if the step would leave their feet unsupported, undo it
+    if (this.crouching && !this.flying && wasGrounded && !groundedTest(world, box)) {
+      box.x = preX;
+      box.z = preZ;
+      res.vx = 0;
+      res.vz = 0;
+    }
     this.pos.set(box.x + box.w / 2, box.y, box.z + box.d / 2);
     this.vel.set(res.vx, res.vy, res.vz);
     this.grounded = res.hitGround || groundedTest(world, box);
@@ -193,7 +234,7 @@ export class PlayerEntity {
 
     if (this.moving && this.grounded) this.walkPhase += dt * 9.5;
     else if (!this.grounded) this.walkPhase += dt * 2;
-    animateAvatar(this.avatar, this.walkPhase, this.moving && this.grounded, !this.grounded, dt);
+    animateAvatar(this.avatar, this.walkPhase, this.moving && this.grounded, !this.grounded, dt, this.crouching);
     this.syncAvatar(dt);
   }
 

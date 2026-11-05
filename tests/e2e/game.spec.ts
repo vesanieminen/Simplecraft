@@ -724,6 +724,100 @@ test('kids can jump out of the water onto the shore', async ({ page }) => {
   }, { ...lake, grass: ids.GRASS, air: ids.AIR });
 });
 
+test('crouch: the red button sneaks — slow shuffle, ledge protection, crawling low gaps', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  const site = await clearRunway(page);
+  const { fx, fz, gy } = site;
+
+  // the course: a pit in the walking row a few blocks ahead, and a
+  // one-block-high tunnel (stone ceiling one block up) in a row next to it
+  await page.evaluate((arg: { fx: number; fz: number; gy: number; stone: number; air: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let x = arg.fx + 3; x <= arg.fx + 7; x++) S.set(x, arg.gy, arg.fz, arg.air); // pit
+    for (let x = arg.fx + 1; x <= arg.fx + 4; x++) S.set(x, arg.gy + 2, arg.fz + 2, arg.stone); // tunnel lid
+  }, { fx, fz, gy, stone: ids.STONE, air: ids.AIR });
+
+  const e = () => page.evaluate(() => {
+    const p = (window as any).__lbw.game.players[0].entity;
+    return { x: p.pos.x, y: p.pos.y, z: p.pos.z, crouch: p.crouching, grounded: p.grounded, sp: Math.hypot(p.vel.x, p.vel.z) };
+  });
+
+  // tap B (the Back button): crouch on — and the shuffle is slow
+  await tap(page, 'back');
+  await page.waitForFunction('window.__lbw.game.players[0].entity.crouching === true', null, { timeout: 8000 });
+  await page.evaluate(() => (window as any).__testPad.setMove(0, -1));
+  await waitForMove(page, { x: fx + 0.5, z: fz + 0.5 }, 1.0);
+  const sneaking = await e();
+  expect(sneaking.sp).toBeLessThan(3.2); // crouched creep, not a 5-block/s walk
+
+  // …and it never walks off the edge of the pit: feet stay supported
+  await waitForMove(page, { x: fx + 0.5, z: fz + 0.5 }, 2.6);
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+  await waitForStop(page);
+  const atEdge = await e();
+  expect(atEdge.x).toBeLessThan(fx + 3.95); // stopped at the lip, did not fall in
+  expect(atEdge.grounded).toBe(true);
+  expect(atEdge.y).toBeCloseTo(gy + 1, 1);
+  expect(atEdge.crouch).toBe(true);
+
+  // tap again to stand, right at the lip
+  await tap(page, 'back');
+  await page.waitForFunction('window.__lbw.game.players[0].entity.crouching === false', null, { timeout: 8000 });
+  const stood = await e();
+  expect(stood.grounded).toBe(true);
+
+  // --- the low tunnel: walking standing runs into the lid, crouching crawls in
+  await page.evaluate((arg: { x: number; y: number; z: number }) => {
+    const p = (window as any).__lbw.game.players[0].entity;
+    p.pos.set(arg.x, arg.y, arg.z);
+    p.vel.set(0, 0, 0);
+  }, { x: fx - 2.5, y: gy + 1, z: fz + 2.5 });
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  await page.evaluate(() => (window as any).__testPad.setMove(0, -1));
+  await waitForMove(page, { x: fx - 2.5, z: fz + 2.5 }, 1.5);
+  await waitForStop(page);
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+  const bumped = await e();
+  expect(bumped.x).toBeLessThan(fx + 0.95); // standing: blocked by the lid
+  expect(bumped.crouch).toBe(false);
+
+  await tap(page, 'back'); // crouch, then walk in
+  await page.waitForFunction('window.__lbw.game.players[0].entity.crouching === true', null, { timeout: 8000 });
+  await page.evaluate(() => (window as any).__testPad.setMove(0, -1));
+  await page.waitForFunction((f: number) => (window as any).__lbw.game.players[0].entity.pos.x > f, fx + 2, { timeout: 20000 });
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+  await waitForStop(page);
+
+  // under the lid: standing up is refused (Minecraft keeps you ducked),
+  // and so is crouch-jumping — tapping the buttons does not stick you to the roof
+  await tap(page, 'back');
+  const stayed = await e();
+  expect(stayed.crouch).toBe(true);
+  await tap(page, 'jump');
+  const afterJump = await e();
+  expect(afterJump.crouch).toBe(true);
+  expect(afterJump.grounded).toBe(true);
+
+  // walk back out and stand freely again
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 1));
+  await page.waitForFunction((f: number) => (window as any).__lbw.game.players[0].entity.pos.x < f, fx - 0.5, { timeout: 20000 });
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+  await waitForStop(page);
+  await tap(page, 'back');
+  await page.waitForFunction('window.__lbw.game.players[0].entity.crouching === false', null, { timeout: 8000 });
+
+  // tidy up: fill the pit, take the lid off
+  await page.evaluate((arg: { fx: number; fz: number; gy: number; grass: number; air: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let x = arg.fx + 3; x <= arg.fx + 7; x++) S.set(x, arg.gy, arg.fz, arg.grass);
+    for (let x = arg.fx + 1; x <= arg.fx + 4; x++) S.set(x, arg.gy + 2, arg.fz + 2, arg.air);
+  }, { fx, fz, gy, grass: ids.GRASS, air: ids.AIR });
+});
+
 test('sand obeys gravity: tumbles down, sinks through water, squashes plants and lands soft on kids', async ({ page }) => {
   test.slow();
   await boot(page);

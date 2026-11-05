@@ -241,20 +241,31 @@ export function createAvatar(colorHex: string): AvatarParts {
   return { group, body, leftArm, rightArm, leftLeg, rightLeg, ring, shadow };
 }
 
-export function animateAvatar(parts: AvatarParts, walkPhase: number, moving: boolean, airborne: boolean, dt: number): void {
+export function animateAvatar(
+  parts: AvatarParts, walkPhase: number, moving: boolean, airborne: boolean, dt: number,
+  crouching = false,
+): void {
   const target = moving ? Math.sin(walkPhase) : Math.sin(walkPhase) * 0.15;
-  const armA = airborne ? 1.1 : target * 0.85;
-  const legA = airborne ? -0.5 : target * 0.9;
+  let armA = airborne ? 1.1 : target * 0.85;
+  let legA = airborne ? -0.5 : target * 0.9;
+  if (crouching) {
+    // sneak pose: knees bent under them, hands out front, the whole body
+    // squatted down (the group scale below)
+    armA = -0.5 + (moving ? Math.sin(walkPhase) * 0.15 : 0);
+    legA = 0.6 + (moving ? Math.sin(walkPhase) * 0.2 : 0);
+  }
   const lerpK = 1 - Math.exp(-14 * dt);
   parts.leftArm.rotation.x += (armA - parts.leftArm.rotation.x) * lerpK;
   parts.rightArm.rotation.x += (-armA - parts.rightArm.rotation.x) * lerpK;
   parts.leftLeg.rotation.x += (legA - parts.leftLeg.rotation.x) * lerpK;
   parts.rightLeg.rotation.x += (-legA - parts.rightLeg.rotation.x) * lerpK;
+  const squat = crouching && !airborne ? 0.62 : 1;
+  parts.group.scale.y += (squat - parts.group.scale.y) * lerpK;
   if (airborne) {
     parts.leftArm.rotation.z = -0.5;
     parts.rightArm.rotation.z = 0.5;
   } else {
-    parts.leftArm.rotation.z = 0;
-    parts.rightArm.rotation.z = 0;
+    parts.leftArm.rotation.z = crouching ? 0.18 : 0;
+    parts.rightArm.rotation.z = crouching ? -0.18 : 0;
   }
 }
