@@ -302,6 +302,24 @@ export function headClearOfWater(world: World, box: Aabb): boolean {
 }
 
 /**
+ * Is a shore or pool wall right next to the player — a solid cell at foot or
+ * waist height one step in any cardinal direction? The surface push-off jump
+ * only fires near such an edge: a kid treading water mid-pond kicks up to the
+ * surface and bobs, it never leaps into the air for no reason.
+ */
+export function nearShore(world: World, box: Aabb): boolean {
+  const cx = box.x + box.w / 2, cz = box.z + box.d / 2;
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const sx = Math.floor(cx + dx * (box.w / 2 + 0.35));
+    const sz = Math.floor(cz + dz * (box.d / 2 + 0.35));
+    for (const dy of [0.15, 0.95]) {
+      if (solidBoxesOf(world, sx, Math.floor(box.y + dy), sz).length) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * How much of the body (0..1) is under water, sampled up the middle of the
  * player. Buoyancy hangs off this: deep under pushes you up, shallow water
  * just lets you wade and settle.
