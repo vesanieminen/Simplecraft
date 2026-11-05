@@ -119,6 +119,27 @@ event. Renaming a storage key orphans the family's existing saves.
   cell a player overlaps — it just rests over their head with `sandThud`.
   Terrain writes cells directly (no hook), so natural sand never falls
   until something changes under it — same as floating sand in Minecraft.
+- Water flows (`core/water.ts`, `Game.water`): **two ids**. `WATER` (10) is an
+  eternal source (the sea, and any a kid places from the palette) — unbreakable,
+  never an aim target (`raycast.hitRemovable`), full-cell. `WATER_FLOW` (38) is
+  travelling water; its depth 0..6 lives in `world.waterLevel` (flat index →
+  level), saved as **version 4** `waterLevels` (server merges it like the other
+  maps). The sim is a dirty-set driven by the same `World.onCellChanged` hook as
+  sand: each 0.2 s step re-reads every dirty cell's best supply (a side
+  neighbour one level deeper, or water falling in from **above keeps its depth**),
+  >`MAX_WATER_LEVEL` (6) drains to AIR. Sideways spread is `level+1`, capped at
+  6, so reach is strictly bounded — no support loops, the shallowest cell always
+  needs a deeper one. Cutting a chain makes levels **climb** (each flow cell
+  `notify`s its neighbours when its own level changes, incl. shallowing) until
+  they fall past the cap and dry, cell by cell. `world.set` deletes the level
+  entry; improving an existing flow cell's depth needs `world.touchAt` (same id,
+  so `set` early-returns). The mesher draws flow cells as shallow
+  `addTexturedSubBox`es (`waterTop(id, level)` in blocks.ts = the drawn height)
+  with water↔water face culling so a pool reads as one body; sources stay
+  full-cell translucent. Anything wet is `blocks.isWaterId(id)` — physics, sand
+  (displaced water rides up), blasts (skip both ids), animals/collectibles all
+  use it, never a bare `=== WATER`. Terrain writes cells directly (no hook), so
+  a fresh sea starts still.
 - Treasure chests: the loot roll is `core/treasure.ts` (weights + messages),
   the effects live in `Game.grantTreasure` (no inventory, so prizes happen to
   the world: star counters, `starField.spawnAt` stars, `playerEntity.zoomTime`

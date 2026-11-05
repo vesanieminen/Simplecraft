@@ -815,6 +815,99 @@ test('sand obeys gravity: tumbles down, sinks through water, squashes plants and
     }
   }, { x0, z0, gy, grass: ids.GRASS, air: ids.AIR });
 });
+
+test('water flows: a dug channel floods from the source, shallows with reach, falls deep and dries when cut off', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  const site = await clearRunway(page);
+  const { fx, fz, gy } = site;
+
+  // the course: a one-deep channel along the surface row, walls left standing
+  // on both sides, and an eternal source at the near end
+  await page.evaluate((arg: { fx: number; fz: number; gy: number; air: number; water: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let x = arg.fx + 2; x <= arg.fx + 10; x++) {
+      S.set(x, arg.gy, arg.fz, arg.air);
+      S.set(x, arg.gy + 1, arg.fz, arg.air); // nothing loiters above the channel
+      S.set(x, arg.gy + 2, arg.fz, arg.air);
+    }
+    S.set(arg.fx + 2, arg.gy, arg.fz, arg.water);
+  }, { fx, fz, gy, air: ids.AIR, water: ids.WATER });
+
+  // water creeps: wait until it has covered its full six-cell reach
+  await page.waitForFunction((arg: { x6: number; gy: number; fz: number; flow: number }) =>
+    (window as any).__lbw.game.world.get(arg.x6, arg.gy, arg.fz) === arg.flow,
+  { x6: fx + 8, gy, fz, flow: ids.WATER_FLOW }, { timeout: 20000 });
+
+  const cellAt = (x: number, y: number) => page.evaluate((c: { x: number; y: number; z: number }) => {
+    const w = (window as any).__lbw.game.world;
+    const { sz, sy } = (window as any).__lbw.dims;
+    return {
+      id: w.get(c.x, c.y, c.z),
+      lvl: w.waterLevel.get((c.x * sz + c.z) * sy + c.y) ?? -1,
+    };
+  }, { x, y, z: fz });
+
+  // the source stands eternal and full; the channel shallows one step per cell
+  expect((await cellAt(fx + 2, gy)).id).toBe(ids.WATER);
+  for (let k = 1; k <= 6; k++) {
+    const c = await cellAt(fx + 2 + k, gy);
+    expect(c.id, `cell +${k}`).toBe(ids.WATER_FLOW);
+    expect(c.lvl, `depth +${k}`).toBe(k);
+  }
+  // and the supply runs out: nothing wet past six cells
+  expect((await cellAt(fx + 9, gy)).id).toBe(ids.AIR);
+  expect((await cellAt(fx + 10, gy)).id).toBe(ids.AIR);
+
+  // falling water keeps its depth: cut a shaft and the plunge is as deep as the channel above it
+  await page.evaluate((arg: { x: number; gy: number; fz: number; air: number }) => {
+    (window as any).__lbw.game.world.set(arg.x, arg.gy - 1, arg.fz, arg.air);
+  }, { x: fx + 7, gy, fz, air: ids.AIR });
+  await page.waitForFunction((arg: { x: number; gy: number; fz: number; flow: number }) =>
+    (window as any).__lbw.game.world.get(arg.x, arg.gy - 1, arg.fz) === arg.flow,
+  { x: fx + 7, gy, fz, flow: ids.WATER_FLOW }, { timeout: 10000 });
+  expect((await cellAt(fx + 7, gy - 1)).lvl).toBe(5);
+
+  // travelling water (with its depths) rides in the save
+  const saved = await page.evaluate((arg: { x3: number; fz: number; gy: number }) => {
+    const save = (window as any).__lbw.game.world.toSave();
+    const { sz, sy } = (window as any).__lbw.dims;
+    return { version: save.version, at: String((arg.x3 * sz + arg.fz) * sy + arg.gy), levels: save.waterLevels ?? {} };
+  }, { x3: fx + 3, fz, gy });
+  expect(saved.version).toBe(4);
+  expect(saved.levels[saved.at]).toBe(1);
+
+  // break the chain at the source: levels climb, then the whole flood drains away
+  await page.evaluate((arg: { x: number; gy: number; fz: number; air: number }) => {
+    (window as any).__lbw.game.world.set(arg.x, arg.gy, arg.fz, arg.air);
+  }, { x: fx + 2, gy, fz, air: ids.AIR });
+  await page.waitForFunction((arg: { fx: number; fz: number; gy: number; sx: number; air: number }) => {
+    const w = (window as any).__lbw.game.world;
+    for (let x = arg.fx + 3; x <= arg.fx + 10; x++) if (w.get(x, arg.gy, arg.fz) !== arg.air) return false;
+    return w.get(arg.sx, arg.gy - 1, arg.fz) === arg.air;
+  }, { fx, fz, gy, sx: fx + 7, air: ids.AIR }, { timeout: 30000 });
+
+  // water is in the block palette, so kids can make their own ponds
+  await tap(page, 'palette');
+  await page.waitForSelector('.palette-grid');
+  const waterIcon = await page.evaluate(() =>
+    [...document.querySelectorAll('.palette-cell')].some((c) => c.textContent?.includes('\u{1F4A7}')));
+  expect(waterIcon).toBe(true);
+  await tap(page, 'back'); // close the palette again
+  await page.waitForSelector('.palette-grid', { state: 'detached' });
+
+  // tidy up so later tests still find clean grass near spawn (and the save lands
+  // the refill before the next page boots)
+  await page.evaluate((arg: { fx: number; fz: number; gy: number; grass: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let x = arg.fx + 2; x <= arg.fx + 10; x++) S.set(x, arg.gy, arg.fz, arg.grass);
+    S.set(arg.fx + 7, arg.gy - 1, arg.fz, arg.grass);
+  }, { fx, fz, gy, grass: ids.GRASS });
+  await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); });
+});
 /** opens Grown-Up Settings, switches Freeze, and closes the menu again */
 async function setFreeze(page: Page, on: boolean): Promise<void> {
   await tap(page, 'menu');
@@ -1783,7 +1876,7 @@ test('doors: two blocks high and half a block deep — build, pat open, walk thr
       swingTop: save.doorFacing?.[at(1)],
     };
   }, door2);
-  expect(saved.version).toBe(3);
+  expect(saved.version).toBe(4);
   expect(saved.bottom).toBe(ids.DOOR);
   expect(saved.top).toBe(ids.DOOR_TOP);
   expect(saved.swingBottom === 0 || saved.swingBottom === 1).toBe(true);
@@ -1988,7 +2081,7 @@ test('stairs: a real step — it points away from the builder, walking one climb
       })),
     };
   }, { run: [0, 1, 2, 3].map((k) => ({ x: step.x + k, y: step.y + k, z: step.z })) });
-  expect(after.version).toBe(3);
+  expect(after.version).toBe(4);
   for (const s of after.run) {
     expect(s.block).toBe(ids.STAIRS);
     expect([0, STAIR_TURN[0]]).toContain(s.facing);

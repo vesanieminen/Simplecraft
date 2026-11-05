@@ -44,6 +44,7 @@ export const DOOR_TOP_OPEN: BlockId = 34; // top half of an opened door
 export const STAIRS: BlockId = 35; // a real step: half the cell low, half of it high
 export const CHEST: BlockId = 36; // a treasure chest, lid shut
 export const CHEST_OPEN: BlockId = 37; // the same chest with the lid up: treasure already taken
+export const WATER_FLOW: BlockId = 38; // travelling water: spreads, shallows and dries up
 
 /**
  * Cells of the procedural *block* texture atlas (see render/textures.ts).
@@ -190,6 +191,10 @@ const DEFS: BlockDef[] = [
     id: WATER, name: 'Water', icon: '💧', color: rgb(79, 179, 232),
     sideAtlasCell: ATLAS_WATER, solid: false, opaque: false, translucent: true,
   },
+  {
+    id: WATER_FLOW, name: 'Flowing Water', icon: '💧', color: rgb(96, 190, 238),
+    sideAtlasCell: ATLAS_WATER, solid: false, opaque: false, translucent: true,
+  },
   { id: FLOWER_RED, name: 'Flower', icon: '🌷', color: rgb(255, 122, 108), solid: false, opaque: false, cross: true, atlasCell: 0 },
   { id: FLOWER_YELLOW, name: 'Sunflower', icon: '🌼', color: rgb(255, 214, 94), solid: false, opaque: false, cross: true, atlasCell: 1 },
   { id: TALLGRASS, name: 'Grass Tuft', icon: '🌿', color: rgb(110, 190, 90), solid: false, opaque: false, cross: true, atlasCell: 2 },
@@ -306,6 +311,21 @@ export function isOpaqueBlock(id: BlockId): boolean {
 export function isFullCellBlock(id: BlockId): boolean {
   return isOpaqueBlock(id) && solidHeightOf(id) >= 1;
 }
+/** WATER (a source, eternal) or WATER_FLOW (travelling): both are wet */
+export function isWaterId(id: BlockId): boolean {
+  return id === WATER || id === WATER_FLOW;
+}
+
+/**
+ * Surface height of a water cell: sources stand full, travelling water
+ * shallows with its flow depth (see core/water.ts) — level 1 tops out at
+ * 0.9, level 6 is a 0.3 puddle.
+ */
+export function waterTop(id: BlockId, flowLevel: number): number {
+  if (id !== WATER_FLOW) return 1;
+  return 1 - Math.min(Math.max(flowLevel, 1), 7) * 0.1;
+}
+
 export function isCrossBlock(id: BlockId): boolean {
   return id !== AIR && !!blockDef(id).cross;
 }
@@ -375,6 +395,7 @@ export function rotateStairFacing(facing: number): StairFacing {
 /** Blocks offered in the child-friendly creative palette (in order). */
 export const PALETTE: BlockId[] = [
   GRASS, DIRT, STONE, SAND, WOOD, PLANKS, STAIRS, SLAB, DOOR, CHEST, BRICKS, GLASS, LEAVES,
+  WATER,
   SAPLING, FLOWER_RED, FLOWER_YELLOW, TALLGRASS,
   GLOW, BOUNCY, SPARKLE, MUSIC, DYNAMITE,
   C_RED, C_ORANGE, C_YELLOW, C_GREEN, C_BLUE, C_PURPLE, C_PINK, C_WHITE,

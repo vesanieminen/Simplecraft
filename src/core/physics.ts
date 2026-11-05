@@ -4,7 +4,7 @@
  */
 
 import {
-  AIR, isDoorClosedBlock, isStairsBlock, solidHeightOf, StairFacing, stairBoxes, VoxelBox, WATER,
+  AIR, isDoorClosedBlock, isStairsBlock, isWaterId, solidHeightOf, StairFacing, stairBoxes, VoxelBox,
 } from './blocks';
 import { idx as worldIdx, World } from './world';
 
@@ -254,9 +254,9 @@ export function bodyBlock(world: World, box: Aabb): number {
 }
 
 export function inWater(world: World, box: Aabb): boolean {
-  return bodyBlock(world, box) === WATER || world.get(
+  return isWaterId(bodyBlock(world, box)) || isWaterId(world.get(
     Math.floor(box.x + box.w / 2), Math.floor(box.y + 0.2), Math.floor(box.z + box.d / 2),
-  ) === WATER;
+  ));
 }
 
 /**
@@ -265,7 +265,7 @@ export function inWater(world: World, box: Aabb): boolean {
  * submerged kids cannot (they have to kick up to the surface first).
  */
 export function headClearOfWater(world: World, box: Aabb): boolean {
-  return world.get(
+  return !isWaterId(world.get(
     Math.floor(box.x + box.w / 2), Math.floor(box.y + PLAYER_H - 0.1), Math.floor(box.z + box.d / 2),
-  ) !== WATER;
+  ));
 }

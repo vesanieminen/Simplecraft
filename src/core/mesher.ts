@@ -6,9 +6,9 @@
 
 import * as THREE from 'three';
 import {
-  ATLAS_CELL_COUNT, ATLAS_DOOR, ATLAS_PLANKS, blockDef, isCrossBlock, isDoorBlock,
-  isDoorClosedBlock, isFullCellBlock, isOpaqueBlock, isStairsBlock, isTranslucentBlock,
-  PLANT_ATLAS_CELLS, StairFacing, stairBoxes, VoxelBox,
+  ATLAS_CELL_COUNT, ATLAS_DOOR, ATLAS_PLANKS, ATLAS_WATER, blockDef, isCrossBlock, isDoorBlock,
+  isDoorClosedBlock, isFullCellBlock, isOpaqueBlock, isStairsBlock, isTranslucentBlock, isWaterId,
+  PLANT_ATLAS_CELLS, StairFacing, stairBoxes, VoxelBox, WATER, WATER_FLOW, waterTop,
 } from './blocks';
 import { CHUNK, idx as worldIdx, WORLD_SY, World } from './world';
 
@@ -191,6 +191,27 @@ export function buildChunkGeometry(world: World, cx: number, cz: number): ChunkG
             { cullFlush: true });
           continue;
         }
+        if (id === WATER_FLOW) {
+          // travelling water: a shallow slab of the water art, its height telling
+          // kids how deep the supply is. Faces buried in other water or solids
+          // are dropped, so a pool reads as one body, not seven boxes.
+          const lvl = world.waterLevel.get(worldIdx(x, y, z)) ?? 6;
+          const h = waterTop(WATER_FLOW, lvl);
+          const skip = FACES.map((f) => {
+            const n = world.get(x + f.dir[0], y + f.dir[1], z + f.dir[2]);
+            if (isFullCellBlock(n)) return true;
+            if (n === WATER) return true; // a source covers this whole side
+            if (n === WATER_FLOW) {
+              if (f.dir[1] !== 0) return true; // top/bottom under other water
+              const nlvl = world.waterLevel.get(worldIdx(x + f.dir[0], y + f.dir[1], z + f.dir[2])) ?? 6;
+              return waterTop(WATER_FLOW, nlvl) >= h;
+            }
+            return false;
+          });
+          addTexturedSubBox(texT, world, [x, y, z], [x, y, z, x + 1, y + h, z + 1],
+            ATLAS_WATER, { skip, capCell: ATLAS_WATER });
+          continue;
+        }
 
         const sideCell = def.sideAtlasCell;
         const isTextured = sideCell !== undefined;
@@ -217,6 +238,7 @@ export function buildChunkGeometry(world: World, cx: number, cz: number): ChunkG
           const n = world.get(nx, ny, nz);
           if (isFullCellBlock(n)) continue; // that neighbour already covers this face
           if (n === id) continue; // water-water, glass-glass: hide interior
+          if (isWaterId(id) && isWaterId(n)) continue; // source next to flow: keep ONE face
 
           // base tint for this face
           let base = def.color;
