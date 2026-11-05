@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { blockDef } from '../core/blocks';
 import {
   canStandAt, CROUCH_H, inWater, moveAabb, PLAYER_H, playerAabb,
-  grounded as groundedTest, headClearOfWater, MoveResult,
+  grounded as groundedTest, headClearOfWater, submergedFraction, MoveResult,
 } from '../core/physics';
 import { World, WORLD_SX, WORLD_SZ, WORLD_SY } from '../core/world';
 import { AvatarParts, animateAvatar, createAvatar, ModelId, nextModel } from './avatar';
@@ -25,7 +25,9 @@ export const BOING_MUL = 1.4;
 
 const JUMP_BUFFER = 0.16; // a jump pressed just before landing still counts
 const SWIM_UP_V = 3.2; // hold jump to kick up through the water
-const SWIM_SINK_V = -2.2; // sink gently when nobody holds jump
+const SWIM_SINK_V = -1.8; // fastest anyone sinks when nobody holds jump
+const SWIM_TRIM = 0.62; // this fraction of the body under water is neutral buoyancy
+const STROKE_SECONDS = 0.85; // one breaststroke pull per…
 export const WATER_JUMP_V = 8.4; // push-off at the surface: clears a one-block shore
 const WATER_JUMP_TIME = 0.45; // buoyancy stays off while that leap carries them out
 
@@ -44,6 +46,8 @@ export interface StepEvents {
   steppedOnMusic: null | { note: number; x: number; y: number; z: number };
   steppedOnSparkle: boolean;
   splashed: boolean;
+  /** one swim stroke just happened (whoosh sound please) */
+  stroked: boolean;
 }
 
 export class PlayerEntity {
@@ -54,6 +58,8 @@ export class PlayerEntity {
   flying = false;
   grounded = false;
   inWaterNow = false;
+  /** true while paddling in water (drives the horizontal swim pose) */
+  swimmingNow = false;
   /** Minecraft-style sneak: squat hitbox, slow creep, ledge protection */
   crouching = false;
   walkPhase = 0;
@@ -71,6 +77,8 @@ export class PlayerEntity {
   coyote = 0;
   /** > 0 while a push-off jump out of the water carries the player up */
   waterJump = 0;
+  /** countdown between swim strokes (sound + reach) */
+  private strokeT = 0;
   private wasInAir = false;
   private wasInWater = false;
 
@@ -144,6 +152,7 @@ export class PlayerEntity {
     this.waterJump = Math.max(0, this.waterJump - dt);
     // a push-off leap is a real jump: buoyancy is off while it lasts
     const swimming = this.inWaterNow && this.waterJump <= 0;
+    this.swimmingNow = swimming;
 
     // horizontal target velocity in yaw space.
     // forward F = (sin yaw, 0, cos yaw) matches the avatar facing (+Z at yaw 0).
@@ -152,7 +161,7 @@ export class PlayerEntity {
     const fwd = -input.moveY; // stick up (-1) means forward
     const fx = sin * fwd - cos * input.moveX;
     const fz = cos * fwd + sin * input.moveX;
-    const speed = (this.flying ? FLY_SPEED : swimming ? WALK_SPEED * 0.55
+    const speed = (this.flying ? FLY_SPEED : swimming ? WALK_SPEED * 0.7
       : this.crouching ? WALK_SPEED * CROUCH_MUL : WALK_SPEED)
       * (this.zoomTime > 0 ? ZOOM_MUL : 1);
     const tvx = fx * speed, tvz = fz * speed;
@@ -168,9 +177,17 @@ export class PlayerEntity {
       if (input.flyDown) vy -= FLY_VERT;
       this.vel.y += (vy - this.vel.y) * (1 - Math.exp(-12 * dt));
     } else if (swimming) {
-      // gentle buoyancy: hold jump to swim up, sink slowly otherwise
-      const targetVy = input.jump ? SWIM_UP_V : SWIM_SINK_V;
+      // gentle buoyancy: hold jump to kick up; deep under floats you back to
+      // the surface, shallow water lets you wade down — like the big game
+      const targetVy = input.jump ? SWIM_UP_V
+        : Math.max(SWIM_SINK_V, Math.min(SWIM_UP_V, (submergedFraction(world, this.aabb) - SWIM_TRIM) * 2.2));
       this.vel.y += (targetVy - this.vel.y) * (1 - Math.exp(-6 * dt));
+      // strokes: a pull every strokeT, with a muffled whoosh
+      this.strokeT -= dt;
+      if (this.strokeT <= 0) {
+        this.strokeT = STROKE_SECONDS;
+        events.stroked = true;
+      }
       // climbing out of a lake: buoyancy alone can never lift a whole block, so
       // once the head is clear of the surface the jump button becomes a real
       // jump that carries them up onto the shore.
@@ -260,8 +277,9 @@ export class PlayerEntity {
     this.wasInWater = this.inWaterNow;
 
     if (this.moving && this.grounded) this.walkPhase += dt * 9.5;
+    else if (swimming) this.walkPhase += dt * 8; // stroke tempo
     else if (!this.grounded) this.walkPhase += dt * 2;
-    animateAvatar(this.avatar, this.walkPhase, this.moving && this.grounded, !this.grounded, dt, this.crouching);
+    animateAvatar(this.avatar, this.walkPhase, this.moving && this.grounded, !this.grounded && !swimming, dt, this.crouching, swimming);
     this.syncAvatar(dt);
   }
 
@@ -269,8 +287,9 @@ export class PlayerEntity {
     const g = this.avatar.group;
     g.position.copy(this.pos);
     g.rotation.y = this.yaw;
-    // face forward: model faces +Z when yaw 0? our face plane is at +Z; yaw applied directly.
-    void dt;
+    // face down in the water while swimming, upright again out of it
+    const lean = this.swimmingNow ? 1.2 : 0;
+    g.rotation.x += (lean - g.rotation.x) * (1 - Math.exp(-9 * dt));
   }
 
   dispose(): void {

@@ -219,6 +219,10 @@ export function createAvatar(colorHex: string, model: ModelId = 'kid'): AvatarPa
   const light = color.clone().lerp(new THREE.Color(0xffffff), 0.35);
 
   const group = new THREE.Group();
+  // yaw-then-pitch: the swim lean must rotate WITH the facing. With three's
+  // default 'XYZ' order, rotation.x pitches about the WORLD x-axis, so the
+  // face-down lean pointed one fixed direction no matter where the kid looked.
+  group.rotation.order = 'YXZ';
   const body = new THREE.Group();
   group.add(body);
 
@@ -397,11 +401,18 @@ export function createAvatar(colorHex: string, model: ModelId = 'kid'): AvatarPa
 export function animateAvatar(
   parts: AvatarParts, walkPhase: number, moving: boolean, airborne: boolean, dt: number,
   crouching = false,
+  swimming = false,
 ): void {
   const target = moving ? Math.sin(walkPhase) : Math.sin(walkPhase) * 0.15;
   let armA = airborne ? 1.1 : target * 0.85;
   let legA = airborne ? -0.5 : target * 0.9;
-  if (crouching) {
+  let sym = false; // breaststroke moves both arms together, not in stride
+  if (swimming) {
+    const s = Math.sin(walkPhase * 1.3);
+    armA = -0.9 - s * 0.7; // reach forward, pull back under
+    legA = 0.15 + Math.sin(walkPhase * 2.6) * 0.55; // flutter kick
+    sym = true;
+  } else if (crouching) {
     // sneak pose: knees bent under them, hands out front, the whole body
     // squatted down (the group scale below)
     armA = -0.5 + (moving ? Math.sin(walkPhase) * 0.15 : 0);
@@ -409,17 +420,17 @@ export function animateAvatar(
   }
   const lerpK = 1 - Math.exp(-14 * dt);
   parts.leftArm.rotation.x += (armA - parts.leftArm.rotation.x) * lerpK;
-  parts.rightArm.rotation.x += (-armA - parts.rightArm.rotation.x) * lerpK;
+  parts.rightArm.rotation.x += ((sym ? armA : -armA) - parts.rightArm.rotation.x) * lerpK;
   parts.leftLeg.rotation.x += (legA - parts.leftLeg.rotation.x) * lerpK;
-  parts.rightLeg.rotation.x += (-legA - parts.rightLeg.rotation.x) * lerpK;
+  parts.rightLeg.rotation.x += ((sym ? legA : -legA) - parts.rightLeg.rotation.x) * lerpK;
   const squat = crouching && !airborne ? 0.62 : 1;
   parts.group.scale.y += (squat - parts.group.scale.y) * lerpK;
   if (airborne) {
     parts.leftArm.rotation.z = -0.5;
     parts.rightArm.rotation.z = 0.5;
   } else {
-    parts.leftArm.rotation.z = crouching ? 0.18 : 0;
-    parts.rightArm.rotation.z = crouching ? -0.18 : 0;
+    parts.leftArm.rotation.z = swimming ? 0.35 : crouching ? 0.18 : 0; // elbows out while paddling
+    parts.rightArm.rotation.z = swimming ? -0.35 : crouching ? -0.18 : 0;
   }
   if (parts.tail) parts.tail.rotation.y = Math.sin(walkPhase * 0.55 + 1.3) * 0.3; // costume tails always wag a little
 }
