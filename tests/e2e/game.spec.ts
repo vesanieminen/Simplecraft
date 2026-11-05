@@ -1459,6 +1459,7 @@ test('a stick you left lying around is still there after a reload, fuse and all'
   await joinWithPad(page);
   await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 10000 });
   const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  await clearRunway(page); // CI's shared save can litter the aiming row
   const cell = await plantStick(page, 60);
 
   const want = await page.evaluate((c: Cell) => {
