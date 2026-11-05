@@ -132,11 +132,19 @@ event. Renaming a storage key orphans the family's existing saves.
   change (buttons, blasts, tests, the sim itself) and `SandGravity.notify`
   tracks the sand at/above that cell, so digging under a cliff cascades:
   each cell's own `set` re-notifies the one above. One cell per step
-  (~8/s), water sinks through (displaced water rides up), cross plants are
-  squashed (`crushed` hook forgets the sapling), and it never occupies a
-  cell a player overlaps — it just rests over their head with `sandThud`.
-  Terrain writes cells directly (no hook), so natural sand never falls
-  until something changes under it — same as floating sand in Minecraft.
+  (~8/s, `STEP_SECONDS`), water sinks through (displaced water rides up),
+  cross plants are squashed (`crushed` hook forgets the sapling), and it
+  never occupies a cell a player overlaps — it just rests over their head
+  with `sandThud`. Terrain writes cells directly (no hook), so natural sand
+  never falls until something changes under it — same as floating sand in
+  Minecraft. **Falls are animated** (`render/sandFalls.ts`, `Game.sandFalls`):
+  each `moved` hook glide spawns/continues one atlas-textured cube per block,
+  eased one cell per `STEP_SECONDS` in game time; the voxel stays authoritative
+  (physics/saves) while the mesher skips the in-flight cell via
+  `chunks.skipSand` (= `sandFalls.hidden`) so a block never draws twice — the
+  cube alone is the block mid-fall, and finishing the glide dirties the chunk
+  (`world.touchAt`) so the voxel takes over seamlessly. e2e: an in-page sampler
+  asserts `sandFalls.count` rises during a fall and returns to 0 after.
 - Treasure chests: the loot roll is `core/treasure.ts` (weights + messages),
   the effects live in `Game.grantTreasure` (no inventory, so prizes happen to
   the world: star counters, `starField.spawnAt` stars, `playerEntity.zoomTime`

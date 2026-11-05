@@ -48,6 +48,9 @@ export class ChunkMeshManager {
     private world: World,
   ) {}
 
+  /** flat indices of sand cells the mesher must leave out (SandFalls draws them) */
+  skipSand?: Set<number>;
+
   /** rebuild up to `budget` dirty chunks; call every frame */
   update(budget = 4): boolean {
     for (const k of this.world.dirtyChunks) this.pending.add(k);
@@ -76,7 +79,7 @@ export class ChunkMeshManager {
   private rebuild(key: number): void {
     const cx = Math.floor(key / CHUNKS_X);
     const cz = key % CHUNKS_X;
-    const geo = buildChunkGeometry(this.world, cx, cz);
+    const geo = buildChunkGeometry(this.world, cx, cz, this.skipSand);
     const slot = (this.meshes[key] ??= {});
 
     this.swap(slot, 'opaque', geo.opaque, this.materials.opaque);

@@ -29,6 +29,7 @@ import { LocalPlayer } from './players/localPlayer';
 import { PlayerEntity } from './players/playerEntity';
 import { AVATAR_COLORS, NICKNAMES } from './players/avatar';
 import { ChunkMeshManager } from './render/chunkMeshes';
+import { SandFalls } from './render/sandFalls';
 import { createSky, SKY_CLEAR, SKY_FAR, SkyEnv } from './render/sky';
 import { SplitLayout, ViewportManager } from './render/viewportManager';
 import { Hud } from './ui/hud';
@@ -101,6 +102,8 @@ export class Game {
   dynamite!: DynamiteManager;
   /** sand obeys gravity: unsupported sand tumbles straight down */
   sand!: SandGravity;
+  /** render-only cubes that glide the tumbling sand smoothly down */
+  sandFalls!: SandFalls;
   /**
    * Player-planted saplings: flat world index -> game time when planted.
    * After `saplingGrowSeconds` of game time (public so tests can hurry it)
@@ -176,7 +179,16 @@ export class Game {
         this.saplings.delete(worldIdx(x, y, z));
         this.particles.burst(x + 0.5, y + 0.5, z + 0.5, 0x9fd06a, 5, 0.6);
       },
+      moved: (x, yFrom, yTo, z) => this.sandFalls.glide(x, yFrom, yTo, z),
     });
+    // the voxel moves instantly (physics/saves stay true); SandFalls draws the
+    // same block gliding between the cells so the fall reads as a fall. The
+    // mesher skips a cell while its cube is in flight (chunks.skipSand), and
+    // SandFalls touches the chunk back when the cube reaches the ground.
+    this.sandFalls = new SandFalls(
+      this.scene, this.chunks.materials.textured, (x, z) => this.world.touchAt(x, z),
+    );
+    this.chunks.skipSand = this.sandFalls.hidden;
     this.world.onCellChanged = (x, y, z) => this.sand.notify(x, y, z);
 
     // ---- input ----
@@ -1226,6 +1238,7 @@ export class Game {
     this.saplings.clear();
     this.dynamite.clear(); // no half-burnt sticks from the old world, please
     this.sand.reset();
+    this.sandFalls.clear();
     // living things and lit fuses that came with a save wake up, same as at boot
     for (const [i, b] of this.world.mods) {
       if (blockDef(b).sparkle) this.sparkleBlocks.add(i);
@@ -1311,6 +1324,7 @@ export class Game {
       this.starField.update(this.time);
       this.dynamite.update(dt);
       this.sand.update(dt);
+      this.sandFalls.update(dt);
       this.growSaplings();
 
       // ambient sparkles from placed sparkle blocks
