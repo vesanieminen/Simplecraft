@@ -316,16 +316,6 @@ export function isWaterId(id: BlockId): boolean {
   return id === WATER || id === WATER_FLOW;
 }
 
-/**
- * Surface height of a water cell: sources stand full, travelling water
- * shallows with its flow depth (see core/water.ts) — level 1 tops out at
- * 0.9, level 6 is a 0.3 puddle.
- */
-export function waterTop(id: BlockId, flowLevel: number): number {
-  if (id !== WATER_FLOW) return 1;
-  return 1 - Math.min(Math.max(flowLevel, 1), 7) * 0.1;
-}
-
 export function isCrossBlock(id: BlockId): boolean {
   return id !== AIR && !!blockDef(id).cross;
 }

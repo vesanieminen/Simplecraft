@@ -70,9 +70,11 @@ await page.evaluate(() => {
     }
   }
 
-  // two features on one lawn: a flush pond whose stepped surface shows the
-  // reach limit, and a stone cliff with a source on its rim — the water
-  // cascades down the cliff face in shallowing steps into a splash pool
+  // two features on one lawn: a flush pond whose water reaches exactly six
+  // cells from its sources, and a stone cliff with a source on its rim — the
+  // water spills over the edge and runs down the cliff face into a splash
+  // pool. Everything renders as full water blocks (the flow depths are sim
+  // state, not draw height), so the whole thing reads as one body of water.
   for (let x = mid - 8; x <= mid - 2; x++) {
     for (let z = mid - 3; z <= mid + 2; z++) S.set(x, gy, z, AIR); // pond (floor: ground)
   }
@@ -81,11 +83,10 @@ await page.evaluate(() => {
 
   for (let x = mid + 3; x <= mid + 6; x++) {
     for (let z = mid - 3; z <= mid + 2; z++) {
-      for (let y = gy + 1; y <= gy + 3; y++) S.set(x, y, z, 3); // 3-tall cliff wall
+      for (let y = gy + 1; y <= gy + 7; y++) S.set(x, y, z, 3); // 7-tall cliff tower
     }
   }
-  S.set(mid + 6, gy + 4, mid - 1, WATER); // sources on the rim's east edge
-  S.set(mid + 6, gy + 4, mid + 1, WATER);
+  S.set(mid + 6, gy + 8, mid, WATER); // source on the rim's east edge
 
   // third-person camera will be parked by the shots below
   const p = game.players[0];
@@ -126,14 +127,15 @@ await page.evaluate((m: number) => {
 await page.waitForTimeout(1200);
 await page.screenshot({ path: `${outDir}/water-channel.jpg`, type: 'jpeg', quality: 92 });
 
-// ---- shot 2: the waterfall, full depth all the way down ----
+// ---- shot 2: the waterfall — tall stone tower, full-height cascade ----
+// far south-east so the bare stone faces and the water shelf read separately
 await page.evaluate((m: number) => {
   const game = (window as any).__lbw.game;
   const gy = game.world.surfaceY(m, m);
   const p = game.players[0];
-  p.entity.pos.set(m + 12.5, gy + 1.02, m + 3);
-  p.entity.yaw = Math.atan2(-6.5, -3.5); // look at the cliff face and its cascade
-  p.entity.pitch = -0.24;
+  p.entity.pos.set(m + 10, gy + 10, m + 16);
+  p.entity.yaw = Math.atan2((m + 5) - (m + 10), m - (m + 16)); // face the tower
+  p.entity.pitch = -0.4;
   p.entity.vel.set(0, 0, 0);
 }, Math.floor(128 / 2));
 await page.waitForTimeout(1200);

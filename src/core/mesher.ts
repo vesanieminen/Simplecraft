@@ -6,9 +6,9 @@
 
 import * as THREE from 'three';
 import {
-  ATLAS_CELL_COUNT, ATLAS_DOOR, ATLAS_PLANKS, ATLAS_WATER, blockDef, isCrossBlock, isDoorBlock,
+  ATLAS_CELL_COUNT, ATLAS_DOOR, ATLAS_PLANKS, blockDef, isCrossBlock, isDoorBlock,
   isDoorClosedBlock, isFullCellBlock, isOpaqueBlock, isStairsBlock, isTranslucentBlock, isWaterId,
-  PLANT_ATLAS_CELLS, SAND, StairFacing, stairBoxes, VoxelBox, WATER, WATER_FLOW, waterTop,
+  PLANT_ATLAS_CELLS, SAND, StairFacing, stairBoxes, VoxelBox,
 } from './blocks';
 import { CHUNK, idx as worldIdx, WORLD_SY, World } from './world';
 
@@ -194,27 +194,6 @@ export function buildChunkGeometry(
           const box = doorPanelBox(world, x, y, z)!;
           addTexturedSubBox(tex, world, [x, y, z], box, def.sideAtlasCell ?? ATLAS_DOOR,
             { cullFlush: true });
-          continue;
-        }
-        if (id === WATER_FLOW) {
-          // travelling water: a shallow slab of the water art, its height telling
-          // kids how deep the supply is. Faces buried in other water or solids
-          // are dropped, so a pool reads as one body, not seven boxes.
-          const lvl = world.waterLevel.get(worldIdx(x, y, z)) ?? 6;
-          const h = waterTop(WATER_FLOW, lvl);
-          const skip = FACES.map((f) => {
-            const n = world.get(x + f.dir[0], y + f.dir[1], z + f.dir[2]);
-            if (isFullCellBlock(n)) return true;
-            if (n === WATER) return true; // a source covers this whole side
-            if (n === WATER_FLOW) {
-              if (f.dir[1] !== 0) return true; // top/bottom under other water
-              const nlvl = world.waterLevel.get(worldIdx(x + f.dir[0], y + f.dir[1], z + f.dir[2])) ?? 6;
-              return waterTop(WATER_FLOW, nlvl) >= h;
-            }
-            return false;
-          });
-          addTexturedSubBox(texT, world, [x, y, z], [x, y, z, x + 1, y + h, z + 1],
-            ATLAS_WATER, { skip, capCell: ATLAS_WATER });
           continue;
         }
 

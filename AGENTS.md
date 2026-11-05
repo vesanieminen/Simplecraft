@@ -192,13 +192,14 @@ event. Renaming a storage key orphans the family's existing saves.
   `notify`s its neighbours when its own level changes, incl. shallowing) until
   they fall past the cap and dry, cell by cell. `world.set` deletes the level
   entry; improving an existing flow cell's depth needs `world.touchAt` (same id,
-  so `set` early-returns). The mesher draws flow cells as shallow
-  `addTexturedSubBox`es (`waterTop(id, level)` in blocks.ts = the drawn height)
-  with water↔water face culling so a pool reads as one body; sources stay
-  full-cell translucent. Anything wet is `blocks.isWaterId(id)` — physics, sand
-  (displaced water rides up), blasts (skip both ids), animals/collectibles all
-  use it, never a bare `=== WATER`. Terrain writes cells directly (no hook), so
-  a fresh sea starts still. **Tests:** terrain ponds and the sea are eternal
+  so `set` early-returns). **All water renders full-cell** — sources and flow
+  cells are the same translucent textured cube; the depth level is sim-only
+  (reach, drying), never a draw height, so floods read as solid water bodies
+  instead of floating ribbons. The general face pass culls water↔water faces
+  (`isWaterId(id) && isWaterId(n)`) so a pool reads as one body. Anything wet
+  is `blocks.isWaterId(id)` — physics, sand (displaced water rides up), blasts
+  (skip both ids), animals/collectibles all use it, never a bare `=== WATER`.
+  Terrain writes cells directly (no hook), so a fresh sea starts still. **Tests:** terrain ponds and the sea are eternal
   *flowing* sources on this branch — any e2e course near spawn must ring its
   site with a full-height stone caisson and scrub every wet cell inside, since
   falling water keeps its depth and one wet cell left above a wall re-rains
