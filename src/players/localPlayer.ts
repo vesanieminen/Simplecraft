@@ -118,7 +118,9 @@ export class LocalPlayer {
       : {
           moveX: frame.move.x,
           moveY: frame.move.y,
-          jump: frame.held.has('jump') || frame.held.has('up'),
+          // d-pad up doubles as jump — but NOT on a keyboard, where the arrow
+          // keys are the look controls (ArrowUp tilts the view, nothing else)
+          jump: frame.held.has('jump') || (frame.kind !== 'keyboard' && frame.held.has('up')),
           flyUp: frame.held.has('jump'),
           flyDown: frame.held.has('interact') && this.entity.flying,
           dt,

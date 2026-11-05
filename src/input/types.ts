@@ -45,10 +45,12 @@ export interface FrameControls {
   released: ReadonlySet<Action>;
   /** true if any button was pressed this frame (for "press any button") */
   anyPressed: boolean;
+  /** which kind of device produced this frame (arrow-key look vs d-pad jump) */
+  kind: InputSource['kind'];
 }
 
 export function emptyFrame(): FrameControls {
-  return { move: { x: 0, y: 0 }, look: { x: 0, y: 0 }, held: new Set(), pressed: new Set(), released: new Set(), anyPressed: false };
+  return { move: { x: 0, y: 0 }, look: { x: 0, y: 0 }, held: new Set(), pressed: new Set(), released: new Set(), anyPressed: false, kind: 'virtual' };
 }
 
 export function deadzone(v: number, dz: number): number {

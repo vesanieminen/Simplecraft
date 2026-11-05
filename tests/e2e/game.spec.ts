@@ -2721,3 +2721,39 @@ test('releasing the mouse stops building — no endless auto-placing', async ({ 
   await page.waitForTimeout(1500);
   expect(await builtHere()).toBe(built);
 });
+
+test('keyboard arrows only tilt the view — ArrowUp never jumps', async ({ page }) => {
+  await boot(page);
+  await page.keyboard.press('Enter'); // keyboard-only join
+  await page.waitForFunction('window.__lbw.game.pendingJoins.size === 1');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction('window.__lbw.game.players.length === 1');
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+
+  const before = await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    return { y: e.pos.y, pitch: e.pitch };
+  });
+  await page.keyboard.down('ArrowUp');
+  await page.waitForTimeout(900); // headless runs at ~half speed: a few game seconds
+  const mid = await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    return { y: e.pos.y, pitch: e.pitch, grounded: e.grounded };
+  });
+  await page.keyboard.up('ArrowUp');
+
+  expect(mid.pitch).toBeGreaterThan(before.pitch + 0.3); // the view tilted up
+  expect(mid.grounded).toBe(true); // ...and the kid never left the ground
+  expect(mid.y).toBeCloseTo(before.y, 3);
+
+  // gamepads keep the double duty: d-pad up still jumps for pad kids
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[1].entity.grounded === true', null, { timeout: 15000 });
+  const startY = await page.evaluate(() => (window as any).__lbw.game.players[1].entity.pos.y);
+  await page.evaluate(() => (window as any).__testPad.press('up'));
+  await page.waitForFunction(
+    (y: number) => (window as any).__lbw.game.players[1].entity.pos.y > y + 0.5,
+    startY, { timeout: 5000 },
+  );
+  await page.evaluate(() => (window as any).__testPad.release('up'));
+});
