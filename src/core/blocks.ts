@@ -38,16 +38,19 @@ export const SCORCH: BlockId = 28; // what grass looks like after a blast
 export const SAPLING: BlockId = 29; // plant one, and in a minute it is a tree
 export const DOOR: BlockId = 30; // closed door, BOTTOM half: solid, painted like a door
 export const DOOR_OPEN: BlockId = 31; // the same door, opened with the pet/interact button
-export const STAIRS: BlockId = 32; // a half-height step you can walk up
+export const SLAB: BlockId = 32; // a flat half-height plate (this used to be called "stairs")
 export const DOOR_TOP: BlockId = 33; // closed door, TOP half (placed automatically above DOOR)
 export const DOOR_TOP_OPEN: BlockId = 34; // top half of an opened door
+export const STAIRS: BlockId = 35; // a real step: half the cell low, half of it high
+export const CHEST: BlockId = 36; // a treasure chest, lid shut
+export const CHEST_OPEN: BlockId = 37; // the same chest with the lid up: treasure already taken
 
 /**
  * Cells of the procedural *block* texture atlas (see render/textures.ts).
  * One 32x32 cell per block face style, laid out in a single row; the mesher
  * divides u by ATLAS_CELL_COUNT, so keep it in step with BLOCK_CELLS there.
  */
-export const ATLAS_CELL_COUNT = 23;
+export const ATLAS_CELL_COUNT = 28;
 export const ATLAS_DYNAMITE_SIDE = 0;
 export const ATLAS_DYNAMITE_CAP = 1;
 export const ATLAS_GRASS_TOP = 2;
@@ -74,6 +77,14 @@ export const ATLAS_WEAVE = 20;
 export const ATLAS_DOOR = 21;
 /** the door's upper half: an inset panel with a little window */
 export const ATLAS_DOOR_TOP = 22;
+/** a treasure chest: the side with the brass lock, and the lid seen from above */
+export const ATLAS_CHEST_SIDE = 23;
+export const ATLAS_CHEST_LID = 24;
+/** the chest's underside: dark boards and iron braces */
+export const ATLAS_CHEST_BOTTOM = 25;
+/** the same chest with its lid up: dark inside, gold spilling out */
+export const ATLAS_CHEST_OPEN_SIDE = 26;
+export const ATLAS_CHEST_OPEN_TOP = 27;
 
 /**
  * Cells of the *plant* atlas (cross blocks). Keep in step with PLANT_CELLS
@@ -122,7 +133,8 @@ export interface BlockDef {
   note?: number;
   /** cannot be removed by players */
   unbreakable?: boolean;
-  /** collidable height of this block, 0..1 (stairs are a half step); default 1 */
+  /** collidable height of this block in its cell, 0..1 (a slab is a half plate,
+   *  a chest a squat box); the mesher draws exactly the same box. Default 1 */
   solidHeight?: number;
   /** blows the surroundings away; sizzles and shakes before it goes */
   explosive?: boolean;
@@ -214,7 +226,7 @@ const DEFS: BlockDef[] = [
     // A door is TWO blocks high (this cell plus DOOR_TOP above it) and its
     // panel is only half a block thick: the mesher paints a 0.5-thick panel
     // centred in the cell, and a closed door collides as that same panel
-    // (see physics.solidBoxOf). Placing one fills both cells at once, and the
+    // (see physics.solidBoxesOf). Placing one fills both cells at once, and the
     // pet/interact button swings the pair (see tryPlace / toggleDoor in game.ts).
     id: DOOR, name: 'Door', icon: '🚪', color: rgb(178, 122, 70),
     sideAtlasCell: ATLAS_DOOR, solid: true, opaque: false,
@@ -234,10 +246,36 @@ const DEFS: BlockDef[] = [
     sideAtlasCell: ATLAS_DOOR_TOP, solid: false, opaque: false,
   },
   {
-    // a chunky wooden step: collides only in its lower half, and kids
-    // automatically hop up onto it (see physics + playerEntity step assist)
-    id: STAIRS, name: 'Stairs', icon: '🪜', color: rgb(200, 154, 95),
+    // a flat wooden plate half a block tall: kids walk straight up onto it from
+    // any side, and two stacked make a full block. (Until the stairs below were
+    // really built, this is what the palette called "Stairs".)
+    id: SLAB, name: 'Slab', icon: '⬛', color: rgb(200, 154, 95),
     sideAtlasCell: ATLAS_PLANKS, solid: true, opaque: false, solidHeight: 0.5,
+  },
+  {
+    // A real step: the half of the cell it points into is full height, the other
+    // half is a half-high tread, so walking one lifts you a step at a time and a
+    // row of them climbs a whole block. `world.stairFacing` says which way each
+    // one points (see stairBoxes below); the pet button spins one around.
+    id: STAIRS, name: 'Stairs', icon: '🪜', color: rgb(200, 154, 95),
+    sideAtlasCell: ATLAS_PLANKS, solid: true, opaque: false,
+  },
+  {
+    // A squat treasure chest (0.85 of a cell tall, painted with a brass lock).
+    // A dozen or so are hidden in every world; the pet button lifts the lid and
+    // out comes a random treasure (see core/treasure.ts). Opened ones stay open.
+    id: CHEST, name: 'Treasure Chest', icon: '📦', color: rgb(178, 122, 70),
+    sideAtlasCell: ATLAS_CHEST_SIDE, capAtlasCell: ATLAS_CHEST_LID,
+    bottomAtlasCell: ATLAS_CHEST_BOTTOM,
+    solid: true, opaque: true, solidHeight: 0.85,
+  },
+  {
+    // lid up, treasure gone: it keeps looking opened forever, so nobody
+    // shakes the same chest twice
+    id: CHEST_OPEN, name: 'Chest (open)', icon: '📦', color: rgb(151, 104, 60),
+    sideAtlasCell: ATLAS_CHEST_OPEN_SIDE, capAtlasCell: ATLAS_CHEST_OPEN_TOP,
+    bottomAtlasCell: ATLAS_CHEST_BOTTOM,
+    solid: true, opaque: true, solidHeight: 0.85,
   },
 ];
 
@@ -284,16 +322,49 @@ export function isDoorClosedBlock(id: BlockId): boolean {
 export function isDoorTopBlock(id: BlockId): boolean {
   return id === DOOR_TOP || id === DOOR_TOP_OPEN;
 }
-/** collidable height of a block id in its cell (0 for non-solids, 0.5 for stairs) */
+/** a stair cell: its shape (and which way it points) lives in world.stairFacing */
+export function isStairsBlock(id: BlockId): boolean {
+  return id === STAIRS;
+}
+/** either state of a treasure chest — the pet button lifts the lid */
+export function isChestBlock(id: BlockId): boolean {
+  return id === CHEST || id === CHEST_OPEN;
+}
+/** collidable height of a block id in its cell (0 for non-solids, 0.5 for a slab) */
 export function solidHeightOf(id: BlockId): number {
   if (id === AIR) return 0;
   const def = blockDef(id);
   return def.solid ? (def.solidHeight ?? 1) : 0;
 }
 
+/**
+ * Which half of a stair cell holds the TALL part: 0 = +x, 1 = -x, 2 = +z,
+ * 3 = -z. The low half — the tread you step onto — is always the opposite one,
+ * so walking toward the tall side climbs a step.
+ */
+export type StairFacing = 0 | 1 | 2 | 3;
+
+/** a box in world space: min corner then max corner */
+export type VoxelBox = [number, number, number, number, number, number];
+
+/** the two boxes a stair cell is made of: the tall half and the half-high tread */
+export function stairBoxes(x: number, y: number, z: number, facing: StairFacing): { tall: VoxelBox; low: VoxelBox } {
+  const f = (facing >= 0 && facing <= 3 ? facing : 0) as StairFacing;
+  if (f === 0) return { tall: [x + 0.5, y, z, x + 1, y + 1, z + 1], low: [x, y, z, x + 0.5, y + 0.5, z + 1] };
+  if (f === 1) return { tall: [x, y, z, x + 0.5, y + 1, z + 1], low: [x + 0.5, y, z, x + 1, y + 0.5, z + 1] };
+  if (f === 2) return { tall: [x, y, z + 0.5, x + 1, y + 1, z + 1], low: [x, y, z, x + 1, y + 0.5, z + 0.5] };
+  return { tall: [x, y, z, x + 1, y + 1, z + 0.5], low: [x, y, z + 0.5, x + 1, y + 0.5, z + 1] };
+}
+
+/** a quarter turn, the same way a kid spins a step with the pet button */
+export function rotateStairFacing(facing: number): StairFacing {
+  const turn = [2, 3, 1, 0]; // +x -> +z -> -x -> -z -> +x
+  return turn[facing >= 0 && facing <= 3 ? facing : 0] as StairFacing;
+}
+
 /** Blocks offered in the child-friendly creative palette (in order). */
 export const PALETTE: BlockId[] = [
-  GRASS, DIRT, STONE, SAND, WOOD, PLANKS, STAIRS, DOOR, BRICKS, GLASS, LEAVES,
+  GRASS, DIRT, STONE, SAND, WOOD, PLANKS, STAIRS, SLAB, DOOR, CHEST, BRICKS, GLASS, LEAVES,
   SAPLING, FLOWER_RED, FLOWER_YELLOW, TALLGRASS,
   GLOW, BOUNCY, SPARKLE, MUSIC, DYNAMITE,
   C_RED, C_ORANGE, C_YELLOW, C_GREEN, C_BLUE, C_PURPLE, C_PINK, C_WHITE,
@@ -301,6 +372,6 @@ export const PALETTE: BlockId[] = [
 
 /** Quick-cycling favorites for shoulder buttons. */
 export const FAVORITES: BlockId[] = [
-  GRASS, PLANKS, STAIRS, BRICKS, GLASS, DOOR, GLOW, BOUNCY, SPARKLE, MUSIC, DYNAMITE,
+  GRASS, PLANKS, STAIRS, SLAB, BRICKS, GLASS, DOOR, CHEST, GLOW, BOUNCY, SPARKLE, MUSIC, DYNAMITE,
   C_RED, C_BLUE, C_PINK, C_YELLOW,
 ];

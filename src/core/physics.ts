@@ -3,7 +3,9 @@
  * and overlap tests used to keep kids from being trapped in blocks.
  */
 
-import { isDoorClosedBlock, solidHeightOf, WATER } from './blocks';
+import {
+  AIR, isDoorClosedBlock, isStairsBlock, solidHeightOf, StairFacing, stairBoxes, VoxelBox, WATER,
+} from './blocks';
 import { idx as worldIdx, World } from './world';
 
 export interface Aabb {
@@ -29,23 +31,40 @@ export function boxesOverlap(a: Aabb, b: Aabb): boolean {
     && a.z < b.z + b.d && a.z + a.d > b.z;
 }
 
+/** an AABB from the mesher's box notation (min corner, max corner) */
+function boxOf([x0, y0, z0, x1, y1, z1]: VoxelBox): Aabb {
+  return { x: x0, y: y0, z: z0, w: x1 - x0, h: y1 - y0, d: z1 - z0 };
+}
+
 /**
- * The solid box inside a voxel cell — the physics twin of what the mesher
- * draws. Full blocks fill the cell; stairs fill its lower half; a CLOSED
- * door is the thin standing panel (half a block deep, centred in the cell,
- * oriented by world.doorFacing). Null for air, water, plants and open doors.
+ * The solid boxes inside a voxel cell — the physics twin of what the mesher
+ * draws. A full block is one box filling the cell; a slab and a treasure chest
+ * are squat boxes; a stair cell is TWO boxes (the tall half plus the half-high
+ * tread); a CLOSED door is the thin standing panel, half a block deep and
+ * oriented by world.doorFacing. Empty for air, water, plants and open doors.
  */
-export function solidBoxOf(world: World, x: number, y: number, z: number): Aabb | null {
+export function solidBoxesOf(world: World, x: number, y: number, z: number): Aabb[] {
   const id = world.get(x, y, z);
+  if (id === AIR) return [];
+  if (isStairsBlock(id)) {
+    const facing = (world.stairFacing.get(worldIdx(x, y, z)) ?? 0) as StairFacing;
+    const { tall, low } = stairBoxes(x, y, z, facing);
+    return [boxOf(tall), boxOf(low)];
+  }
   const h = solidHeightOf(id);
-  if (h <= 0) return null;
+  if (h <= 0) return [];
   if (isDoorClosedBlock(id)) {
     const facing = world.doorFacing.get(worldIdx(x, y, z)) ?? 0;
-    return facing === 0
+    return [facing === 0
       ? { x: x + 0.25, y, z, w: 0.5, h: 1, d: 1 }
-      : { x, y, z: z + 0.25, w: 1, h: 1, d: 0.5 };
+      : { x, y, z: z + 0.25, w: 1, h: 1, d: 0.5 }];
   }
-  return { x, y, z, w: 1, h, d: 1 };
+  return [{ x, y, z, w: 1, h, d: 1 }];
+}
+
+/** do two boxes overlap when you look down on them from above? */
+function planarOverlap(a: Aabb, b: Aabb): boolean {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.z < b.z + b.d && a.z + a.d > b.z;
 }
 
 function collides(world: World, a: Aabb): boolean {
@@ -55,9 +74,10 @@ function collides(world: World, a: Aabb): boolean {
   for (let x = x0; x <= x1; x++) {
     for (let y = y0; y <= y1; y++) {
       for (let z = z0; z <= z1; z++) {
-        // stairs, doors…: partial blocks only fill part of their cell
-        const b = solidBoxOf(world, x, y, z);
-        if (b && boxesOverlap(a, b)) return true;
+        // slabs, stairs, doors…: partial blocks only fill part of their cell
+        for (const b of solidBoxesOf(world, x, y, z)) {
+          if (boxesOverlap(a, b)) return true;
+        }
       }
     }
   }
@@ -66,7 +86,8 @@ function collides(world: World, a: Aabb): boolean {
 
 /**
  * Top of the highest solid part under the feet — lands must snap onto
- * it, which for a stairs block is half a cell, not a whole one.
+ * it, which for a slab is half a cell and for a stair cell whichever half
+ * the kid is standing over.
  */
 function supportTop(world: World, box: Aabb): number {
   const y0 = Math.floor(box.y + EPS);
@@ -75,33 +96,38 @@ function supportTop(world: World, box: Aabb): number {
   let best = -Infinity;
   for (let x = x0; x <= x1; x++) {
     for (let z = z0; z <= z1; z++) {
-      const b = solidBoxOf(world, x, y0, z);
-      if (b) best = Math.max(best, b.y + b.h);
+      for (const b of solidBoxesOf(world, x, y0, z)) {
+        if (!planarOverlap(box, b)) continue;
+        best = Math.max(best, b.y + b.h);
+      }
     }
   }
   return Number.isFinite(best) ? best : Math.floor(box.y) + 1;
 }
 
 /**
- * Top of the block the box is walking into (used for stair step-ups):
- * the row of cells just past the leading edge at foot level.
+ * Top of the low part of the block the box is walking into (used for step-ups):
+ * the row of cells just past the leading edge at foot level. Of everything there
+ * that is taller than their feet, the LOWEST top wins — the tread of a stair
+ * before its tall half, so one step at a time is always enough.
  */
 function stepLift(world: World, box: Aabb, axis: 'x' | 'z', dir: number): number | null {
   const y0 = Math.floor(box.y + EPS);
-  let best: number | null = null;
+  const cells: [number, number][] = [];
   if (axis === 'x') {
     const bx = dir > 0 ? Math.floor(box.x + box.w - 1e-6) : Math.floor(box.x + 1e-6);
-    const z0 = Math.floor(box.z), z1 = Math.floor(box.z + box.d - 1e-6);
-    for (let z = z0; z <= z1; z++) {
-      const b = solidBoxOf(world, bx, y0, z);
-      if (b) best = best === null ? b.y + b.h : Math.max(best, b.y + b.h);
-    }
+    for (let z = Math.floor(box.z); z <= Math.floor(box.z + box.d - 1e-6); z++) cells.push([bx, z]);
   } else {
     const bz = dir > 0 ? Math.floor(box.z + box.d - 1e-6) : Math.floor(box.z + 1e-6);
-    const x0 = Math.floor(box.x), x1 = Math.floor(box.x + box.w - 1e-6);
-    for (let x = x0; x <= x1; x++) {
-      const b = solidBoxOf(world, x, y0, bz);
-      if (b) best = best === null ? b.y + b.h : Math.max(best, b.y + b.h);
+    for (let x = Math.floor(box.x); x <= Math.floor(box.x + box.w - 1e-6); x++) cells.push([x, bz]);
+  }
+  let best: number | null = null;
+  for (const [cx, cz] of cells) {
+    for (const b of solidBoxesOf(world, cx, y0, cz)) {
+      if (!planarOverlap(box, b)) continue;
+      const top = b.y + b.h;
+      if (top <= box.y + EPS) continue; // below their feet: nothing to climb
+      if (best === null || top < best) best = top;
     }
   }
   return best;
@@ -121,10 +147,11 @@ function faceSnap(world: World, box: Aabb, axis: 'x' | 'z', dir: number): void {
   for (let x = x0; x <= x1; x++) {
     for (let y = y0; y <= y1; y++) {
       for (let z = z0; z <= z1; z++) {
-        const b = solidBoxOf(world, x, y, z);
-        if (!b || !boxesOverlap(box, b)) continue;
-        if (axis === 'x') best = dir > 0 ? Math.min(best, b.x - box.w - EPS) : Math.max(best, b.x + b.w + EPS);
-        else best = dir > 0 ? Math.min(best, b.z - box.d - EPS) : Math.max(best, b.z + b.d + EPS);
+        for (const b of solidBoxesOf(world, x, y, z)) {
+          if (!b || !boxesOverlap(box, b)) continue;
+          if (axis === 'x') best = dir > 0 ? Math.min(best, b.x - box.w - EPS) : Math.max(best, b.x + b.w + EPS);
+          else best = dir > 0 ? Math.min(best, b.z - box.d - EPS) : Math.max(best, b.z + b.d + EPS);
+        }
       }
     }
   }
@@ -197,10 +224,10 @@ export function moveAabb(world: World, box: Aabb, vx: number, vy: number, vz: nu
 }
 
 /**
- * Stairs, not walls: if the box stands on the ground and walks into a block
- * whose solid top is a comfortable step height above their feet (a stairs
- * block), lift them onto it instead of stopping. Kids never have to think
- * about jumping up a step.
+ * Steps, not walls: if the box stands on the ground and walks into a block
+ * whose solid top is a comfortable step height above their feet (a slab, or the
+ * tread half of a stair), lift them onto it instead of stopping. Kids never
+ * have to think about jumping up a step.
  */
 function tryStepUp(world: World, box: Aabb, axis: 'x' | 'z', v: number): boolean {
   if (v === 0) return false;

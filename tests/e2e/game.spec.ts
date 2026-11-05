@@ -1491,7 +1491,7 @@ test('the kids are dressed: knitted jumpers, denim legs, a faced head', async ({
   expect(cloth.textures).toBeGreaterThanOrEqual(3); // knit, denim and the jumper front differ
 });
 
-// ------------------------------------------------------- animals, doors, stairs, saplings
+// ------------------------------------- animals, doors, slabs, stairs, chests, saplings
 
 /** flattens a strip of the starting meadow and faces the player down it */
 async function clearRunway(page: Page): Promise<{ fx: number; fz: number; gy: number }> {
@@ -1638,7 +1638,7 @@ test('doors: two blocks high and half a block deep — build, pat open, walk thr
       swingTop: save.doorFacing?.[at(1)],
     };
   }, door2);
-  expect(saved.version).toBe(2);
+  expect(saved.version).toBe(3);
   expect(saved.bottom).toBe(ids.DOOR);
   expect(saved.top).toBe(ids.DOOR_TOP);
   expect(saved.swingBottom === 0 || saved.swingBottom === 1).toBe(true);
@@ -1665,7 +1665,26 @@ test('doors: two blocks high and half a block deep — build, pat open, walk thr
   expect(after.swingTop).toBe(after.swingBottom);
 });
 
-test('stairs: walk into one and you step up onto it — no jumping required', async ({ page }) => {
+/** the block id in a cell (`dy` cells above it) */
+async function blockAtCell(page: Page, c: Cell, dy = 0): Promise<number> {
+  return page.evaluate((arg: { c: Cell; dy: number }) =>
+    (window as any).__lbw.game.world.get(arg.c.x, arg.c.y + arg.dy, arg.c.z), { c, dy });
+}
+
+/** which way a stair cell points: 0 = +x, 1 = -x, 2 = +z, 3 = -z (undefined for none) */
+async function stairFacingAt(page: Page, c: Cell): Promise<number | undefined> {
+  return page.evaluate((arg: { c: Cell }) => {
+    const { sz, sy } = (window as any).__lbw.dims;
+    return (window as any).__lbw.game.world.stairFacing.get((arg.c.x * sz + arg.c.z) * sy + arg.c.y);
+  }, { c });
+}
+
+/** the text of the toast currently on screen ("" when there is none) */
+function toastText(page: Page): Promise<string> {
+  return page.evaluate(() => document.querySelector('.toast')?.textContent ?? '');
+}
+
+test('slabs: the flat half-plate steps you up from every side', async ({ page }) => {
   test.slow();
   await boot(page);
   await joinWithPad(page);
@@ -1673,11 +1692,12 @@ test('stairs: walk into one and you step up onto it — no jumping required', as
   const ids = await page.evaluate(() => (window as any).__lbw.ids);
   const site = await clearRunway(page);
 
-  const step = await placeSelected(page, ids.STAIRS);
-  expect(await page.evaluate((c: Cell) => (window as any).__lbw.game.world.get(c.x, c.y, c.z), step))
-    .toBe(ids.STAIRS);
+  const plate = await placeSelected(page, ids.SLAB);
+  expect(await blockAtCell(page, plate)).toBe(ids.SLAB);
+  // a plate is one cell, not a door: nothing stacks above it
+  expect(await blockAtCell(page, plate, 1)).toBe(ids.AIR);
 
-  // walk into it from the far side: feet rise onto the step, then walk off it again
+  // walk into it from the far side: feet rise onto the plate, then walk off it again
   await page.evaluate((arg: { c: Cell; gy: number; pz: number }) => {
     const e = (window as any).__lbw.game.players[0].entity;
     e.pos.set(arg.c.x + 2.5, arg.gy + 1, arg.pz);
@@ -1685,14 +1705,14 @@ test('stairs: walk into one and you step up onto it — no jumping required', as
     e.yaw = -Math.PI / 2;
     e.pitch = -0.2;
     (window as any).__testPad.setMove(0, -1);
-  }, { c: step, gy: site.gy, pz: site.fz + 0.5 });
+  }, { c: plate, gy: site.gy, pz: site.fz + 0.5 });
 
   await page.waitForFunction(
     (arg: { c: Cell; gy: number }) => {
       const e = (window as any).__lbw.game.players[0].entity;
       return e.pos.y >= arg.gy + 1.4 && e.pos.x <= arg.c.x + 1.0;
     },
-    { c: step, gy: site.gy }, { timeout: 15000 },
+    { c: plate, gy: site.gy }, { timeout: 15000 },
   );
   // and the far side steps back down to the meadow floor
   await page.waitForFunction(
@@ -1700,9 +1720,209 @@ test('stairs: walk into one and you step up onto it — no jumping required', as
       const e = (window as any).__lbw.game.players[0].entity;
       return e.pos.x < arg.c.x - 0.6 && Math.abs(e.pos.y - (arg.gy + 1)) < 0.25;
     },
-    { c: step, gy: site.gy }, { timeout: 15000 },
+    { c: plate, gy: site.gy }, { timeout: 15000 },
   );
   await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+});
+
+/** which way a stair turns when the pet button spins it: +x → +z → -x → -z */
+const STAIR_TURN = [2, 3, 1, 0];
+
+test('stairs: a real step — it points away from the builder, walking one climbs a block, the pet button turns it', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  const site = await clearRunway(page); // leaves the player facing down +x
+
+  // build one with the build trigger: a stair cell, pointing away from the kid
+  // who built it (the tall half is the far side, so it climbs away from them)
+  const step = await placeSelected(page, ids.STAIRS);
+  expect(await blockAtCell(page, step)).toBe(ids.STAIRS);
+  expect(await stairFacingAt(page, step)).toBe(0);
+
+  // how a kid really builds with them: each step one block over and one block up,
+  // all pointing away from them, so the row climbs
+  await page.evaluate((arg: { c: Cell }) => {
+    const game = (window as any).__lbw.game;
+    const stairs = (window as any).__lbw.ids.STAIRS;
+    for (let k = 0; k < 4; k++) {
+      const x = arg.c.x + k, y = arg.c.y + k;
+      game.world.set(x, y, arg.c.z, stairs);
+      game.world.setStairFacing(x, y, arg.c.z, 0); // tall half away from the climber
+    }
+  }, { c: step });
+
+  // walking up the treads climbs the staircase a half-block at a time, with the
+  // jump button never touched once
+  await page.evaluate((arg: { c: Cell; gy: number; pz: number }) => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    e.pos.set(arg.c.x - 1.5, arg.gy + 1, arg.pz);
+    e.vel.set(0, 0, 0);
+    e.yaw = Math.PI / 2; // face +x: up the steps
+    e.pitch = -0.2;
+    (window as any).__testPad.setMove(0, -1);
+  }, { c: step, gy: site.gy, pz: site.fz + 0.5 });
+  await page.waitForFunction(
+    (arg: { c: Cell }) => {
+      const e = (window as any).__lbw.game.players[0].entity;
+      return e.pos.y >= arg.c.y + 3.4 && e.pos.x >= arg.c.x + 3.0;
+    },
+    { c: step }, { timeout: 20000 },
+  );
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+
+  // …but the back of a step is a full-block riser: a real stair has a front, and
+  // walking into the back stops you short instead of sliding you up. A lone step,
+  // so nothing else is in the way.
+  const lone = { x: step.x + 4, y: step.y, z: step.z };
+  await page.evaluate((arg: { c: Cell }) => {
+    const game = (window as any).__lbw.game;
+    // a clear patch of meadow to walk on (only up to head height, so the
+    // staircase further along is left standing), then one lonely step
+    for (let x = arg.c.x - 1; x <= arg.c.x + 3; x++) {
+      for (let y = arg.c.y; y <= arg.c.y + 1; y++) game.world.set(x, y, arg.c.z, 0);
+    }
+    game.world.set(arg.c.x, arg.c.y, arg.c.z, (window as any).__lbw.ids.STAIRS);
+    game.world.setStairFacing(arg.c.x, arg.c.y, arg.c.z, 0);
+  }, { c: lone });
+  await page.evaluate((arg: { c: Cell; gy: number; pz: number }) => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    e.pos.set(arg.c.x + 1.4, arg.gy + 1, arg.pz);
+    e.vel.set(0, 0, 0);
+    e.yaw = -Math.PI / 2; // face -x: straight at the riser
+    e.pitch = -0.2;
+    (window as any).__testPad.setMove(0, -1);
+  }, { c: lone, gy: site.gy, pz: site.fz + 0.5 });
+  await waitForStop(page);
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+  const blocked = await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    return { x: e.pos.x, y: e.pos.y };
+  });
+  expect(blocked.x).toBeGreaterThan(lone.x + 1.15); // stopped at the riser, not through it
+  expect(blocked.x).toBeLessThan(lone.x + 1.5);
+  expect(blocked.y).toBeLessThan(step.y + 0.6); // and no free lift from the back
+
+  // the pet button, aimed at a step: it turns a quarter turn on the spot
+  await page.evaluate((arg: { c: Cell; gy: number; pz: number }) => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    e.pos.set(arg.c.x - 1.2, arg.gy + 1, arg.pz);
+    e.vel.set(0, 0, 0);
+    e.yaw = Math.PI / 2; // look back down the staircase
+    e.pitch = -0.5; // straight at the first riser
+  }, { c: step, gy: site.gy, pz: site.fz + 0.5 });
+  await page.waitForFunction((sid: number) => {
+    const t = (window as any).__lbw.game.players[0].removeTarget;
+    return t !== null && t.block === sid;
+  }, ids.STAIRS, { timeout: 8000 });
+  const aimed = await page.evaluate(() => {
+    const t = (window as any).__lbw.game.players[0].removeTarget;
+    return { cell: { x: t.x, y: t.y, z: t.z } as Cell };
+  });
+  const was = await stairFacingAt(page, aimed.cell);
+  expect(was).toBeDefined();
+  await tap(page, 'interact');
+  expect(await stairFacingAt(page, aimed.cell)).toBe(STAIR_TURN[was!]);
+  // the step two over is left the way it was
+  const neighbour = { x: step.x + 2, y: step.y + 2, z: step.z };
+  expect(await stairFacingAt(page, neighbour)).toBe(0);
+
+  // and each step keeps the way it points across a save and a reload
+  await page.evaluate(() => (window as any).__lbw.game.saveNow());
+  await page.reload();
+  await page.waitForFunction('window.__lbw !== undefined');
+  const after = await page.evaluate((arg: { run: Cell[] }) => {
+    const game = (window as any).__lbw.game;
+    return {
+      version: game.world.toSave().version,
+      run: arg.run.map((c) => ({
+        block: game.world.get(c.x, c.y, c.z),
+        facing: game.world.getStairFacing(c.x, c.y, c.z),
+      })),
+    };
+  }, { run: [0, 1, 2, 3].map((k) => ({ x: step.x + k, y: step.y + k, z: step.z })) });
+  expect(after.version).toBe(3);
+  for (const s of after.run) {
+    expect(s.block).toBe(ids.STAIRS);
+    expect([0, STAIR_TURN[0]]).toContain(s.facing);
+  }
+  expect(after.run.some((s) => s.facing === STAIR_TURN[0])).toBe(true); // the spun one kept its turn
+});
+
+test('treasure chests: every world hides them, and the pet button trades a lid for a random treasure', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+
+  // a world comes with its treasure hidden away from the starting meadow
+  const hidden = await page.evaluate((chest: number) => {
+    const game = (window as any).__lbw.game;
+    const { sx, sy, sz } = (window as any).__lbw.dims;
+    let found = 0;
+    for (let x = 0; x < sx; x++) {
+      for (let z = 0; z < sz; z++) {
+        for (let y = 0; y < sy; y++) if (game.world.get(x, y, z) === chest) found++;
+      }
+    }
+    return found;
+  }, ids.CHEST);
+  expect(hidden).toBeGreaterThanOrEqual(6); // 12 are hidden; a dynamite test may have blown one up
+
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  await clearRunway(page);
+
+  // a chest can also be built: it is one squat cell, not a two-cell door
+  const chest = await placeSelected(page, ids.CHEST);
+  expect(await blockAtCell(page, chest)).toBe(ids.CHEST);
+  expect(await blockAtCell(page, chest, 1)).toBe(ids.AIR);
+
+  const tally = () => page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    const e = game.players[0].entity;
+    return {
+      stars: e.starsCount, zoom: e.zoomTime, boing: e.boingTime,
+      animals: game.animals.animals.length, starsInWorld: game.starField.stars.length,
+    };
+  });
+  const before = await tally();
+
+  // look down at the chest and press the pet button: the lid comes up
+  await page.evaluate(() => {
+    (window as any).__lbw.game.players[0].entity.pitch = -0.5;
+  });
+  await page.waitForFunction((cids: number[]) => {
+    const t = (window as any).__lbw.game.players[0].removeTarget;
+    return t !== null && cids.includes(t.block);
+  }, [ids.CHEST, ids.CHEST_OPEN], { timeout: 8000 });
+  await tap(page, 'interact');
+
+  expect(await blockAtCell(page, chest)).toBe(ids.CHEST_OPEN);
+  expect(await toastText(page)).toMatch(
+    /pile of stars|stars jumped out|zoomy boots|boing boots|surprise animal|giant diamond/i,
+  );
+  // …and one of the six treasures really happened
+  const opened = await tally();
+  const somethingHappened = opened.stars > before.stars || opened.zoom > 0 || opened.boing > 0
+    || opened.animals > before.animals || opened.starsInWorld > before.starsInWorld;
+  expect(somethingHappened).toBe(true);
+
+  // an opened chest stays opened and pays out nothing twice
+  await tap(page, 'interact');
+  expect(await toastText(page)).toMatch(/empty/i);
+  expect(await blockAtCell(page, chest)).toBe(ids.CHEST_OPEN);
+  const poked = await tally();
+  expect(poked.stars).toBe(opened.stars);
+  expect(poked.animals).toBe(opened.animals);
+  expect(poked.starsInWorld).toBe(opened.starsInWorld);
+
+  // the open lid survives a save and a reload
+  await page.evaluate(() => (window as any).__lbw.game.saveNow());
+  await page.reload();
+  await page.waitForFunction('window.__lbw !== undefined');
+  expect(await blockAtCell(page, chest)).toBe(ids.CHEST_OPEN);
 });
 
 test('saplings: plant one on the meadow and it grows into a real tree', async ({ page }) => {

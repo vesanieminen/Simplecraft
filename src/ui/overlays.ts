@@ -764,7 +764,7 @@ const PAD_ROWS: [string, string][] = [
   ['LT', 'Place block'],
   ['RT', 'Break block'],
   ['LB / RB', 'Prev / next block'],
-  ['X', 'Pet animals · open doors'],
+  ['X', 'Pet · open doors & chests · turn stairs'],
   ['Y', 'Block palette'],
   ['START', 'Menu'],
   ['B', 'Back'],

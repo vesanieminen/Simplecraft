@@ -19,12 +19,14 @@ export class Hud {
   private nameTag: HTMLElement;
   private stars: HTMLElement;
   private flyTag: HTMLElement;
+  private boostTag: HTMLElement;
   private crosshair: HTMLElement;
   private swatch: HTMLElement;
   private blockName: HTMLElement;
   private hints: HTMLElement;
   private lastBlock = -1;
   private lastStars = -1;
+  private lastBoost = '';
 
   constructor(player: LocalPlayer, type: ControllerType) {
     this.root = document.createElement('div');
@@ -42,6 +44,9 @@ export class Hud {
     this.flyTag = document.createElement('div');
     this.flyTag.className = 'fly-tag';
     this.flyTag.textContent = '🕊️ Flying!';
+
+    this.boostTag = document.createElement('div');
+    this.boostTag.className = 'boost-tag';
 
     this.crosshair = document.createElement('div');
     this.crosshair.className = 'crosshair';
@@ -65,9 +70,9 @@ export class Hud {
     // LT-position button builds, RT-position breaks (2026-11 control swap —
     // on keyboard that means R-Click builds, L-Click breaks)
     this.hints.textContent =
-      `${b.lt} build · ${b.rt} break · ${b.a} jump · ${b.x} pet/door · ${b.y} blocks · ${b.start} menu`;
+      `${b.lt} build · ${b.rt} break · ${b.a} jump · ${b.x} pet / open · ${b.y} blocks · ${b.start} menu`;
 
-    this.root.append(this.nameTag, this.stars, this.flyTag, this.crosshair, pod, this.hints);
+    this.root.append(this.nameTag, this.stars, this.flyTag, this.boostTag, this.crosshair, pod, this.hints);
   }
 
   update(player: LocalPlayer): void {
@@ -84,6 +89,13 @@ export class Hud {
       this.stars.textContent = `⭐ ${s}`;
     }
     this.flyTag.classList.toggle('on', player.entity.flying);
+    const boost = player.entity.zoomTime > 0 ? '🌈 Zoomy!'
+      : player.entity.boingTime > 0 ? '🦘 Boingy!' : '';
+    if (boost !== this.lastBoost) {
+      this.lastBoost = boost;
+      this.boostTag.textContent = boost;
+      this.boostTag.classList.toggle('on', boost !== '');
+    }
     this.crosshair.classList.toggle('hit', !!player.target);
   }
 }

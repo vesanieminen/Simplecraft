@@ -71,5 +71,22 @@
   split screen, waking a sleeping pad). Virtual pads in tests drive the same
   input abstraction, so they are a good regression net — but re-check the
   README's manual checklist with real pads after any input change (newly added
-  Leave / Waiting-Players rows and the water-jump fix still owe the couch a
-  turn).
+  Leave / Waiting-Players rows, the water-jump fix and the slab / real-stairs /
+  treasure-chest blocks still owe the couch a turn).
+- Partial blocks share one shape language: `BlockDef.solidHeight` is both the
+  squat box the mesher paints (`mesher.addTexturedSubBox`) and the box
+  `physics.solidBoxesOf` collides with (slab 0.5, treasure chest 0.85). Stairs
+  are the exception — two boxes from `blocks.stairBoxes` (tall half + tread
+  half) — and which way they point lives in `world.stairFacing` (save
+  **version 3**). Spinning a step keeps its block id, so `world.set` would
+  early-return: call `world.touchAt(x, z)` to remesh and let autosave notice.
+  `physics.stepLift` picks the LOWEST solid top above the feet, which is what
+  lets a kid walk up a step without jumping. A staircase is built one block
+  over and one block up (that is what aiming while walking produces), and the
+  step above does bump a 1.8-tall head from underneath — that is correct.
+- Treasure chests: the loot roll is `core/treasure.ts` (weights + messages),
+  the effects live in `Game.grantTreasure` (no inventory, so prizes happen to
+  the world: star counters, `starField.spawnAt` stars, `playerEntity.zoomTime`
+  / `boingTime`, `animals.spawn`). Opened = `CHEST_OPEN` in the voxel, so it
+  needs no extra save field. Terrain hides `CHESTS_PER_WORLD` chests in
+  `generateTerrain` step 6 — remember `idx` strides y by 1, not by `WORLD_SY`.

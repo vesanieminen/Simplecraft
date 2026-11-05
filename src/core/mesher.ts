@@ -7,7 +7,8 @@
 import * as THREE from 'three';
 import {
   ATLAS_CELL_COUNT, ATLAS_DOOR, ATLAS_PLANKS, blockDef, isCrossBlock, isDoorBlock,
-  isDoorClosedBlock, isOpaqueBlock, isTranslucentBlock, PLANT_ATLAS_CELLS, STAIRS,
+  isDoorClosedBlock, isOpaqueBlock, isStairsBlock, isTranslucentBlock, PLANT_ATLAS_CELLS,
+  StairFacing, stairBoxes, VoxelBox,
 } from './blocks';
 import { CHUNK, idx as worldIdx, WORLD_SY, World } from './world';
 
@@ -171,12 +172,12 @@ export function buildChunkGeometry(world: World, cx: number, cz: number): ChunkG
           continue;
         }
 
-        if (id === STAIRS) {
-          // a chunky wooden step occupying the lower half of its cell; the
-          // step surface (half a block high) is never flush with a neighbour,
-          // so it never gets culled — the sides and underside do, as usual
-          addTexturedSubBox(tex, world, [x, y, z], [x, y, z, x + 1, y + 0.5, z + 1],
-            def.sideAtlasCell ?? ATLAS_PLANKS, true);
+        if (isStairsBlock(id)) {
+          // A real step: one half of the cell is full height, the other is a
+          // half-high tread. Three boxes, with the faces that meet inside the
+          // step skipped, so the tread and the riser stay painted.
+          const facing = (world.stairFacing.get(worldIdx(x, y, z)) ?? 0) as StairFacing;
+          addStairShape(tex, world, x, y, z, facing, def.sideAtlasCell ?? ATLAS_PLANKS);
           continue;
         }
         if (isDoorBlock(id)) {
@@ -186,7 +187,8 @@ export function buildChunkGeometry(world: World, cx: number, cz: number): ChunkG
           // axis it is thin along. Open halves are never solid, so you walk
           // straight through them.
           const box = doorPanelBox(world, x, y, z)!;
-          addTexturedSubBox(tex, world, [x, y, z], box, def.sideAtlasCell ?? ATLAS_DOOR, true);
+          addTexturedSubBox(tex, world, [x, y, z], box, def.sideAtlasCell ?? ATLAS_DOOR,
+            { cullFlush: true });
           continue;
         }
 
@@ -196,6 +198,18 @@ export function buildChunkGeometry(world: World, cx: number, cz: number): ChunkG
         const target = isTextured
           ? (seeThrough ? texT : tex)
           : (seeThrough ? transp : opaque);
+
+        if (isTextured && def.solidHeight !== undefined && def.solidHeight < 1) {
+          // a painted block that does not fill its cell — a slab plate, a squat
+          // treasure chest — drawn as exactly the box physics collides with
+          addTexturedSubBox(target, world, [x, y, z], [x, y, z, x + 1, y + def.solidHeight, z + 1],
+            sideCell, {
+              cullFlush: true,
+              capCell: def.capAtlasCell ?? sideCell,
+              bottomCell: def.bottomAtlasCell ?? def.capAtlasCell ?? sideCell,
+            });
+          continue;
+        }
 
         for (let fi = 0; fi < 6; fi++) {
           const f = FACES[fi];
@@ -322,23 +336,66 @@ function doorSeamCovers(
   return same(nb[0], box[0]) && same(nb[3], box[3]) && same(nb[1], box[1]) && same(nb[4], box[4]);
 }
 
+/** face numbers used by FACES / skip masks: +x -x +y -y +z -z */
+const FACE_PX = 0, FACE_NX = 1, FACE_PY = 2, FACE_NY = 3, FACE_PZ = 4, FACE_NZ = 5;
+
+/** a skip mask with the given faces marked "do not draw" */
+function faceSkip(...faces: number[]): boolean[] {
+  const skip = [false, false, false, false, false, false];
+  for (const f of faces) skip[f] = true;
+  return skip;
+}
+
+/**
+ * One stair cell, as three boxes: the lower and upper parts of the tall half,
+ * and the half-high tread half. The faces where those boxes meet each other are
+ * skipped, so the step reads as one solid piece with the tread and the riser
+ * painted and nothing doubled up inside.
+ */
+function addStairShape(
+  g: GeomBuilder,
+  world: World,
+  x: number,
+  y: number,
+  z: number,
+  facing: StairFacing,
+  sideCell: number,
+): void {
+  const { tall, low } = stairBoxes(x, y, z, facing);
+  // which way the tall half sits: +x, -x, +z or -z
+  const toward = facing === 0 ? FACE_PX : facing === 1 ? FACE_NX : facing === 2 ? FACE_PZ : FACE_NZ;
+  const away = facing === 0 ? FACE_NX : facing === 1 ? FACE_PX : facing === 2 ? FACE_NZ : FACE_PZ;
+  const mid = y + 0.5;
+  const [tx0, , tz0, tx1, , tz1] = tall;
+  addTexturedSubBox(g, world, [x, y, z], low, sideCell, { cullFlush: true, skip: faceSkip(toward) });
+  addTexturedSubBox(g, world, [x, y, z], [tx0, y, tz0, tx1, mid, tz1], sideCell,
+    { cullFlush: true, skip: faceSkip(away, FACE_PY) });
+  // the upper part keeps its `away` face: that is the riser of the step
+  addTexturedSubBox(g, world, [x, y, z], [tx0, mid, tz0, tx1, tall[4], tz1], sideCell,
+    { cullFlush: true, skip: faceSkip(FACE_NY) });
+}
+
 /**
  * A painted box smaller than a full cell — the mesher's shape language for
- * "not a cube" blocks (stairs steps, door panels). One atlas cell
- * covers it; faces that sit flush on the cell border are culled against
- * opaque neighbours when `cullFlush`, and shading is face-angle only (no AO:
- * these shapes are small enough that it would only muddy them).
+ * "not a cube" blocks (slab plates, stair steps, door panels, treasure
+ * chests). Faces that sit flush on the cell border are culled against opaque
+ * neighbours when `cullFlush`, faces listed in `skip` are left out (they meet
+ * another part of the same block), and shading is face-angle only (no AO: these
+ * shapes are small enough that it would only muddy them).
  */
 function addTexturedSubBox(
   g: GeomBuilder,
   world: World,
   cell: [number, number, number],
-  box: [number, number, number, number, number, number],
+  box: VoxelBox,
   sideCell: number,
-  cullFlush: boolean,
+  opts: { cullFlush?: boolean; capCell?: number; bottomCell?: number; skip?: boolean[] } = {},
 ): void {
   const [cx, cy, cz] = cell;
   const [x0, y0, z0, x1, y1, z1] = box;
+  const cullFlush = opts.cullFlush ?? false;
+  const capCell = opts.capCell ?? sideCell;
+  const bottomCell = opts.bottomCell ?? capCell;
   const vary = 1 + (hashByte(cx, cy, cz) - 0.5) * 0.07;
   const E = 1e-6;
   const flush = [
@@ -348,6 +405,7 @@ function addTexturedSubBox(
   ];
   for (let fi = 0; fi < 6; fi++) {
     const f = FACES[fi];
+    if (opts.skip?.[fi]) continue;
     if (cullFlush && flush[fi]
       && (isOpaqueBlock(world.get(cx + f.dir[0], cy + f.dir[1], cz + f.dir[2])) || doorSeamCovers(world, box, cx, cy, cz, fi))) continue;
     const shade = FACE_SHADE[fi] * vary;
@@ -357,7 +415,7 @@ function addTexturedSubBox(
     const pts = f.corners.map(([ax, ay, az]) => [
       ax ? x1 : x0, ay ? y1 : y0, az ? z1 : z0,
     ] as [number, number, number]);
-    g.quad(pts[0], pts[1], pts[2], pts[3], f.dir, tint, faceUvs(fi, sideCell, sideCell, sideCell));
+    g.quad(pts[0], pts[1], pts[2], pts[3], f.dir, tint, faceUvs(fi, sideCell, capCell, bottomCell));
   }
 }
 

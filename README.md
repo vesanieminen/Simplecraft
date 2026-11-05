@@ -17,8 +17,9 @@ Creative mode, built for a 5-year-old and a parent on one couch.
 - A world that saves itself and survives restarts (one save per world).
 - **Eight friendly animals** — sheep, bunnies, chickens, cows, and new
   pigs, horses, cats and foxes — each with a voice of its own.
-- **Doors you can open, stairs you can walk up, saplings that grow into
-  trees** — and planks that finally look like planks.
+- **Doors you can open, proper stairs, treasure chests hidden in every world,
+  slabs, saplings that grow into trees** — and planks that finally look like
+  planks.
 - Glowing stars to collect, bouncy blocks, musical blocks, and a world
   full of textured flowers, grass tufts, lakes, and trees.
 
@@ -160,7 +161,7 @@ things that aren't solid. Water and bedrock stay indestructible, and plants
 never get in the way when you place a block (the two aim at slightly
 different things so both just work).
 
-## Doors, stairs and saplings 🚪
+## Doors, slabs, stairs and saplings 🚪
 
 New in the palette (Y / △), right next to the planks they're built from:
 
@@ -173,9 +174,24 @@ New in the palette (Y / △), right next to the planks they're built from:
   it's a thin standing panel you walk straight through. Break any half and
   the whole door comes down. It stands the way you placed it, and it
   *remembers* which way it opens across saves and restarts.
-- **🪜 Stairs** — a chunky wooden half-step. Walk into one and you simply
-  step up onto it: no jumping, no fiddling, from every side. Rows of them
-  make real staircases, and one makes a friendly kerb anywhere.
+- **⬛ Slab** — a flat wooden plate exactly **half a block tall**: walk into it
+  from any side and you step up onto it, no jumping. Two stacked are a full
+  block, a ring of them is a kerb, a shelf or a low garden wall. (Naming
+  confession: this is the block the palette used to call *Stairs*. It is now
+  called what it always was — and the real stairs below are new. Old worlds
+  keep their plates exactly as they built them; they are simply labelled
+  **Slab** now.)
+- **🪜 Stairs** — a **proper step**: one half of the cell is a half-high tread,
+  the other half is full height. Build one and it points *away* from you, so
+  its riser leans against the wall you were aiming at and the step climbs away
+  from where you are standing. Walk up the tread side and you climb a **whole
+  block** without ever touching the jump button — tread, riser, tread. Put the
+  next one one block over and one block up and you walk straight up a whole
+  staircase, half a block per step: four steps is a door-step, eight is a wall.
+  Walking into the back of a step is a real climb (jump, or spin it round),
+  because a step has a front. If it landed the wrong way round, aim at it and press
+  **X / ☐ / E**: it spins a quarter turn on the spot. Each step remembers which
+  way it points, across saves and restarts.
 - **🌳 Sapling** — plant one on clear ground, run off to build something,
   and about half a minute later it grows into a full tree — trunk, leaves
   and all, with a little sparkle and a toast. Saplings you leave behind
@@ -184,6 +200,38 @@ New in the palette (Y / △), right next to the planks they're built from:
 And the wood shelf is complete: **logs** with bark sides and growth-ring
 ends, **planks**, and **leaves** were already in the palette — now the whole
 tree, from sapling to plank, is buildable by hand.
+
+## Treasure chests 📦
+
+Every world hides **twelve treasure chests** out in the wild — never on the
+starting meadow, always on dry ground with the sky above them, so the first
+one is a walk rather than a step. They come out of the seed, so the same world
+hides the same twelve treasures forever, and the hint ticker likes to nudge:
+**🗝️ Find a treasure chest!**
+
+A chest is a squat wooden box (0.85 of a block tall) painted with a brass lock,
+an iron-banded lid seen from above and dark boards underneath. Look at one and
+press **X / ☐ / E** — the same button that pets animals, swings doors and turns
+stairs — and the lid comes up: gold particles, a jingle, and a toast telling
+everybody on the couch what was inside. The treasure is rolled when the lid
+lifts, and there is no inventory in this game, so the treasure is something
+that *happens*:
+
+- **⭐ A pile of stars** — four stars straight onto that player's counter.
+- **🌟 Stars jumped out** — three real collectible stars pop out and hover over
+  the chest until somebody grabs them.
+- **🌈 Zoomy boots** — run half again as fast for thirty seconds, with a
+  **🌈 Zoomy!** badge on that player's HUD while it lasts.
+- **🦘 Boing boots** — mega jumps for thirty seconds (a **🦘 Boingy!** badge).
+- **🐣 A surprise animal friend** — a random animal hops out of the chest and
+  adopts that spot, voice included.
+- **💎 A GIANT diamond** — twenty-five stars, and by far the rarest find.
+
+An opened chest **stays opened** (it is drawn with its lid up and its gold
+showing): press the button again and it tells you the treasure is already
+yours, so nobody shakes the same chest twice. Chests are also in the block
+palette, so children can hide their own — and one chest per (world, seed) pair
+is a fair game of hide and seek.
 
 ## The whole barnyard 🐷
 
@@ -212,7 +260,8 @@ dirt clods, stone boulders with cracks, sand grain, bark and growth rings on
 log ends, planks with real board gaps, staggered joints and nail heads,
 offset bricks over mortar, leaves with twigs, water with waves, the glow-block
 sun, bouncy springs, sparkle stars, a music
-note, bedrock boulders, scorched crater rims, painted doors and the dynamite
+note, bedrock boulders, scorched crater rims, painted doors, treasure chests
+(lock, lid, gold inside) and the dynamite
 bundle. The
 eight candy colours keep their own bright tint and multiply a near-white
 weave through it, so a Red block still reads as Red — it just looks like
@@ -353,12 +402,20 @@ New this round: a **two-block-high, half-a-block-deep door** gets built with
 one press of the build trigger, stops a walking kid right at the panel (not
 half a block short of it), swings open under the pet button, lets them walk
 through, closes from the other side, comes down as a whole door when any half
-is broken, and reappears after a reload from the v2 save with its swing;
+is broken, and reappears after a reload from the save with its swing;
 the **block palette** really walks its grid — left/right step cells, up/down
 jump whole rows and wrap; **releasing the mouse button stops building** (the
 endless auto-placing bug: the swap left `mouseup` on the old mapping, so a
-released right button stayed held forever); stairs **step you up automatically**
-while walking; a planted sapling grows
+released right button stayed held forever); **slabs** (the half-plate the
+palette used to call *Stairs*) step you up automatically from every side; real
+**stairs** point away from whoever builds them, walk you up a whole block with
+the jump button never touched, stop you at the back riser, spin a quarter turn
+under the pet button, and keep the way they point across a reload (saves are
+now **version 3**, which carries `stairFacing`); **treasure chests** hide
+twelve per generated world, the pet button lifts the lid, one of six random
+treasures really changes the world (stars on the counter, stars hovering over
+the chest, a speed or jump boost, a new animal friend), an opened chest pays
+out nothing twice and stays open after a reload; a planted sapling grows
 into a recorded full tree; **first person** hides a body from its own camera
 via three.js layers while every other camera keeps seeing it; the 10-row
 player menu really **fits inside a half-height stacked pane**; grown-up
@@ -374,8 +431,10 @@ npm run typecheck
 **Xbox One** pad and a **PS5 DualSense** — both worked fine: joining, both
 sticks, building, palette, menus, split screen and waking a sleeping
 controller. The items below are what to re-check after any input change; the
-**swapped LT/RT build/break mapping**, the new **door / stairs / sapling**
-blocks, the **first-person visibility fix**, the **Leave / Waiting
+**swapped LT/RT build/break mapping**, the new **door / slab / stairs /
+sapling** blocks, the **treasure chests** (**X** opens a lid, and a boost
+badge appears on the HUD), the **first-person visibility fix**, the **Leave /
+Waiting
 Players** rows, and the new **My Worlds** saved-game list all still owe the
 couch a turn. Virtual pads in the automated tests drive
 the exact same input abstraction (dead zones, edge detection, button mapping
@@ -397,8 +456,15 @@ all shared) — a good regression net, still not a substitute for hardware QA.
 5b. Place a **door**: it should stand two blocks high out of one press, half
    a block thick. Look at it (any half) and tap **X**: the whole door swings
    open with a creak, walk through, tap X from the other side to close it.
-   Break the top half: the whole door comes down. Walk into a **stairs**
-   block: you step up without jumping. Plant a **sapling**, wait a moment:
+   Break the top half: the whole door comes down. Place a **slab**: you step up
+   onto the flat plate from any side, no jumping. Place **stairs**: they should
+   point *away* from you (riser against whatever you were aiming at); walk up
+   the tread side and you climb a whole block without jumping, walk into the
+   back and you stop at the riser; aim at one and tap **X** and it turns a
+   quarter turn. Find (or place) a **treasure chest** and tap **X**: the lid
+   comes up, a toast names the treasure, and a boost (if you drew Zoomy or
+   Boing boots) shows a badge on that player's HUD — tap X again and the chest
+   says it is empty. Plant a **sapling**, wait a moment:
    a tree. In the **block palette**, check the D-pad really goes up/down as
    well as left/right. Check all of this on the pad, not just in the
    automated tests, and build/break a few times with the swapped triggers.
@@ -425,7 +491,8 @@ all shared) — a good regression net, still not a substitute for hardware QA.
 
 Implemented: a 128 × 128 × 64 voxel world (four world themes + any seed,
 picked on a screen with a live map preview), building, textured plants,
-eight kinds of animals, doors, stairs, saplings that grow into trees,
+eight kinds of animals, doors, slabs, real stairs, treasure chests with random
+treasure hidden in every world, saplings that grow into trees,
 stars, special blocks, audio, particles, complete controller UX,
 2–4 player split screen, per-world persistence with a saved-worlds menu, and
 remembered grown-up settings.

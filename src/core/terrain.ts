@@ -5,7 +5,7 @@
  */
 
 import {
-  AIR, C_WHITE, DIRT, FLOWER_RED, FLOWER_YELLOW, GRASS, LEAVES, ROCK, SAND, STONE, TALLGRASS, WATER, WOOD,
+  AIR, CHEST, C_WHITE, DIRT, FLOWER_RED, FLOWER_YELLOW, GRASS, LEAVES, ROCK, SAND, STONE, TALLGRASS, WATER, WOOD,
 } from './blocks';
 import { WATER_LEVEL, World, WORLD_SX, WORLD_SY, WORLD_SZ } from './world';
 
@@ -116,6 +116,9 @@ export interface GeneratedWorld {
 }
 
 export const DEFAULT_SEED = 20261102;
+
+/** how many treasure chests one world hides */
+export const CHESTS_PER_WORLD = 12;
 
 /** heightmap for a seed+theme (shared by terrain gen and world previews) */
 export function computeHeights(seed: number, theme: WorldTheme): Uint8Array {
@@ -234,6 +237,28 @@ export function generateTerrain(world: World, theme?: WorldTheme): GeneratedWorl
       const r = hash2(x, z, seedA + 4242);
       const dens = (d < meadowR ? 0.07 : 0.03) * th.flowerMul;
       if (r < dens) data[above] = r < dens * 0.35 ? FLOWER_RED : r < dens * 0.7 ? FLOWER_YELLOW : TALLGRASS;
+    }
+  }
+
+  // 6. treasure chests — a dozen hidden around the map, never on the starting
+  // meadow, so the first one is a proper walk (and a reward for exploring).
+  // They come from the seed, so the same world hides the same treasures.
+  let chests = 0;
+  const chestSpots: [number, number][] = [];
+  for (let x = 4; x < WORLD_SX - 4 && chests < CHESTS_PER_WORLD; x++) {
+    for (let z = 4; z < WORLD_SZ - 4 && chests < CHESTS_PER_WORLD; z++) {
+      if (hash2(x, z, seedA + 9091) > 0.003) continue;
+      if (Math.hypot(x - cx, z - cz) < meadowR + 8) continue;
+      if (chestSpots.some(([sx, sz]) => Math.abs(sx - x) < 7 && Math.abs(sz - z) < 7)) continue;
+      const h = heights[x * WORLD_SZ + z];
+      if (h <= waterLevel + 1 || h >= WORLD_SY - 4) continue; // dry ground, room for the lid
+      const i = (x * WORLD_SZ + z) * WORLD_SY + h;
+      const ground = data[i];
+      if (ground !== GRASS && ground !== SAND && ground !== DIRT && ground !== STONE) continue;
+      if (data[i + 1] !== AIR) continue; // the cell above is free: no trees or roofs on the lid
+      data[i] = CHEST;
+      chestSpots.push([x, z]);
+      chests++;
     }
   }
 
