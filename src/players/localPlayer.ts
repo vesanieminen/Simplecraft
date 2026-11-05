@@ -120,7 +120,9 @@ export class LocalPlayer {
       : {
           moveX: frame.move.x,
           moveY: frame.move.y,
-          jump: frame.held.has('jump') || frame.held.has('up'),
+          // d-pad up doubles as jump — but NOT on a keyboard, where the arrow
+          // keys are the look controls (ArrowUp tilts the view, nothing else)
+          jump: frame.held.has('jump') || (frame.kind !== 'keyboard' && frame.held.has('up')),
           // swim down: the sneak buttons (Ctrl / B / ◯) do double duty in
           // water — the Minecraft convention of shift sinking you
           swimDown: frame.held.has('crouch') || frame.held.has('back'),

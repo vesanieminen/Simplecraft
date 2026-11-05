@@ -10,7 +10,7 @@
  */
 
 import * as THREE from 'three';
-import { AIR, blockDef, DIRT, DYNAMITE, GRASS, SAND, SCORCH, WATER } from './blocks';
+import { AIR, blockDef, DIRT, DYNAMITE, GRASS, isWaterId, SAND, SCORCH } from './blocks';
 import { idx as worldIdx, World, WORLD_SY, WORLD_SZ } from './world';
 import { ParticleSystem } from './particles';
 import { AudioKit } from './audio';
@@ -294,7 +294,7 @@ export class DynamiteManager {
           const id = this.world.get(bx, by, bz);
           if (id === AIR) continue;
           const def = blockDef(id);
-          if (def.unbreakable || id === WATER) continue; // bedrock and water win
+          if (def.unbreakable || isWaterId(id)) continue; // bedrock and water win
           const d = Math.hypot(bx + 0.5 - cx, by + 0.5 - cy, bz + 0.5 - cz);
           if (d + (Math.random() - 0.5) * 0.6 > r) continue;
           this.world.set(bx, by, bz, AIR);

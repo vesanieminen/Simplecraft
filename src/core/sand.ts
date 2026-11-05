@@ -11,7 +11,7 @@
  */
 
 import {
-  AIR, BlockId, isCrossBlock, isSolidBlock, SAND, WATER,
+  AIR, BlockId, isCrossBlock, isSolidBlock, isWaterId, SAND,
 } from './blocks';
 import { idx, World, WORLD_SY, WORLD_SZ } from './world';
 
@@ -111,9 +111,9 @@ export class SandGravity {
       }
       const below = w.get(x, y - 1, z);
       const j = idx(x, y - 1, z);
-      if (below === WATER) {
+      if (isWaterId(below)) {
         w.set(x, y - 1, z, SAND);
-        w.set(x, y, z, WATER); // the displaced water slides up into the freed cell
+        w.set(x, y, z, below); // the displaced water slides up into the freed cell
       } else {
         if (isCrossBlock(below)) {
           this.hooks.crushed(x, y - 1, z, below);

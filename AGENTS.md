@@ -157,6 +157,14 @@ event. Renaming a storage key orphans the family's existing saves.
   cube made its neighbours drop the shared face and the terrain around every
   chest went see-through. AO still uses `isOpaqueBlock`. The regression test
   counts quads in one chunk's `textured` channel through `__lbw.chunkGeometry`.
+- Sounds are all procedural WebAudio (`core/audio.ts`) and **material-aware**:
+  `blocks.soundFamilyOf(id)` → wood/stone/soft/glass/plant recipes for
+  `place`/`remove`/`land`/`footstep`. Footsteps ride `StepEvents.footfall`
+  (one per ~1.7 blocks walked, throttled per player in `Game`, alternating
+  pitch via `footAlt`); `landedOn` gives landings the right thud; water
+  entry/exit is `audio.splash()`, chests are `chestOpen()`. `AudioKit.recent`
+  is a 30-entry ring of sound names — the headless e2e asserts the wiring
+  through it (`sounds carry the material` test).
 - Doors: closing one **makes room first** — `Game.makeRoomForDoor` nudges any
   player overlapping the soon-to-be panel out along the panel's thin axis
   (the walk-through direction) to the nearer clear side, and refuses the
@@ -183,6 +191,35 @@ event. Renaming a storage key orphans the family's existing saves.
   cube alone is the block mid-fall, and finishing the glide dirties the chunk
   (`world.touchAt`) so the voxel takes over seamlessly. e2e: an in-page sampler
   asserts `sandFalls.count` rises during a fall and returns to 0 after.
+- Water flows (`core/water.ts`, `Game.water`): **two ids**. `WATER` (10) is an
+  eternal source (the sea, and any a kid places from the palette) — unbreakable,
+  never an aim target (`raycast.hitRemovable`), full-cell. `WATER_FLOW` (38) is
+  travelling water; its depth 0..6 lives in `world.waterLevel` (flat index →
+  level), saved as **version 4** `waterLevels` (server merges it like the other
+  maps). The sim is a dirty-set driven by the same `World.onCellChanged` hook as
+  sand: each 0.2 s step re-reads every dirty cell's best supply (a side
+  neighbour one level deeper, or water falling in from **above keeps its depth**),
+  >`MAX_WATER_LEVEL` (6) drains to AIR. Sideways spread is `level+1`, capped at
+  6 and unconditional — water reaching a ledge edge **pours over it** like the
+  big game (an elevated source fans out; accepted as MC-like). Reach is
+  strictly bounded: the shallowest cell always
+  needs a deeper one. Cutting a chain makes levels **climb** (each flow cell
+  `notify`s its neighbours when its own level changes, incl. shallowing) until
+  they fall past the cap and dry, cell by cell. `world.set` deletes the level
+  entry; improving an existing flow cell's depth needs `world.touchAt` (same id,
+  so `set` early-returns). **All water renders full-cell** — sources and flow
+  cells are the same translucent textured cube; the depth level is sim-only
+  (reach, drying), never a draw height, so floods read as solid water bodies
+  instead of floating ribbons. The general face pass culls water↔water faces
+  (`isWaterId(id) && isWaterId(n)`) so a pool reads as one body. Anything wet
+  is `blocks.isWaterId(id)` — physics, sand (displaced water rides up), blasts
+  (skip both ids), animals/collectibles all use it, never a bare `=== WATER`.
+  Terrain writes cells directly (no hook), so a fresh sea starts still. **Tests:** terrain ponds and the sea are eternal
+  *flowing* sources on this branch — any e2e course near spawn must ring its
+  site with a full-height stone caisson and scrub every wet cell inside, since
+  falling water keeps its depth and one wet cell left above a wall re-rains
+  on the course forever (the sand and water-flow tests do exactly this, and
+  their dry-waits dump wet-cell maps on failure for the next CI sleuth).
 - Treasure chests: the loot roll is `core/treasure.ts` (weights + messages),
   the effects live in `Game.grantTreasure` (no inventory, so prizes happen to
   the world: star counters, `starField.spawnAt` stars, `playerEntity.zoomTime`

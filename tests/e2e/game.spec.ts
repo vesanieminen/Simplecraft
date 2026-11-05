@@ -722,6 +722,19 @@ test('kids can jump out of the water onto the shore', async ({ page }) => {
       }
     }
   }, { ...lake, grass: ids.GRASS, air: ids.AIR });
+  // ...and mop up any flow that crept out beyond the fill box before the
+  // source went away: later tests share this spawn meadow
+  await page.evaluate((arg: { cx: number; cz: number; base: number; water: number; flow: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let dx = -10; dx <= 10; dx++) {
+      for (let dz = -10; dz <= 10; dz++) {
+        for (let y = arg.base - 2; y <= arg.base + 4; y++) {
+          const b = S.get(arg.cx + dx, y, arg.cz + dz);
+          if (b === arg.water || b === arg.flow) S.set(arg.cx + dx, y, arg.cz + dz, 0);
+        }
+      }
+    }
+  }, { ...lake, water: ids.WATER, flow: ids.WATER_FLOW });
   await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); }); // land the refill before the next page boots
 });
 
@@ -888,7 +901,81 @@ test('swimming: paddling like a proper kid — stroke, surface float, kick-up an
       }
     }
   }, { ...lake, grass: ids.GRASS, air: ids.AIR });
+  // ...and mop up any flow that crept out beyond the fill box before the
+  // source went away: later tests share this spawn meadow
+  await page.evaluate((arg: { cx: number; cz: number; base: number; water: number; flow: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let dx = -10; dx <= 10; dx++) {
+      for (let dz = -10; dz <= 10; dz++) {
+        for (let y = arg.base - 2; y <= arg.base + 4; y++) {
+          const b = S.get(arg.cx + dx, y, arg.cz + dz);
+          if (b === arg.water || b === arg.flow) S.set(arg.cx + dx, y, arg.cz + dz, 0);
+        }
+      }
+    }
+  }, { ...lake, water: ids.WATER, flow: ids.WATER_FLOW });
   await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); }); // land the refill before the next page boots
+});
+
+test('sounds carry the material: stone clacks, dirt thuds, water splashes, feet pitter-patter', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  const site = await clearRunway(page);
+
+  const recent = () => page.evaluate(() => (window as any).__lbw.game.audio.recent.slice());
+
+  // build and break a STONE block: both sounds know it is stone
+  const cell = await placeSelected(page, ids.STONE);
+  expect((await recent()).some((s: string) => s === 'place:stone')).toBe(true);
+  await page.evaluate((arg: { c: Cell; b: number }) => {
+    const game = (window as any).__lbw.game;
+    game.hooks().tryRemove(game.players[0], {
+      block: arg.b, x: arg.c.x, y: arg.c.y, z: arg.c.z,
+      px: arg.c.x, py: arg.c.y + 1, pz: arg.c.z, dist: 1,
+    });
+  }, { c: cell, b: ids.STONE });
+  expect((await recent()).some((s: string) => s === 'remove:stone')).toBe(true);
+
+  // walking makes footsteps with the material under the feet (grass = soft).
+  // CI's shared save can leave craters or stone on the runway, so lay a known
+  // strip of grass for the footstep lap first
+  await page.evaluate((arg: { fx: number; fz: number; gy: number; grass: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let x = arg.fx - 1; x <= arg.fx + 7; x++) S.set(x, arg.gy, arg.fz, arg.grass);
+  }, { fx: site.fx, fz: site.fz, gy: site.gy, grass: ids.GRASS });
+  await page.evaluate(() => (window as any).__testPad.setMove(0, -1));
+  await waitForMove(page, { x: site.fx + 0.5, z: site.fz + 0.5 }, 2.5);
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+  expect((await recent()).some((s: string) => s === 'step:soft')).toBe(true);
+
+  // a puddle punched into the runway: entering it splashes — no more land-thud
+  await page.evaluate((arg: { fx: number; fz: number; gy: number; water: number; air: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let x = arg.fx + 4; x <= arg.fx + 6; x++) {
+      S.set(x, arg.gy, arg.fz, arg.air);
+      S.set(x, arg.gy - 1, arg.fz, arg.water);
+    }
+  }, { fx: site.fx, fz: site.fz, gy: site.gy, water: ids.WATER, air: ids.AIR });
+  await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    e.yaw = Math.PI / 2;
+    (window as any).__testPad.setMove(0, -1);
+  });
+  await page.waitForFunction('window.__lbw.game.players[0].entity.inWaterNow === true', null, { timeout: 20000 });
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+  expect((await recent()).some((s: string) => s === 'splash')).toBe(true);
+
+  // fill the puddle back in so later tests find tidy ground
+  await page.evaluate((arg: { fx: number; fz: number; gy: number; grass: number; air: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let x = arg.fx + 4; x <= arg.fx + 6; x++) {
+      S.set(x, arg.gy - 1, arg.fz, arg.grass);
+      S.set(x, arg.gy, arg.fz, arg.air);
+    }
+  }, { fx: site.fx, fz: site.fz, gy: site.gy, grass: ids.GRASS, air: ids.AIR });
 });
 
 test('crouch: the red button sneaks — slow shuffle, ledge protection, crawling low gaps', async ({ page }) => {
@@ -996,15 +1083,34 @@ test('sand obeys gravity: tumbles down, sinks through water, squashes plants and
 
   // flat, known ground for the test columns (three rows deep), and the kid
   // stands on the south edge row: safely clear of every falling column
-  // until part 5 asks for their head
-  await page.evaluate((arg: { x0: number; z0: number; gy: number; stone: number; air: number }) => {
+  // until part 5 asks for their head. A FULL-HEIGHT stone CAISSON rings the
+  // whole site: on this branch terrain ponds and the sea are eternal water
+  // sources that flow, and a CI seed may put the spawn meadow at the sea's
+  // edge. The wall must reach the world roof and the scrub the world floor:
+  // falling water keeps its depth, so a single wet cell left above the wall
+  // re-rains on the site forever (observed in CI). Everything wet inside the
+  // caisson is stoned out — no source survives within, none can enter.
+  await page.evaluate((arg: { x0: number; z0: number; gy: number; stone: number; air: number; water: number; flow: number }) => {
     const S = (window as any).__lbw.game.world;
+    const SY: number = (window as any).__lbw.dims.sy;
+    for (let x = arg.x0 - 3; x <= arg.x0 + 9; x++) {
+      for (let z = arg.z0 - 3; z <= arg.z0 + 3; z++) {
+        const ring = x === arg.x0 - 3 || x === arg.x0 + 9 || z === arg.z0 - 3 || z === arg.z0 + 3;
+        for (let y = 1; y < SY; y++) {
+          if (ring) S.set(x, y, z, arg.stone);
+          else {
+            const b = S.get(x, y, z);
+            if (b === arg.water || b === arg.flow) S.set(x, y, z, arg.stone);
+          }
+        }
+      }
+    }
     for (let x = arg.x0 - 1; x <= arg.x0 + 7; x++) {
       for (let z = arg.z0 - 1; z <= arg.z0 + 1; z++) {
         for (let y = arg.gy; y <= arg.gy + 6; y++) S.set(x, y, z, y === arg.gy ? arg.stone : arg.air);
       }
     }
-  }, { x0, z0, gy, stone: ids.STONE, air: ids.AIR });
+  }, { x0, z0, gy, stone: ids.STONE, air: ids.AIR, water: ids.WATER, flow: ids.WATER_FLOW });
   await page.evaluate((arg: { x: number; y: number; z: number }) => {
     const e = (window as any).__lbw.game.players[0].entity;
     e.pos.set(arg.x, arg.y, arg.z);
@@ -1053,6 +1159,57 @@ test('sand obeys gravity: tumbles down, sinks through water, squashes plants and
   await setCell(bx, gy + 3, z0, ids.SAND);
   await waitForBlock(bx, gy + 1, z0, ids.SAND);
   expect(await blockAt(bx, gy + 2, z0)).toBe(ids.WATER); // the water it displaced rode up
+  // tidy NOW, and completely: while the sand sank through the puddle, the
+  // displaced water rode up as a column of ETERNAL sources — one sim step
+  // late and each of them has fanned a three-storey flood across the runway
+  // (observed). Scrub every wet cell inside the caisson, then wait for the
+  // scrubbed flow to finish drying before the later parts run.
+  await page.evaluate((arg: { x0: number; z0: number; air: number; water: number; flow: number }) => {
+    const S = (window as any).__lbw.game.world;
+    const SY: number = (window as any).__lbw.dims.sy;
+    for (let x = arg.x0 - 2; x <= arg.x0 + 8; x++) {
+      for (let z = arg.z0 - 2; z <= arg.z0 + 2; z++) {
+        for (let y = 1; y < SY; y++) {
+          const b = S.get(x, y, z);
+          if (b === arg.water || b === arg.flow) S.set(x, y, z, arg.air);
+        }
+      }
+    }
+  }, { x0, z0, air: ids.AIR, water: ids.WATER, flow: ids.WATER_FLOW });
+  try {
+    await page.waitForFunction((arg: { x0: number; z0: number; water: number; flow: number }) => {
+      const S = (window as any).__lbw.game.world;
+      const SY: number = (window as any).__lbw.dims.sy;
+      for (let x = arg.x0 - 2; x <= arg.x0 + 8; x++) {
+        for (let z = arg.z0 - 2; z <= arg.z0 + 2; z++) {
+          for (let y = 1; y < SY; y++) {
+            const b = S.get(x, y, z);
+            if (b === arg.water || b === arg.flow) return false;
+          }
+        }
+      }
+      return true;
+    }, { x0, z0, water: ids.WATER, flow: ids.WATER_FLOW }, { timeout: 8000 });
+  } catch (e) {
+    const dump = await page.evaluate((arg: { x0: number; z0: number; water: number; flow: number }) => {
+      const S = (window as any).__lbw.game.world;
+      const { sz, sy } = (window as any).__lbw.dims;
+      const out: string[] = [];
+      for (let x = arg.x0 - 6; x <= arg.x0 + 12; x++) {
+        for (let z = arg.z0 - 6; z <= arg.z0 + 6; z++) {
+          for (let y = 1; y < sy; y++) {
+            const b = S.get(x, y, z);
+            if (b === arg.water || b === arg.flow) {
+              const lvl = S.waterLevel.get((x * sz + z) * sy + y) ?? -1;
+              out.push(`${x},${y},${z}=${b}/L${lvl}`);
+            }
+          }
+        }
+      }
+      return out.join(' ');
+    }, { x0, z0, water: ids.WATER, flow: ids.WATER_FLOW });
+    throw new Error(`sand dry-wait stuck; wet: ${dump}`);
+  }
 
   // 4) falling sand squashes the tallgrass in its way
   const cx = x0 + 4;
@@ -1072,12 +1229,32 @@ test('sand obeys gravity: tumbles down, sinks through water, squashes plants and
   await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
   await setCell(dx, gy + 5, z0, ids.SAND);
   await waitForBlock(dx, gy + 3, z0, ids.SAND); // resting above the head, never in it
-  const kid = await page.evaluate(() => {
+  const kid = await page.evaluate((dbg: { x0: number; z0: number; gy: number; water: number; flow: number }) => {
     const e = (window as any).__lbw.game.players[0].entity;
-    return { y: e.pos.y, inWater: e.inWaterNow };
-  });
+    const w = (window as any).__lbw.game.world;
+    const wet: string[] = [];
+    for (let x = dbg.x0 - 8; x <= dbg.x0 + 14; x++) {
+      for (let z = dbg.z0 - 8; z <= dbg.z0 + 8; z++) {
+        for (let y = dbg.gy - 4; y <= dbg.gy + 8; y++) {
+          const b = w.get(x, y, z);
+          if (b === dbg.water || b === dbg.flow) wet.push(`${x},${y},${z}=${b}`);
+        }
+      }
+    }
+    const cols: string[] = [];
+    for (const x of [dbg.x0 + 1, dbg.x0 + 4, dbg.x0 + 7]) {
+      for (let z = dbg.z0 - 4; z <= dbg.z0 + 10; z++) {
+        let s = `x${x} z${z}: `;
+        for (let y = dbg.gy - 6; y <= dbg.gy + 3; y++) s += w.get(x, y, z) + ' ';
+        cols.push(s);
+      }
+    }
+    const site = (window as any).__lbw.dims;
+    void site;
+    return { y: e.pos.y, inWater: e.inWaterNow, wet, cols, kidPos: `${e.pos.x},${e.pos.y},${e.pos.z}` };
+  }, { x0, z0, gy, water: ids.WATER, flow: ids.WATER_FLOW });
   expect(kid.y).toBeCloseTo(gy + 1, 1); // not crushed, not launched, not teleported
-  expect(kid.inWater).toBe(false);
+  expect(kid.inWater, `kid@${kid.kidPos} gy=${gy} x0=${x0} z0=${z0}\n${kid.cols.join('\n')}\n${kid.wet.join(' ')}`).toBe(false);
   expect(pageErrs, pageErrs.join('\n')).toEqual([]);
 
   // tidy up so later tests still find clean grass near spawn
@@ -1089,6 +1266,150 @@ test('sand obeys gravity: tumbles down, sinks through water, squashes plants and
       }
     }
   }, { x0, z0, gy, grass: ids.GRASS, air: ids.AIR });
+});
+
+test('water flows: a dug channel floods from the source, shallows with reach, falls deep and dries when cut off', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  const site = await clearRunway(page);
+  const { fx, fz, gy } = site;
+
+  // the course: a one-deep channel along the surface row, walls left standing
+  // on both sides, and an eternal source at the near end. A stone WALL rings
+  // the whole site and its floor is sealed, so nothing but our own source can
+  // supply the channel (CI's shard world may be a beach, or carry a failed
+  // test's puddle — and on this branch ponds *flow*, so clearing wet cells
+  // alone is not enough: a source outside the band would refill them).
+  await page.evaluate((arg: { fx: number; fz: number; gy: number; air: number; water: number; flow: number; stone: number }) => {
+    const S = (window as any).__lbw.game.world;
+    const SY: number = (window as any).__lbw.dims.sy;
+    for (let x = arg.fx - 3; x <= arg.fx + 14; x++) {
+      for (let z = arg.fz - 4; z <= arg.fz + 4; z++) {
+        const ring = x === arg.fx - 3 || x === arg.fx + 14 || z === arg.fz - 4 || z === arg.fz + 4;
+        for (let y = 1; y < SY; y++) {
+          if (ring) S.set(x, y, z, arg.stone);
+        }
+      }
+    }
+    for (let x = arg.fx - 2; x <= arg.fx + 13; x++) {
+      for (let z = arg.fz - 3; z <= arg.fz + 3; z++) {
+        for (let y = 1; y < SY; y++) {
+          const b = S.get(x, y, z);
+          if (b === arg.water || b === arg.flow) S.set(x, y, z, arg.air);
+        }
+      }
+    }
+    for (let x = arg.fx - 1; x <= arg.fx + 12; x++) {
+      for (let z = arg.fz - 2; z <= arg.fz + 2; z++) {
+        S.set(x, arg.gy - 1, z, arg.stone); // sealed floor under the whole course
+        for (let y = arg.gy; y <= arg.gy + 2; y++) {
+          const b = S.get(x, y, z);
+          if (b === arg.water || b === arg.flow) S.set(x, y, z, arg.air);
+        }
+      }
+    }
+    for (let x = arg.fx + 2; x <= arg.fx + 10; x++) {
+      S.set(x, arg.gy, arg.fz, arg.air);
+      S.set(x, arg.gy + 1, arg.fz, arg.air); // nothing loiters above the channel
+      S.set(x, arg.gy + 2, arg.fz, arg.air);
+    }
+    S.set(arg.fx + 2, arg.gy, arg.fz, arg.water);
+  }, { fx, fz, gy, air: ids.AIR, water: ids.WATER, flow: ids.WATER_FLOW, stone: ids.STONE });
+
+  // water creeps: wait until it has covered its full six-cell reach
+  await page.waitForFunction((arg: { x6: number; gy: number; fz: number; flow: number }) =>
+    (window as any).__lbw.game.world.get(arg.x6, arg.gy, arg.fz) === arg.flow,
+  { x6: fx + 8, gy, fz, flow: ids.WATER_FLOW }, { timeout: 20000 });
+
+  const cellAt = (x: number, y: number) => page.evaluate((c: { x: number; y: number; z: number }) => {
+    const w = (window as any).__lbw.game.world;
+    const { sz, sy } = (window as any).__lbw.dims;
+    return {
+      id: w.get(c.x, c.y, c.z),
+      lvl: w.waterLevel.get((c.x * sz + c.z) * sy + c.y) ?? -1,
+    };
+  }, { x, y, z: fz });
+
+  // the source stands eternal and full; the channel shallows one step per cell
+  expect((await cellAt(fx + 2, gy)).id).toBe(ids.WATER);
+  for (let k = 1; k <= 6; k++) {
+    const c = await cellAt(fx + 2 + k, gy);
+    expect(c.id, `cell +${k}`).toBe(ids.WATER_FLOW);
+    expect(c.lvl, `depth +${k}`).toBe(k);
+  }
+  // and the supply runs out: nothing wet past six cells
+  expect((await cellAt(fx + 9, gy)).id).toBe(ids.AIR);
+  expect((await cellAt(fx + 10, gy)).id).toBe(ids.AIR);
+
+  // falling water keeps its depth: cut a shaft and the plunge is as deep as the channel above it
+  await page.evaluate((arg: { x: number; gy: number; fz: number; air: number }) => {
+    (window as any).__lbw.game.world.set(arg.x, arg.gy - 1, arg.fz, arg.air);
+  }, { x: fx + 7, gy, fz, air: ids.AIR });
+  await page.waitForFunction((arg: { x: number; gy: number; fz: number; flow: number }) =>
+    (window as any).__lbw.game.world.get(arg.x, arg.gy - 1, arg.fz) === arg.flow,
+  { x: fx + 7, gy, fz, flow: ids.WATER_FLOW }, { timeout: 10000 });
+  expect((await cellAt(fx + 7, gy - 1)).lvl).toBe(5);
+
+  // travelling water (with its depths) rides in the save
+  const saved = await page.evaluate((arg: { x3: number; fz: number; gy: number }) => {
+    const save = (window as any).__lbw.game.world.toSave();
+    const { sz, sy } = (window as any).__lbw.dims;
+    return { version: save.version, at: String((arg.x3 * sz + arg.fz) * sy + arg.gy), levels: save.waterLevels ?? {} };
+  }, { x3: fx + 3, fz, gy });
+  expect(saved.version).toBe(4);
+  expect(saved.levels[saved.at]).toBe(1);
+
+  // break the chain at the source: levels climb, then the whole flood drains away
+  await page.evaluate((arg: { x: number; gy: number; fz: number; air: number }) => {
+    (window as any).__lbw.game.world.set(arg.x, arg.gy, arg.fz, arg.air);
+  }, { x: fx + 2, gy, fz, air: ids.AIR });
+  try {
+    await page.waitForFunction((arg: { fx: number; fz: number; gy: number; sx: number; air: number }) => {
+      const w = (window as any).__lbw.game.world;
+      for (let x = arg.fx + 3; x <= arg.fx + 10; x++) if (w.get(x, arg.gy, arg.fz) !== arg.air) return false;
+      return w.get(arg.sx, arg.gy - 1, arg.fz) === arg.air;
+    }, { fx, fz, gy, sx: fx + 7, air: ids.AIR }, { timeout: 30000 });
+  } catch (e) {
+    const dump = await page.evaluate((arg: { fx: number; fz: number; gy: number; water: number; flow: number }) => {
+      const w = (window as any).__lbw.game.world;
+      const { sz, sy } = (window as any).__lbw.dims;
+      const out: string[] = [];
+      for (let x = arg.fx - 2; x <= arg.fx + 16; x++) {
+        for (let z = arg.fz - 3; z <= arg.fz + 3; z++) {
+          for (let y = arg.gy - 3; y <= arg.gy + 4; y++) {
+            const b = w.get(x, y, z);
+            if (b === arg.water || b === arg.flow) {
+              const lvl = w.waterLevel.get((x * sz + z) * sy + y) ?? -1;
+              out.push(`${x},${y},${z}=${b}/L${lvl}`);
+            }
+          }
+        }
+      }
+      return out.join(' ');
+    }, { fx, fz, gy, water: ids.WATER, flow: ids.WATER_FLOW });
+    throw new Error(`drain stuck; wet: ${dump}`);
+  }
+
+  // water is in the block palette, so kids can make their own ponds
+  await tap(page, 'palette');
+  await page.waitForSelector('.palette-grid');
+  const waterIcon = await page.evaluate(() =>
+    [...document.querySelectorAll('.palette-cell')].some((c) => c.textContent?.includes('\u{1F4A7}')));
+  expect(waterIcon).toBe(true);
+  await tap(page, 'back'); // close the palette again
+  await page.waitForSelector('.palette-grid', { state: 'detached' });
+
+  // tidy up so later tests still find clean grass near spawn (and the save lands
+  // the refill before the next page boots)
+  await page.evaluate((arg: { fx: number; fz: number; gy: number; grass: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let x = arg.fx + 2; x <= arg.fx + 10; x++) S.set(x, arg.gy, arg.fz, arg.grass);
+    S.set(arg.fx + 7, arg.gy - 1, arg.fz, arg.grass);
+  }, { fx, fz, gy, grass: ids.GRASS });
+  await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); });
 });
 /** opens Grown-Up Settings, switches Freeze, and closes the menu again */
 async function setFreeze(page: Page, on: boolean): Promise<void> {
@@ -2128,7 +2449,7 @@ test('doors: two blocks high and half a block deep — build, pat open, walk thr
       swingTop: save.doorFacing?.[at(1)],
     };
   }, door2);
-  expect(saved.version).toBe(3);
+  expect(saved.version).toBe(4);
   expect(saved.bottom).toBe(ids.DOOR);
   expect(saved.top).toBe(ids.DOOR_TOP);
   expect(saved.swingBottom === 0 || saved.swingBottom === 1).toBe(true);
@@ -2401,7 +2722,7 @@ test('stairs: a real step — it points away from the builder, walking one climb
       })),
     };
   }, { run: [0, 1, 2, 3].map((k) => ({ x: step.x + k, y: step.y + k, z: step.z })) });
-  expect(after.version).toBe(3);
+  expect(after.version).toBe(4);
   for (const s of after.run) {
     expect(s.block).toBe(ids.STAIRS);
     expect([0, STAIR_TURN[0]]).toContain(s.facing);
@@ -2466,10 +2787,19 @@ test('treasure chests: every world hides them, and the pet button trades a lid f
   });
   const before = await tally();
 
-  // look down at the chest and press the pet button: the lid comes up
-  await page.evaluate(() => {
-    (window as any).__lbw.game.players[0].entity.pitch = -0.5;
-  });
+  // look at the chest and press the pet button: the lid comes up. Aim
+  // exactly at the chest's middle rather than assuming a fixed pitch:
+  // shared CI shard worlds have uneven ground near spawn, where the chest
+  // can land a cell or two farther than expected and a fixed downward
+  // pitch then hits the floor in front of it and removeTarget never
+  // becomes the chest (observed in CI).
+  await page.evaluate((c: Cell) => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    const dx = c.x + 0.5 - e.pos.x, dz = c.z + 0.5 - e.pos.z;
+    const dy = c.y + 0.45 - (e.pos.y + e.headHeight);
+    e.yaw = Math.atan2(dx, dz);
+    e.pitch = Math.atan2(dy, Math.hypot(dx, dz));
+  }, chest);
   await page.waitForFunction((cids: number[]) => {
     const t = (window as any).__lbw.game.players[0].removeTarget;
     return t !== null && cids.includes(t.block);
@@ -2777,4 +3107,40 @@ test('releasing the mouse stops building — no endless auto-placing', async ({ 
   });
   await page.waitForTimeout(1500);
   expect(await builtHere()).toBe(built);
+});
+
+test('keyboard arrows only tilt the view — ArrowUp never jumps', async ({ page }) => {
+  await boot(page);
+  await page.keyboard.press('Enter'); // keyboard-only join
+  await page.waitForFunction('window.__lbw.game.pendingJoins.size === 1');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction('window.__lbw.game.players.length === 1');
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+
+  const before = await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    return { y: e.pos.y, pitch: e.pitch };
+  });
+  await page.keyboard.down('ArrowUp');
+  await page.waitForTimeout(900); // headless runs at ~half speed: a few game seconds
+  const mid = await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    return { y: e.pos.y, pitch: e.pitch, grounded: e.grounded };
+  });
+  await page.keyboard.up('ArrowUp');
+
+  expect(mid.pitch).toBeGreaterThan(before.pitch + 0.3); // the view tilted up
+  expect(mid.grounded).toBe(true); // ...and the kid never left the ground
+  expect(mid.y).toBeCloseTo(before.y, 3);
+
+  // gamepads keep the double duty: d-pad up still jumps for pad kids
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[1].entity.grounded === true', null, { timeout: 15000 });
+  const startY = await page.evaluate(() => (window as any).__lbw.game.players[1].entity.pos.y);
+  await page.evaluate(() => (window as any).__testPad.press('up'));
+  await page.waitForFunction(
+    (y: number) => (window as any).__lbw.game.players[1].entity.pos.y > y + 0.5,
+    startY, { timeout: 5000 },
+  );
+  await page.evaluate(() => (window as any).__testPad.release('up'));
 });

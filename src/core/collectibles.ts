@@ -4,7 +4,7 @@
  */
 
 import * as THREE from 'three';
-import { WATER } from './blocks';
+import { isWaterId } from './blocks';
 import { WORLD_SX, WORLD_SY, WORLD_SZ, World } from './world';
 
 export interface Star {
@@ -45,7 +45,7 @@ export class StarField {
       if (Math.hypot(x - spawnX, z - spawnZ) < 5) continue;
       const bx = Math.floor(x), bz = Math.floor(z);
       const top = world.surfaceY(bx, bz);
-      if (top < 0 || world.get(bx, top, bz) === WATER) continue;
+      if (top < 0 || isWaterId(world.get(bx, top, bz))) continue;
       const heightBoost = rnd() < 0.3 ? 2 + Math.floor(rnd() * 3) : 1;
       const y = top + 0.5 + heightBoost;
       if (y >= WORLD_SY - 2) continue;

@@ -9,13 +9,14 @@ import { AudioKit } from './core/audio';
 import { AnimalWorld, ANIMAL_KINDS } from './core/animals';
 import {
   blockDef, CHEST, CHEST_OPEN, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, isChestBlock,
-  isDoorBlock, isDoorTopBlock, isExplosiveBlock, isSolidBlock, isStairsBlock,
-  ROCK, rotateStairFacing, SAPLING, StairFacing, STAIRS, WATER,
+  isDoorBlock, isDoorTopBlock, isExplosiveBlock, isSolidBlock, isStairsBlock, isWaterId,
+  ROCK, rotateStairFacing, SAPLING, soundFamilyOf, StairFacing, STAIRS, WATER,
 } from './core/blocks';
 import { StarField } from './core/collectibles';
 import { BlastInfo, DynamiteManager } from './core/dynamite';
 import { ParticleSystem } from './core/particles';
 import { SandGravity } from './core/sand';
+import { WaterFlow } from './core/water';
 import { RayHit } from './core/raycast';
 import { Aabb, aabbOverlapsSolid, blockAabb, boxesOverlap, doorPanelAabb, playerAabb } from './core/physics';
 import { DEFAULT_SEED, generateTerrain, plantTree, themeOf, WORLD_THEMES } from './core/terrain';
@@ -104,6 +105,8 @@ export class Game {
   sand!: SandGravity;
   /** render-only cubes that glide the tumbling sand smoothly down */
   sandFalls!: SandFalls;
+  /** water flows: sources push, travelling water spreads, shallows and dries */
+  water!: WaterFlow;
   /**
    * Player-planted saplings: flat world index -> game time when planted.
    * After `saplingGrowSeconds` of game time (public so tests can hurry it)
@@ -113,13 +116,15 @@ export class Game {
   saplings = new Map<number, number>();
   saplingGrowSeconds = 30;
   private lastLandSound = new Map<number, number>();
+  private lastFootAt = new Map<number, number>();
+  private footAlt = false;
   private lastStroke = new Map<number, number>();
   /** game time of the last "standing in the doorway" toast, so door-spam does not strobe it */
   private lastDoorWarnAt = -10;
   private stepEvents = {
-    landed: false, bounced: null as number | null,
+    landed: false, landedOn: 0, bounced: null as number | null,
     steppedOnMusic: null as null | { note: number; x: number; y: number; z: number },
-    steppedOnSparkle: false, splashed: false, stroked: false,
+    steppedOnSparkle: false, splashed: false, stroked: false, footfall: false, footfallOn: 0,
   };
   private rafId = 0;
 
@@ -190,7 +195,13 @@ export class Game {
       this.scene, this.chunks.materials.textured, (x, z) => this.world.touchAt(x, z),
     );
     this.chunks.skipSand = this.sandFalls.hidden;
-    this.world.onCellChanged = (x, y, z) => this.sand.notify(x, y, z);
+    // water finds its level: the same change hook drives flow spreading and
+    // draining, so digging a trench into the sea floods it cell by cell
+    this.water = new WaterFlow(this.world);
+    this.world.onCellChanged = (x, y, z) => {
+      this.sand.notify(x, y, z);
+      this.water.notify(x, y, z);
+    };
 
     // ---- input ----
     this.input.addSource(new KeyboardSource());
@@ -414,7 +425,12 @@ export class Game {
     const e = p.entity;
     if (ev.landed && this.time - (this.lastLandSound.get(e.id) ?? -9) > 0.25) {
       this.lastLandSound.set(e.id, this.time);
-      this.audio.land();
+      this.audio.land(soundFamilyOf(ev.landedOn));
+    }
+    if (ev.footfall && this.time - (this.lastFootAt.get(e.id) ?? -9) > 0.18) {
+      this.lastFootAt.set(e.id, this.time);
+      this.footAlt = !this.footAlt;
+      this.audio.footstep(soundFamilyOf(ev.footfallOn), this.footAlt);
     }
     if (ev.bounced) this.audio.bounce();
     if (ev.steppedOnMusic) {
@@ -425,18 +441,21 @@ export class Game {
     }
     if (ev.splashed) {
       this.particles.burst(e.pos.x, e.pos.y + 0.3, e.pos.z, 0x7fd0f0, 8, 0.6);
-      this.audio.land();
+      this.audio.splash();
     }
     if (ev.stroked && this.time - (this.lastStroke.get(e.id) ?? -9) > 0.5) {
       this.lastStroke.set(e.id, this.time);
       this.audio.swimStroke();
     }
     ev.landed = false;
+    ev.landedOn = 0;
     ev.bounced = null;
     ev.steppedOnMusic = null;
     ev.steppedOnSparkle = false;
     ev.splashed = false;
     ev.stroked = false;
+    ev.footfall = false;
+    ev.footfallOn = 0;
   }
 
   private openMenu(p: LocalPlayer): void {
@@ -789,7 +808,7 @@ export class Game {
     this.world.set(x, y, z, CHEST_OPEN);
     const treasure = rollTreasure();
     this.grantTreasure(lp, treasure, x, y, z);
-    this.audio.collect();
+    this.audio.chestOpen();
     this.audio.sparkle();
     this.particles.burst(x + 0.5, y + 1.05, z + 0.5, 0xffd24a, 24, 1.5);
     this.ui.toast(`${treasure.icon} ${treasure.message}`, 3200);
@@ -866,7 +885,7 @@ export class Game {
         const door = id === DOOR;
         if (door) {
           const above = this.world.get(px, py + 1, pz);
-          if (!this.world.inBounds(px, py + 1, pz) || isSolidBlock(above) || above === WATER) {
+          if (!this.world.inBounds(px, py + 1, pz) || isSolidBlock(above) || isWaterId(above)) {
             this.particles.burst(px + 0.5, py + 0.5, pz + 0.5, 0xff5d5d, 4, 0.4);
             return false;
           }
@@ -904,7 +923,7 @@ export class Game {
           else this.world.stairFacing.delete(i);
           if (blockDef(cid).sparkle) this.sparkleBlocks.add(i);
         }
-        this.audio.place();
+        this.audio.place(soundFamilyOf(id));
         const def = blockDef(id);
         this.particles.burst(px + 0.5, py + 0.5, pz + 0.5, new THREE.Color(def.color[0], def.color[1], def.color[2]), 7, 0.7);
         if (id === SAPLING) this.saplings.set(worldIdx(px, py, pz), this.time);
@@ -952,7 +971,7 @@ export class Game {
           const c = blockDef(b).color;
           this.particles.burst(hit.x + 0.5, y + 0.5, hit.z + 0.5, new THREE.Color(c[0], c[1], c[2]), 9, 0.9);
         }
-        this.audio.remove();
+        this.audio.remove(soundFamilyOf(hit.block));
         void lp;
       },
       interact: (lp: LocalPlayer): void => {
@@ -1251,6 +1270,7 @@ export class Game {
     this.dynamite.clear(); // no half-burnt sticks from the old world, please
     this.sand.reset();
     this.sandFalls.clear();
+    this.water.reset(); // forget old floods; a fresh world's sea starts still
     // living things and lit fuses that came with a save wake up, same as at boot
     for (const [i, b] of this.world.mods) {
       if (blockDef(b).sparkle) this.sparkleBlocks.add(i);
@@ -1337,6 +1357,7 @@ export class Game {
       this.dynamite.update(dt);
       this.sand.update(dt);
       this.sandFalls.update(dt);
+      this.water.update(dt);
       this.growSaplings();
 
       // ambient sparkles from placed sparkle blocks
