@@ -15,6 +15,7 @@ import {
 import { StarField } from './core/collectibles';
 import { BlastInfo, DynamiteManager } from './core/dynamite';
 import { ParticleSystem } from './core/particles';
+import { SandGravity } from './core/sand';
 import { RayHit } from './core/raycast';
 import { blockAabb, boxesOverlap, playerAabb } from './core/physics';
 import { DEFAULT_SEED, generateTerrain, plantTree, themeOf, WORLD_THEMES } from './core/terrain';
@@ -98,6 +99,8 @@ export class Game {
   private time = 0;
   private sparkleBlocks = new Set<number>();
   dynamite!: DynamiteManager;
+  /** sand obeys gravity: unsupported sand tumbles straight down */
+  sand!: SandGravity;
   /**
    * Player-planted saplings: flat world index -> game time when planted.
    * After `saplingGrowSeconds` of game time (public so tests can hurry it)
@@ -157,6 +160,22 @@ export class Game {
       this.scene, this.world, this.particles, this.audio, (b) => this.onBlast(b),
     );
     this.dynamite.restoreFromWorld();
+
+    // gravity sand: it hears about every changed cell through the world hook,
+    // so digging out under a sand cliff starts the whole column falling
+    this.sand = new SandGravity(this.world, {
+      blockedAt: (x, y, z) =>
+        this.players.some((p) => boxesOverlap(p.entity.aabb, blockAabb(x, y, z))),
+      landed: (x, y, z) => {
+        this.audio.sandThud();
+        this.particles.burst(x + 0.5, y + 1.15, z + 0.5, 0xe6cf96, 5, 0.5);
+      },
+      crushed: (x, y, z) => {
+        this.saplings.delete(worldIdx(x, y, z));
+        this.particles.burst(x + 0.5, y + 0.5, z + 0.5, 0x9fd06a, 5, 0.6);
+      },
+    });
+    this.world.onCellChanged = (x, y, z) => this.sand.notify(x, y, z);
 
     // ---- input ----
     this.input.addSource(new KeyboardSource());
@@ -1146,6 +1165,7 @@ export class Game {
     this.sparkleBlocks.clear();
     this.saplings.clear();
     this.dynamite.clear(); // no half-burnt sticks from the old world, please
+    this.sand.reset();
     // living things and lit fuses that came with a save wake up, same as at boot
     for (const [i, b] of this.world.mods) {
       if (blockDef(b).sparkle) this.sparkleBlocks.add(i);
@@ -1230,6 +1250,7 @@ export class Game {
       this.animals.update(dt);
       this.starField.update(this.time);
       this.dynamite.update(dt);
+      this.sand.update(dt);
       this.growSaplings();
 
       // ambient sparkles from placed sparkle blocks
