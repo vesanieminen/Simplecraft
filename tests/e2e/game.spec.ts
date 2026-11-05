@@ -785,6 +785,100 @@ test('sounds carry the material: stone clacks, dirt thuds, water splashes, feet 
   }, { fx: site.fx, fz: site.fz, gy: site.gy, grass: ids.GRASS, air: ids.AIR });
 });
 
+test('crouch: the red button sneaks — slow shuffle, ledge protection, crawling low gaps', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  const site = await clearRunway(page);
+  const { fx, fz, gy } = site;
+
+  // the course: a pit in the walking row a few blocks ahead, and a
+  // one-block-high tunnel (stone ceiling one block up) in a row next to it
+  await page.evaluate((arg: { fx: number; fz: number; gy: number; stone: number; air: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let x = arg.fx + 3; x <= arg.fx + 7; x++) S.set(x, arg.gy, arg.fz, arg.air); // pit
+    for (let x = arg.fx + 1; x <= arg.fx + 4; x++) S.set(x, arg.gy + 2, arg.fz + 2, arg.stone); // tunnel lid
+  }, { fx, fz, gy, stone: ids.STONE, air: ids.AIR });
+
+  const e = () => page.evaluate(() => {
+    const p = (window as any).__lbw.game.players[0].entity;
+    return { x: p.pos.x, y: p.pos.y, z: p.pos.z, crouch: p.crouching, grounded: p.grounded, sp: Math.hypot(p.vel.x, p.vel.z) };
+  });
+
+  // tap B (the Back button): crouch on — and the shuffle is slow
+  await tap(page, 'back');
+  await page.waitForFunction('window.__lbw.game.players[0].entity.crouching === true', null, { timeout: 8000 });
+  await page.evaluate(() => (window as any).__testPad.setMove(0, -1));
+  await waitForMove(page, { x: fx + 0.5, z: fz + 0.5 }, 1.0);
+  const sneaking = await e();
+  expect(sneaking.sp).toBeLessThan(3.2); // crouched creep, not a 5-block/s walk
+
+  // …and it never walks off the edge of the pit: feet stay supported
+  await waitForMove(page, { x: fx + 0.5, z: fz + 0.5 }, 2.6);
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+  await waitForStop(page);
+  const atEdge = await e();
+  expect(atEdge.x).toBeLessThan(fx + 3.95); // stopped at the lip, did not fall in
+  expect(atEdge.grounded).toBe(true);
+  expect(atEdge.y).toBeCloseTo(gy + 1, 1);
+  expect(atEdge.crouch).toBe(true);
+
+  // tap again to stand, right at the lip
+  await tap(page, 'back');
+  await page.waitForFunction('window.__lbw.game.players[0].entity.crouching === false', null, { timeout: 8000 });
+  const stood = await e();
+  expect(stood.grounded).toBe(true);
+
+  // --- the low tunnel: walking standing runs into the lid, crouching crawls in
+  await page.evaluate((arg: { x: number; y: number; z: number }) => {
+    const p = (window as any).__lbw.game.players[0].entity;
+    p.pos.set(arg.x, arg.y, arg.z);
+    p.vel.set(0, 0, 0);
+  }, { x: fx - 2.5, y: gy + 1, z: fz + 2.5 });
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  await page.evaluate(() => (window as any).__testPad.setMove(0, -1));
+  await waitForMove(page, { x: fx - 2.5, z: fz + 2.5 }, 1.5);
+  await waitForStop(page);
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+  const bumped = await e();
+  expect(bumped.x).toBeLessThan(fx + 0.95); // standing: blocked by the lid
+  expect(bumped.crouch).toBe(false);
+
+  await tap(page, 'back'); // crouch, then walk in
+  await page.waitForFunction('window.__lbw.game.players[0].entity.crouching === true', null, { timeout: 8000 });
+  await page.evaluate(() => (window as any).__testPad.setMove(0, -1));
+  await page.waitForFunction((f: number) => (window as any).__lbw.game.players[0].entity.pos.x > f, fx + 2, { timeout: 20000 });
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+  await waitForStop(page);
+
+  // under the lid: standing up is refused (Minecraft keeps you ducked),
+  // and so is crouch-jumping — tapping the buttons does not stick you to the roof
+  await tap(page, 'back');
+  const stayed = await e();
+  expect(stayed.crouch).toBe(true);
+  await tap(page, 'jump');
+  const afterJump = await e();
+  expect(afterJump.crouch).toBe(true);
+  expect(afterJump.grounded).toBe(true);
+
+  // walk back out and stand freely again
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 1));
+  await page.waitForFunction((f: number) => (window as any).__lbw.game.players[0].entity.pos.x < f, fx - 0.5, { timeout: 20000 });
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+  await waitForStop(page);
+  await tap(page, 'back');
+  await page.waitForFunction('window.__lbw.game.players[0].entity.crouching === false', null, { timeout: 8000 });
+
+  // tidy up: fill the pit, take the lid off
+  await page.evaluate((arg: { fx: number; fz: number; gy: number; grass: number; air: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let x = arg.fx + 3; x <= arg.fx + 7; x++) S.set(x, arg.gy, arg.fz, arg.grass);
+    for (let x = arg.fx + 1; x <= arg.fx + 4; x++) S.set(x, arg.gy + 2, arg.fz + 2, arg.air);
+  }, { fx, fz, gy, grass: ids.GRASS, air: ids.AIR });
+});
+
 test('sand obeys gravity: tumbles down, sinks through water, squashes plants and lands soft on kids', async ({ page }) => {
   test.slow();
   await boot(page);
@@ -1520,6 +1614,7 @@ test('a stick you left lying around is still there after a reload, fuse and all'
   await joinWithPad(page);
   await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 10000 });
   const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  await clearRunway(page); // CI's shared save can litter the aiming row
   const cell = await plantStick(page, 60);
 
   const want = await page.evaluate((c: Cell) => {
@@ -1869,6 +1964,74 @@ test('doors: two blocks high and half a block deep — build, pat open, walk thr
   expect(after.top).toBe(ids.DOOR_TOP);
   expect(after.swingBottom === 0 || after.swingBottom === 1).toBe(true);
   expect(after.swingTop).toBe(after.swingBottom);
+});
+
+test('doors never shove a kid out of the world: spam close while standing in the doorway at the map edge', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+
+  // a stone island hard against the WEST map edge with the door in the edge
+  // column, swung so its near side is the void: exactly the setup the family
+  // found — the old physics closed the panel inside the kid and faceSnap
+  // shoved them along the panel's long axis, over the invisible wall.
+  await page.evaluate((b: { door: number; doorTop: number; stone: number }) => {
+    const game = (window as any).__lbw.game;
+    const { sy, sz } = (window as any).__lbw.dims;
+    for (let x = 0; x <= 5; x++) {
+      for (let z = 0; z <= 4; z++) {
+        for (let y = 8; y <= 12; y++) game.world.set(x, y, z, b.stone);
+        for (let y = 13; y <= 16; y++) game.world.set(x, y, z, 0);
+      }
+    }
+    game.world.set(0, 13, 2, b.door);
+    game.world.set(0, 14, 2, b.doorTop);
+    game.world.doorFacing.set((0 * sz + 2) * sy + 13, 0); // thin along x: the void is one shove away
+    game.world.doorFacing.set((0 * sz + 2) * sy + 14, 0);
+    const e = game.players[0].entity;
+    e.pos.set(1.5, 13, 2.25);
+    e.vel.set(0, 0, 0);
+    e.yaw = -Math.PI / 2; // face the edge — and the door
+    e.pitch = -0.35;
+  }, { door: ids.DOOR, doorTop: ids.DOOR_TOP, stone: ids.STONE });
+
+  await page.waitForFunction((bids: number[]) => {
+    const t = (window as any).__lbw.game.players[0].removeTarget;
+    return t !== null && bids.includes(t.block);
+  }, [ids.DOOR, ids.DOOR_TOP], { timeout: 8000 });
+
+  // step into the doorway and spam the pet button
+  await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    e.pos.set(0.5, 13, 2.25);
+    e.vel.set(0, 0, 0);
+  });
+  const dims = await page.evaluate(() => (window as any).__lbw.dims);
+  for (let i = 0; i < 6; i++) {
+    await tap(page, 'interact');
+    const p = await page.evaluate(() => {
+      const e = (window as any).__lbw.game.players[0].entity;
+      return { x: e.pos.x, y: e.pos.y, z: e.pos.z };
+    });
+    // never flung around: stays within arm's reach of the doorway, on top of
+    // the island, inside the invisible wall — no respawns, no map-edge roulette
+    expect(Math.hypot(p.x - 0.5, p.z - 2.5)).toBeLessThan(2.5);
+    expect(p.y).toBeGreaterThanOrEqual(12.5);
+    expect(p.x).toBeGreaterThanOrEqual(0.35);
+    expect(p.z).toBeGreaterThanOrEqual(0.35);
+    expect(p.x).toBeLessThan(dims.sx - 0.35);
+    expect(p.z).toBeLessThan(dims.sz - 0.35);
+  }
+
+  // whoever holds the door at the end, the kid stands clear of the panel
+  const end = await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    return { bottom: game.world.get(0, 13, 2), x: game.players[0].entity.pos.x };
+  });
+  expect([ids.DOOR, ids.DOOR_OPEN]).toContain(end.bottom);
+  if (end.bottom === ids.DOOR) expect(end.x).toBeGreaterThan(0.78); // east of the shut panel
 });
 
 /** the block id in a cell (`dy` cells above it) */

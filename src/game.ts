@@ -17,7 +17,7 @@ import { BlastInfo, DynamiteManager } from './core/dynamite';
 import { ParticleSystem } from './core/particles';
 import { SandGravity } from './core/sand';
 import { RayHit } from './core/raycast';
-import { blockAabb, boxesOverlap, playerAabb } from './core/physics';
+import { Aabb, aabbOverlapsSolid, blockAabb, boxesOverlap, doorPanelAabb, playerAabb } from './core/physics';
 import { DEFAULT_SEED, generateTerrain, plantTree, themeOf, WORLD_THEMES } from './core/terrain';
 import { BOOST_SECONDS, EMPTY_CHEST_MESSAGE, rollTreasure, Treasure } from './core/treasure';
 import { idx as worldIdx, SavedWorldInfo, World, WorldSaveData, WORLD_SX, WORLD_SY, WORLD_SZ } from './core/world';
@@ -112,6 +112,8 @@ export class Game {
   private lastLandSound = new Map<number, number>();
   private lastFootAt = new Map<number, number>();
   private footAlt = false;
+  /** game time of the last "standing in the doorway" toast, so door-spam does not strobe it */
+  private lastDoorWarnAt = -10;
   private stepEvents = {
     landed: false, landedOn: 0, bounced: null as number | null,
     steppedOnMusic: null as null | { note: number; x: number; y: number; z: number },
@@ -644,7 +646,14 @@ export class Game {
     return Math.abs(Math.sin(lp.entity.yaw)) > Math.abs(Math.cos(lp.entity.yaw)) ? 0 : 1;
   }
 
-  /** the pet/interact button on a door: the whole door swings open, or closes */
+  /**
+   * The pet/interact button on a door: the whole door swings open, or closes.
+   * Closing first makes sure nobody is standing in the doorway — the panel
+   * must never end up inside a player's hitbox: a kid buried in the panel
+   * used to be shoved along its long axis and could shoot straight through
+   * the invisible wall at the map edge (the "the door pushed me out of the
+   * world" bug).
+   */
   private toggleDoor(lp: LocalPlayer, hit: RayHit): void {
     // a door is two cells tall; aim at either half and the pair swings together
     const yBottom = isDoorTopBlock(hit.block) ? hit.y - 1 : hit.y;
@@ -659,6 +668,14 @@ export class Game {
       parts.push([hit.y, hit.block]);
     }
     const opening = parts.some(([, b]) => b === DOOR || b === DOOR_TOP);
+    if (!opening && !this.makeRoomForDoor(lp, hit, parts)) {
+      this.particles.burst(hit.x + 0.5, yBottom + 0.5, hit.z + 0.5, 0xff5d5d, 5, 0.5);
+      if (this.time - this.lastDoorWarnAt > 2) {
+        this.lastDoorWarnAt = this.time;
+        this.ui.toast('Somebody is standing in the doorway!', 1800);
+      }
+      return;
+    }
     for (const [y, b] of parts) {
       const to = b === DOOR ? DOOR_OPEN : b === DOOR_TOP ? DOOR_TOP_OPEN
         : b === DOOR_OPEN ? DOOR : b === DOOR_TOP_OPEN ? DOOR_TOP : b;
@@ -670,6 +687,49 @@ export class Game {
     else this.audio.doorClose();
     this.particles.burst(hit.x + 0.5, yBottom + 1, hit.z + 0.5, 0xd9a766, 6, 0.6);
     this.world.revision++; // the swing itself is a change: let autosave catch it
+  }
+
+  /**
+   * Before the panel swings shut, nudge everyone standing in the doorway to
+   * the near side of it. The panel is half a block deep and thin along
+   * exactly one axis — the walk-through direction — so the shove slides the
+   * kid out through the doorway, never through a wall or the map edge.
+   * Returns false when someone cannot be moved (a critter loitering in the
+   * doorway, or solid walls on both sides): then the close is refused.
+   */
+  private makeRoomForDoor(lp: LocalPlayer, hit: RayHit, parts: [number, number][]): boolean {
+    const panels: Aabb[] = parts.map(([y]) => doorPanelAabb(
+      hit.x, y, hit.z,
+      this.world.doorFacing.get(worldIdx(hit.x, y, hit.z)) ?? this.doorFacingFromAim(lp, hit),
+    ));
+    // animals wander cell to cell and cannot be nudged reliably — the door
+    // just waits for the chicken to move on
+    for (const a of this.animals.animals) {
+      const ab: Aabb = { x: a.pos.x - 0.3, y: a.pos.y, z: a.pos.z - 0.3, w: 0.6, h: 0.8, d: 0.6 };
+      if (panels.some((q) => boxesOverlap(ab, q))) return false;
+    }
+    for (const p of this.players) {
+      const e = p.entity;
+      const panel = panels.find((q) => boxesOverlap(e.aabb, q));
+      if (!panel) continue;
+      const thinX = panel.w < panel.d; // the panel's thin axis = the walk-through axis
+      const lo = thinX ? panel.x : panel.z;
+      const hi = thinX ? panel.x + panel.w : panel.z + panel.d;
+      const cur = thinX ? e.pos.x : e.pos.z;
+      const half = 0.31 + 0.02; // PLAYER_W/2 plus a hair of clearance
+      const near = cur - lo < hi - cur ? lo - half : hi + half;
+      const far = cur - lo < hi - cur ? hi + half : lo - half;
+      for (const side of [near, far]) {
+        if (side < 0.5 || side > (thinX ? WORLD_SX : WORLD_SZ) - 0.5) continue; // never over the edge
+        const px = thinX ? side : e.pos.x;
+        const pz = thinX ? e.pos.z : side;
+        if (aabbOverlapsSolid(this.world, playerAabb(px, e.pos.y, pz))) continue;
+        if (thinX) { e.pos.x = side; e.vel.x = 0; } else { e.pos.z = side; e.vel.z = 0; }
+        break;
+      }
+      if (boxesOverlap(e.aabb, panel)) return false; // nowhere to put them: do not close on top
+    }
+    return true;
   }
 
   /**
