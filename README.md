@@ -398,6 +398,10 @@ atlas is decoded in the page and every cell must be drawn and different from
 all the others, painted blocks must really reach the textured mesh channels
 (including see-through glass and water), and the avatars must be wearing
 cloth, denim and a jumper front. And no black hole in the sky, from any angle.
+And no see-through terrain around a squat block: hidden-face culling is only
+allowed against a neighbour that really fills its cell, which is why the walls
+around a treasure chest (0.85 of a cell tall) keep their faces — a regression
+this round, counted quad by quad in one chunk.
 New this round: a **two-block-high, half-a-block-deep door** gets built with
 one press of the build trigger, stops a walking kid right at the panel (not
 half a block short of it), swings open under the pet button, lets them walk

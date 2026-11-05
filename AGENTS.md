@@ -20,7 +20,9 @@
 - `npm run dev` serves the app and the `api/…` world endpoints on port 3000
   (bound to 0.0.0.0); the e2e suite uses its own server on 3100 with
   `LBW_DATA_DIR=/tmp/opencode/lbw-test-world` — delete that directory for a
-  fresh world.
+  fresh world. Delete it before a **subset** run (`-g "…"`) as well: tests build
+  stairs, open chests and blast craters near spawn, and that save carries into
+  the next run, which makes unrelated tests time out waiting for an aim target.
 - `scripts/hero-shot.ts` and `scripts/feature-shots.ts` regenerate the README
   screenshots against a :3100 server; headless Chromium has no emoji font, so
   both scripts swap/strip emoji in the DOM before shooting.
@@ -84,6 +86,11 @@
   lets a kid walk up a step without jumping. A staircase is built one block
   over and one block up (that is what aiming while walking produces), and the
   step above does bump a 1.8-tall head from underneath — that is correct.
+  Hidden-face culling asks `blocks.isFullCellBlock` (opaque **and** a whole cell
+  tall), never `isOpaqueBlock`: a chest is 0.85 of a cell, so treating it as a
+  cube made its neighbours drop the shared face and the terrain around every
+  chest went see-through. AO still uses `isOpaqueBlock`. The regression test
+  counts quads in one chunk's `textured` channel through `__lbw.chunkGeometry`.
 - Treasure chests: the loot roll is `core/treasure.ts` (weights + messages),
   the effects live in `Game.grantTreasure` (no inventory, so prizes happen to
   the world: star counters, `starField.spawnAt` stars, `playerEntity.zoomTime`

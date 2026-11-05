@@ -7,8 +7,8 @@
 import * as THREE from 'three';
 import {
   ATLAS_CELL_COUNT, ATLAS_DOOR, ATLAS_PLANKS, blockDef, isCrossBlock, isDoorBlock,
-  isDoorClosedBlock, isOpaqueBlock, isStairsBlock, isTranslucentBlock, PLANT_ATLAS_CELLS,
-  StairFacing, stairBoxes, VoxelBox,
+  isDoorClosedBlock, isFullCellBlock, isOpaqueBlock, isStairsBlock, isTranslucentBlock,
+  PLANT_ATLAS_CELLS, StairFacing, stairBoxes, VoxelBox,
 } from './blocks';
 import { CHUNK, idx as worldIdx, WORLD_SY, World } from './world';
 
@@ -215,7 +215,7 @@ export function buildChunkGeometry(world: World, cx: number, cz: number): ChunkG
           const f = FACES[fi];
           const nx = x + f.dir[0], ny = y + f.dir[1], nz = z + f.dir[2];
           const n = world.get(nx, ny, nz);
-          if (isOpaqueBlock(n)) continue;
+          if (isFullCellBlock(n)) continue; // that neighbour already covers this face
           if (n === id) continue; // water-water, glass-glass: hide interior
 
           // base tint for this face
@@ -407,7 +407,7 @@ function addTexturedSubBox(
     const f = FACES[fi];
     if (opts.skip?.[fi]) continue;
     if (cullFlush && flush[fi]
-      && (isOpaqueBlock(world.get(cx + f.dir[0], cy + f.dir[1], cz + f.dir[2])) || doorSeamCovers(world, box, cx, cy, cz, fi))) continue;
+      && (isFullCellBlock(world.get(cx + f.dir[0], cy + f.dir[1], cz + f.dir[2])) || doorSeamCovers(world, box, cx, cy, cz, fi))) continue;
     const shade = FACE_SHADE[fi] * vary;
     const tint: [number, number, number][] = [
       [shade, shade, shade], [shade, shade, shade], [shade, shade, shade], [shade, shade, shade],
