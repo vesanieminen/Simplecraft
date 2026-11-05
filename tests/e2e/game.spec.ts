@@ -860,6 +860,67 @@ test('swimming: paddling like a proper kid — stroke, surface float, kick-up an
   await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); }); // land the refill before the next page boots
 });
 
+test('sounds carry the material: stone clacks, dirt thuds, water splashes, feet pitter-patter', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  const site = await clearRunway(page);
+
+  const recent = () => page.evaluate(() => (window as any).__lbw.game.audio.recent.slice());
+
+  // build and break a STONE block: both sounds know it is stone
+  const cell = await placeSelected(page, ids.STONE);
+  expect((await recent()).some((s: string) => s === 'place:stone')).toBe(true);
+  await page.evaluate((arg: { c: Cell; b: number }) => {
+    const game = (window as any).__lbw.game;
+    game.hooks().tryRemove(game.players[0], {
+      block: arg.b, x: arg.c.x, y: arg.c.y, z: arg.c.z,
+      px: arg.c.x, py: arg.c.y + 1, pz: arg.c.z, dist: 1,
+    });
+  }, { c: cell, b: ids.STONE });
+  expect((await recent()).some((s: string) => s === 'remove:stone')).toBe(true);
+
+  // walking makes footsteps with the material under the feet (grass = soft).
+  // CI's shared save can leave craters or stone on the runway, so lay a known
+  // strip of grass for the footstep lap first
+  await page.evaluate((arg: { fx: number; fz: number; gy: number; grass: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let x = arg.fx - 1; x <= arg.fx + 7; x++) S.set(x, arg.gy, arg.fz, arg.grass);
+  }, { fx: site.fx, fz: site.fz, gy: site.gy, grass: ids.GRASS });
+  await page.evaluate(() => (window as any).__testPad.setMove(0, -1));
+  await waitForMove(page, { x: site.fx + 0.5, z: site.fz + 0.5 }, 2.5);
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+  expect((await recent()).some((s: string) => s === 'step:soft')).toBe(true);
+
+  // a puddle punched into the runway: entering it splashes — no more land-thud
+  await page.evaluate((arg: { fx: number; fz: number; gy: number; water: number; air: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let x = arg.fx + 4; x <= arg.fx + 6; x++) {
+      S.set(x, arg.gy, arg.fz, arg.air);
+      S.set(x, arg.gy - 1, arg.fz, arg.water);
+    }
+  }, { fx: site.fx, fz: site.fz, gy: site.gy, water: ids.WATER, air: ids.AIR });
+  await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    e.yaw = Math.PI / 2;
+    (window as any).__testPad.setMove(0, -1);
+  });
+  await page.waitForFunction('window.__lbw.game.players[0].entity.inWaterNow === true', null, { timeout: 20000 });
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+  expect((await recent()).some((s: string) => s === 'splash')).toBe(true);
+
+  // fill the puddle back in so later tests find tidy ground
+  await page.evaluate((arg: { fx: number; fz: number; gy: number; grass: number; air: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let x = arg.fx + 4; x <= arg.fx + 6; x++) {
+      S.set(x, arg.gy - 1, arg.fz, arg.grass);
+      S.set(x, arg.gy, arg.fz, arg.air);
+    }
+  }, { fx: site.fx, fz: site.fz, gy: site.gy, grass: ids.GRASS, air: ids.AIR });
+});
+
 test('crouch: the red button sneaks — slow shuffle, ledge protection, crawling low gaps', async ({ page }) => {
   test.slow();
   await boot(page);
@@ -2669,10 +2730,19 @@ test('treasure chests: every world hides them, and the pet button trades a lid f
   });
   const before = await tally();
 
-  // look down at the chest and press the pet button: the lid comes up
-  await page.evaluate(() => {
-    (window as any).__lbw.game.players[0].entity.pitch = -0.5;
-  });
+  // look at the chest and press the pet button: the lid comes up. Aim
+  // exactly at the chest's middle rather than assuming a fixed pitch:
+  // shared CI shard worlds have uneven ground near spawn, where the chest
+  // can land a cell or two farther than expected and a fixed downward
+  // pitch then hits the floor in front of it and removeTarget never
+  // becomes the chest (observed in CI).
+  await page.evaluate((c: Cell) => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    const dx = c.x + 0.5 - e.pos.x, dz = c.z + 0.5 - e.pos.z;
+    const dy = c.y + 0.45 - (e.pos.y + e.headHeight);
+    e.yaw = Math.atan2(dx, dz);
+    e.pitch = Math.atan2(dy, Math.hypot(dx, dz));
+  }, chest);
   await page.waitForFunction((cids: number[]) => {
     const t = (window as any).__lbw.game.players[0].removeTarget;
     return t !== null && cids.includes(t.block);

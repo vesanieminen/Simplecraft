@@ -1,10 +1,12 @@
 /**
  * Procedural WebAudio sound kit — all sounds are synthesized here,
- * no external assets, all original.
+ * no external assets, all original. The kit layers tones and filtered
+ * noise so blocks knock, thud, clack and rustle like their material.
  */
 
 // type-only, so there is no import cycle with core/animals.ts (which uses AudioKit)
 import type { AnimalKind } from './animals';
+import type { SoundFamily } from './blocks';
 
 export class AudioKit {
   private ctx: AudioContext | null = null;
@@ -13,6 +15,8 @@ export class AudioKit {
   volume = 0.6;
   muted = false;
   private lastNoteAt = new Map<string, number>();
+  /** ring of recent sound names (material-aware) — lets tests check the wiring headlessly */
+  readonly recent: string[] = [];
 
   /** must be called from a user gesture (first button press) */
   resume(): void {
@@ -80,22 +84,116 @@ export class AudioKit {
     src.stop(t + dur + 0.02);
   }
 
-  place(): void {
-    this.tone('triangle', 330, 190, 0.09, 0.25);
-    this.noise(0.06, 0.15, 900);
+  private log(name: string): void {
+    this.recent.push(name);
+    if (this.recent.length > 30) this.recent.shift();
   }
 
-  remove(): void {
-    this.tone('triangle', 210, 130, 0.1, 0.22);
-    this.noise(0.09, 0.2, 1400);
+  /**
+   * Setting a block down: one knock per material. Wood knocks, stone
+   * clacks, dirt and sand thud, glass pings, plants rustle.
+   */
+  place(family: SoundFamily = 'wood'): void {
+    this.log(`place:${family}`);
+    switch (family) {
+      case 'stone':
+        this.tone('triangle', 180, 110, 0.08, 0.2);
+        this.noise(0.05, 0.13, 2400, 0, 'highpass');
+        this.noise(0.09, 0.09, 700, 0.02);
+        break;
+      case 'soft':
+        this.noise(0.11, 0.2, 480);
+        this.tone('sine', 120, 80, 0.08, 0.09);
+        break;
+      case 'glass':
+        this.tone('sine', 1350, 1250, 0.16, 0.11);
+        this.tone('sine', 1900, 1750, 0.1, 0.05, 0.02);
+        this.noise(0.04, 0.05, 5200, 0, 'highpass');
+        break;
+      case 'plant':
+        this.noise(0.09, 0.13, 2600, 0, 'bandpass');
+        this.tone('sine', 420, 300, 0.07, 0.05);
+        break;
+      default: // wood
+        this.tone('triangle', 300, 180, 0.09, 0.24);
+        this.noise(0.05, 0.12, 800);
+    }
+  }
+
+  /** breaking a block: the material's knock, roughened, with falling debris */
+  remove(family: SoundFamily = 'wood'): void {
+    this.log(`remove:${family}`);
+    switch (family) {
+      case 'stone':
+        this.tone('square', 160, 90, 0.1, 0.16);
+        this.noise(0.16, 0.22, 1800, 0, 'bandpass');
+        this.noise(0.1, 0.1, 900, 0.08);
+        break;
+      case 'soft':
+        this.noise(0.16, 0.22, 620);
+        this.noise(0.1, 0.08, 1400, 0.07);
+        break;
+      case 'glass':
+        this.tone('sine', 2100, 1500, 0.1, 0.1);
+        this.noise(0.14, 0.2, 4200, 0, 'highpass'); // tinkle of shards
+        this.noise(0.1, 0.07, 6500, 0.05, 'highpass');
+        break;
+      case 'plant':
+        this.noise(0.13, 0.16, 3000, 0, 'bandpass'); // crunch/rustle
+        this.tone('sine', 350, 240, 0.08, 0.05);
+        break;
+      default: // wood
+        this.tone('triangle', 220, 120, 0.1, 0.22);
+        this.noise(0.12, 0.16, 1200);
+    }
+  }
+
+  /** the block under a landing or a footfall decides that sound too */
+  land(family: SoundFamily = 'soft'): void {
+    this.log(`land:${family}`);
+    switch (family) {
+      case 'stone': this.noise(0.07, 0.16, 900); this.tone('sine', 140, 90, 0.08, 0.1); break;
+      case 'wood': this.noise(0.06, 0.12, 700); this.tone('triangle', 160, 110, 0.07, 0.08); break;
+      case 'glass': this.tone('sine', 1500, 1400, 0.08, 0.05); this.noise(0.04, 0.06, 4000, 0, 'highpass'); break;
+      case 'plant': this.noise(0.08, 0.1, 2400, 0, 'bandpass'); break;
+      default: this.noise(0.09, 0.13, 500); // soft earth
+    }
+  }
+
+  footstep(family: SoundFamily = 'soft', alt = false): void {
+    this.log(`step:${family}`);
+    const t = alt ? 1.13 : 1; // alternate the pitch a hair, like real shoes
+    switch (family) {
+      case 'stone': this.noise(0.05, 0.07 * t, 1600, 0, 'bandpass'); break;
+      case 'wood': this.tone('triangle', 190 * t, 150, 0.05, 0.05); break;
+      case 'glass': this.tone('sine', 2000 * t, 1900, 0.04, 0.03); break;
+      case 'plant': this.noise(0.05, 0.05, 3000, 0, 'bandpass'); break;
+      default: this.noise(0.06, 0.07, 620); // soft earth, quietest
+    }
+  }
+
+  /** hitting the water: a slap, a blop, droplets — the works */
+  splash(): void {
+    this.log('splash');
+    this.noise(0.05, 0.3, 1500, 0, 'highpass');  // the slap on the surface
+    this.noise(0.22, 0.24, 620, 0.03);           // the body going in
+    this.tone('sine', 320, 720, 0.16, 0.1, 0.02); // the rising blop
+    this.tone('sine', 900, 520, 0.1, 0.05, 0.2);  // a droplet off the splash
+    this.noise(0.12, 0.07, 900, 0.26);           // waves settling
+  }
+
+  /** a treasure chest's lid: wooden creak, then a surprise chime */
+  chestOpen(): void {
+    this.log('chestOpen');
+    this.tone('sawtooth', 160, 215, 0.3, 0.07);
+    this.noise(0.1, 0.05, 1200, 0.05);
+    [784, 1047, 1319].forEach((f, i) => this.tone('triangle', f, f, 0.16, 0.12, 0.12 + i * 0.07));
   }
 
   jump(): void {
-    this.tone('sine', 250, 430, 0.13, 0.18);
-  }
-
-  land(): void {
-    this.noise(0.08, 0.12, 500);
+    this.log('jump');
+    this.tone('sine', 250, 430, 0.13, 0.16);
+    this.noise(0.04, 0.05, 800); // little shove-off scuff
   }
 
   collect(): void {

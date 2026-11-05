@@ -150,6 +150,14 @@ event. Renaming a storage key orphans the family's existing saves.
   cube made its neighbours drop the shared face and the terrain around every
   chest went see-through. AO still uses `isOpaqueBlock`. The regression test
   counts quads in one chunk's `textured` channel through `__lbw.chunkGeometry`.
+- Sounds are all procedural WebAudio (`core/audio.ts`) and **material-aware**:
+  `blocks.soundFamilyOf(id)` → wood/stone/soft/glass/plant recipes for
+  `place`/`remove`/`land`/`footstep`. Footsteps ride `StepEvents.footfall`
+  (one per ~1.7 blocks walked, throttled per player in `Game`, alternating
+  pitch via `footAlt`); `landedOn` gives landings the right thud; water
+  entry/exit is `audio.splash()`, chests are `chestOpen()`. `AudioKit.recent`
+  is a 30-entry ring of sound names — the headless e2e asserts the wiring
+  through it (`sounds carry the material` test).
 - Doors: closing one **makes room first** — `Game.makeRoomForDoor` nudges any
   player overlapping the soon-to-be panel out along the panel's thin axis
   (the walk-through direction) to the nearer clear side, and refuses the
