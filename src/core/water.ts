@@ -142,6 +142,8 @@ export class WaterFlow {
   private spread(x: number, y: number, z: number, level: number): void {
     if (y > 1) this.setFlow(x, y - 1, z, level); // pours straight down, full depth
     if (level < MAX_WATER_LEVEL) {
+      // side spread regardless of what is under the target — water reaching
+      // the edge of a ledge pours over it, like the big game
       this.setFlow(x + 1, y, z, level + 1);
       this.setFlow(x - 1, y, z, level + 1);
       this.setFlow(x, y, z + 1, level + 1);
