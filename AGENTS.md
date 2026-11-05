@@ -100,6 +100,16 @@ event. Renaming a storage key orphans the family's existing saves.
   cube made its neighbours drop the shared face and the terrain around every
   chest went see-through. AO still uses `isOpaqueBlock`. The regression test
   counts quads in one chunk's `textured` channel through `__lbw.chunkGeometry`.
+- Sand obeys gravity (`core/sand.ts`, `Game.sand`): a cell **changed** id is
+  what drives it — `World.onCellChanged` fires from `world.set` for every
+  change (buttons, blasts, tests, the sim itself) and `SandGravity.notify`
+  tracks the sand at/above that cell, so digging under a cliff cascades:
+  each cell's own `set` re-notifies the one above. One cell per step
+  (~8/s), water sinks through (displaced water rides up), cross plants are
+  squashed (`crushed` hook forgets the sapling), and it never occupies a
+  cell a player overlaps — it just rests over their head with `sandThud`.
+  Terrain writes cells directly (no hook), so natural sand never falls
+  until something changes under it — same as floating sand in Minecraft.
 - Treasure chests: the loot roll is `core/treasure.ts` (weights + messages),
   the effects live in `Game.grantTreasure` (no inventory, so prizes happen to
   the world: star counters, `starField.spawnAt` stars, `playerEntity.zoomTime`
