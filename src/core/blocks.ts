@@ -372,9 +372,14 @@ export function rotateStairFacing(facing: number): StairFacing {
   return turn[facing >= 0 && facing <= 3 ? facing : 0] as StairFacing;
 }
 
-/** Blocks offered in the child-friendly creative palette (in order). */
+/**
+ * Blocks offered in the child-friendly creative palette (in order). Treasure
+ * chests are deliberately NOT here — they are meant to be *found*, hidden in
+ * the terrain by terrain.ts, not built. Break one or pet it to open; once a
+ * lid is up (CHEST_OPEN) it stays open in that world forever.
+ */
 export const PALETTE: BlockId[] = [
-  GRASS, DIRT, STONE, SAND, WOOD, PLANKS, STAIRS, SLAB, DOOR, CHEST, BRICKS, GLASS, LEAVES,
+  GRASS, DIRT, STONE, SAND, WOOD, PLANKS, STAIRS, SLAB, DOOR, BRICKS, GLASS, LEAVES,
   SAPLING, FLOWER_RED, FLOWER_YELLOW, TALLGRASS,
   GLOW, BOUNCY, SPARKLE, MUSIC, DYNAMITE,
   C_RED, C_ORANGE, C_YELLOW, C_GREEN, C_BLUE, C_PURPLE, C_PINK, C_WHITE,
@@ -382,6 +387,6 @@ export const PALETTE: BlockId[] = [
 
 /** Quick-cycling favorites for shoulder buttons. */
 export const FAVORITES: BlockId[] = [
-  GRASS, PLANKS, STAIRS, SLAB, BRICKS, GLASS, DOOR, CHEST, GLOW, BOUNCY, SPARKLE, MUSIC, DYNAMITE,
+  GRASS, PLANKS, STAIRS, SLAB, BRICKS, GLASS, DOOR, GLOW, BOUNCY, SPARKLE, MUSIC, DYNAMITE,
   C_RED, C_BLUE, C_PINK, C_YELLOW,
 ];

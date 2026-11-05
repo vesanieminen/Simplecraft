@@ -2361,10 +2361,29 @@ test('treasure chests: every world hides them, and the pet button trades a lid f
   await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
   await clearRunway(page);
 
-  // a chest can also be built: it is one squat cell, not a two-cell door
-  const chest = await placeSelected(page, ids.CHEST);
+  // chests are not in the palette any more — you find them in the world. So
+  // drop one into the cell the kid is aiming at (terrain-style) and check it
+  // is one squat cell, not a two-cell door like the build path used to allow
+  const chest = await page.evaluate((chestId: number) => {
+    const game = (window as any).__lbw.game;
+    const t = game.players[0].target;
+    const c = { x: t.px, y: t.py, z: t.pz };
+    game.world.set(c.x, c.y, c.z, chestId);
+    return c;
+  }, ids.CHEST);
   expect(await blockAtCell(page, chest)).toBe(ids.CHEST);
   expect(await blockAtCell(page, chest, 1)).toBe(ids.AIR);
+
+  // and confirm the palette really no longer offers the chest
+  await tap(page, 'palette');
+  await page.waitForSelector('.palette-grid');
+  const chestInPalette = await page.evaluate((chestId: number) => {
+    return [...document.querySelectorAll('.palette-cell')].some(
+      (c) => Number((c as HTMLElement).dataset.id) === chestId,
+    );
+  }, ids.CHEST);
+  expect(chestInPalette).toBe(false);
+  await tap(page, 'back'); // close the palette again
 
   const tally = () => page.evaluate(() => {
     const game = (window as any).__lbw.game;
