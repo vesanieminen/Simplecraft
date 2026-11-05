@@ -1,5 +1,14 @@
 # Agent notes for this repo
 
+## Naming
+
+The game is **Elocraft** (title, welcome screen, page title, docs). The GitHub
+repository is still `Simplecraft`, so the Pages URL stays
+`https://vesanieminen.github.io/Simplecraft/`. Internal ids still carry the
+first name and must keep doing so: the `lbw-*` localStorage keys (saves, world
+index, settings), `LBW_DATA_DIR`, `window.__lbw` and the `lbw-open-palette`
+event. Renaming a storage key orphans the family's existing saves.
+
 ## Git workflow (always)
 
 - **Never push directly to `main`.** Always work on a feature branch and open

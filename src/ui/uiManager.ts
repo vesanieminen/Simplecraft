@@ -27,7 +27,7 @@ export class UiManager {
     this.welcomeEl.className = 'global-layer';
     this.welcomeEl.innerHTML = `
       <div class="welcome">
-        <h1>🧱 Little Block World</h1>
+        <h1>🧱 Elocraft</h1>
         <div class="press">Press any button on a controller to join!</div>
         <div class="sub" style="color:#fff;margin-top:10px">Pick a world first: Y / △ (F)</div>
         <div class="sub" style="color:#fff;margin-top:4px">Keyboard: press Enter to join, F for worlds</div>

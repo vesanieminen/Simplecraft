@@ -1,11 +1,12 @@
-# 🧱 Little Block World
+# 🧱 Elocraft
 
-![Little Block World — a kid's house in the meadow at golden hour](docs/screenshots/hero.jpg)
+![Elocraft — a kid's house in the meadow at golden hour](docs/screenshots/hero.jpg)
 
 A colorful, controller-first voxel sandbox for kids — inspired by Minecraft
 Creative mode, built for a 5-year-old and a parent on one couch.
 
 - 🎮 **Play online right now:** <https://vesanieminen.github.io/Simplecraft/>
+  (the repository is still named `Simplecraft`, its older name — same game)
   (in-browser save, see [How the world saves](#how-the-world-saves) — a split-screen
   couch session also works on one machine with two controllers plugged into it)
 - No accounts, no internet needed after install, no external services.
@@ -254,7 +255,7 @@ synthesized in code, like every pixel.
 
 ![Every block type, painted from the atlas](docs/screenshots/blocks.jpg)
 
-There are no flat-coloured cubes in Little Block World: every block is drawn
+There are no flat-coloured cubes in Elocraft: every block is drawn
 into one procedural 32-px atlas at startup — grass with a fringe over dirt,
 dirt clods, stone boulders with cracks, sand grain, bark and growth rings on
 log ends, planks with real board gaps, staggered joints and nail heads,

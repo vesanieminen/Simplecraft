@@ -929,6 +929,11 @@ export class Game {
   // The few grown-up settings that belong to the whole browser (split-screen
   // layout, sound on/off) keep their own little localStorage key, so a
   // family's tablet stays the way they left it.
+  //
+  // Every browser storage key keeps the `lbw-` prefix from the game's first
+  // name (Little Block World). The game is Elocraft now, but renaming the keys
+  // would orphan every world and setting the family already has, so the old
+  // prefix stays where nobody sees it.
 
   private settingsKey = 'lbw-settings';
 
