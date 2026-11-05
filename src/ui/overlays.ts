@@ -9,7 +9,7 @@ import { AudioKit } from '../core/audio';
 import { computeHeights, themeOf, WORLD_THEMES } from '../core/terrain';
 import { SavedWorldInfo, WATER_LEVEL, WORLD_SX, WORLD_SZ } from '../core/world';
 import { ControllerType, FrameControls } from '../input/types';
-import { AVATAR_COLORS, NICKNAMES } from '../players/avatar';
+import { AVATAR_COLORS, AVATAR_MODELS, modelDef, NICKNAMES } from '../players/avatar';
 import { LocalPlayer } from '../players/localPlayer';
 import { NavHelper } from './nav';
 
@@ -70,16 +70,18 @@ function btnLabels(type: ControllerType): { a: string; b: string; lr: string; ud
 export class JoinCard extends Overlay {
   private colorIdx = 0;
   private nameIdx = 0;
+  private modelIdx = 0;
   private headEl!: HTMLElement;
   private torsoEl!: HTMLElement;
   private nameEl!: HTMLElement;
+  private modelEl!: HTMLElement;
   private swatchEls: HTMLElement[] = [];
 
   constructor(
     audio: AudioKit,
     type: ControllerType,
     playerNumber: number,
-    private onConfirm: (colorIdx: number, nameIdx: number) => void,
+    private onConfirm: (colorIdx: number, nameIdx: number, modelIdx: number) => void,
   ) {
     super(audio, type);
     const c = this.card(`Player ${playerNumber} — pick a friend!`);
@@ -97,6 +99,10 @@ export class JoinCard extends Overlay {
     this.nameEl.className = 'name-big';
     c.appendChild(this.nameEl);
 
+    this.modelEl = document.createElement('div');
+    this.modelEl.className = 'model-name';
+    c.appendChild(this.modelEl);
+
     const row = document.createElement('div');
     row.className = 'swatch-row';
     for (const col of AVATAR_COLORS) {
@@ -109,15 +115,17 @@ export class JoinCard extends Overlay {
     c.appendChild(row);
 
     const k = btnLabels(type);
-    this.keys(c, [[k.ud, 'change'], [k.a, 'join!'], [k.b, 'cancel']]);
+    this.keys(c, [[k.ud, 'name'], [k.lr, 'costume'], [k.a, 'join!'], [k.b, 'cancel']]);
     this.refresh();
   }
 
   private refresh(): void {
     const col = AVATAR_COLORS[this.colorIdx];
+    const model = AVATAR_MODELS[this.modelIdx];
     this.headEl.style.background = col.hex;
     this.torsoEl.style.background = col.hex;
     this.nameEl.textContent = NICKNAMES[this.nameIdx];
+    this.modelEl.textContent = `${model.icon} ${model.name}`;
     this.swatchEls.forEach((s, i) => s.classList.toggle('sel', i === this.colorIdx));
   }
 
@@ -128,10 +136,12 @@ export class JoinCard extends Overlay {
     if (nav.right) { this.colorIdx = (this.colorIdx + 1) % AVATAR_COLORS.length; changed = true; }
     if (nav.up) { this.nameIdx = (this.nameIdx + NICKNAMES.length - 1) % NICKNAMES.length; changed = true; }
     if (nav.down) { this.nameIdx = (this.nameIdx + 1) % NICKNAMES.length; changed = true; }
+    if (frame.pressed.has('nextBlock')) { this.modelIdx = (this.modelIdx + 1) % AVATAR_MODELS.length; changed = true; }
+    if (frame.pressed.has('prevBlock')) { this.modelIdx = (this.modelIdx + AVATAR_MODELS.length - 1) % AVATAR_MODELS.length; changed = true; }
     if (changed) { this.audio.uiMove(); this.refresh(); }
     if (nav.confirm) {
       this.audio.uiSelect();
-      this.onConfirm(this.colorIdx, this.nameIdx);
+      this.onConfirm(this.colorIdx, this.nameIdx, this.modelIdx);
       this.close();
     }
     if (nav.back) {
@@ -246,6 +256,7 @@ export class PaletteOverlay extends Overlay {
 export interface MenuActions {
   toggleFly(): void;
   toggleCamera(): void;
+  cycleCostume(): void;
   goHome(): void;
   toggleSound(): void;
   openHelp(): void;
@@ -282,6 +293,7 @@ export class PlayerMenu extends Overlay {
       },
       { icon: '🏠', label: 'Go Home', fn: () => { actions.goHome(); this.close(); } },
       { icon: '🎨', label: 'Blocks', fn: () => { this.close(); window.dispatchEvent(new CustomEvent('lbw-open-palette', { detail: this.player.entity.id })); } },
+      { icon: '🎭', label: 'Costume', val: () => `${modelDef(player.entity.model).icon} ${modelDef(player.entity.model).name}`, fn: () => { actions.cycleCostume(); } },
       { icon: '🎮', label: 'Help', fn: () => { this.close(); actions.openHelp(); } },
       { icon: '🔊', label: 'Sound', val: () => (this.soundOn() ? 'ON' : 'OFF'), fn: () => actions.toggleSound() },
       { icon: '🧑', label: 'Grown-Ups', fn: () => { this.close(); actions.openGrownUps(); } },
@@ -763,7 +775,7 @@ const PAD_ROWS: [string, string][] = [
   ['A', 'Jump'],
   ['LT', 'Place block'],
   ['RT', 'Break block'],
-  ['LB / RB', 'Prev / next block'],
+  ['LB / RB', 'Prev / next block · costume at join'],
   ['X', 'Pet · open doors & chests · turn stairs'],
   ['Y', 'Block palette'],
   ['START', 'Menu'],

@@ -10,7 +10,7 @@ import {
   grounded as groundedTest, headClearOfWater, MoveResult,
 } from '../core/physics';
 import { World, WORLD_SX, WORLD_SZ, WORLD_SY } from '../core/world';
-import { AvatarParts, animateAvatar, createAvatar } from './avatar';
+import { AvatarParts, animateAvatar, createAvatar, ModelId, nextModel } from './avatar';
 
 export const GRAVITY = 26;
 export const JUMP_V = 8.9;
@@ -74,17 +74,44 @@ export class PlayerEntity {
   private wasInAir = false;
   private wasInWater = false;
 
-  readonly avatar: AvatarParts;
+  avatar: AvatarParts;
+  /** the costume this kid picked (see players/avatar.ts AVATAR_MODELS) */
+  model: ModelId;
 
   constructor(
     public id: number,
     public name: string,
     public colorHex: string,
     public spawn: THREE.Vector3,
+    model: ModelId = 'kid',
   ) {
     this.pos = spawn.clone();
-    this.avatar = createAvatar(colorHex);
+    this.model = model;
+    this.avatar = createAvatar(colorHex, model);
     this.syncAvatar(0);
+  }
+
+  /**
+   * Swap the costume mid-game: build the new avatar, and if the old one is in
+   * the scene, the new one slides into the very same place (Game re-layers all
+   * bodies every frame, so the split-screen visibility sorts itself out).
+   */
+  setModel(model: ModelId): void {
+    if (model === this.model) return;
+    const old = this.avatar.group;
+    const parent = old.parent;
+    this.model = model;
+    this.avatar = createAvatar(this.colorHex, model);
+    this.syncAvatar(0);
+    if (parent) {
+      parent.remove(old);
+      parent.add(this.avatar.group);
+    }
+  }
+
+  cycleModel(): ModelId {
+    this.setModel(nextModel(this.model));
+    return this.model;
   }
 
   get aabb() {

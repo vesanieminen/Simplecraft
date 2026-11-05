@@ -27,7 +27,7 @@ import { ControllerType, InputSource, FrameControls, emptyFrame } from './input/
 import { VirtualPadSource } from './input/virtual';
 import { LocalPlayer } from './players/localPlayer';
 import { PlayerEntity } from './players/playerEntity';
-import { AVATAR_COLORS, NICKNAMES } from './players/avatar';
+import { AVATAR_COLORS, AVATAR_MODELS, modelDef, NICKNAMES } from './players/avatar';
 import { ChunkMeshManager } from './render/chunkMeshes';
 import { createSky, SKY_CLEAR, SKY_FAR, SkyEnv } from './render/sky';
 import { SplitLayout, ViewportManager } from './render/viewportManager';
@@ -272,7 +272,7 @@ export class Game {
     if (this.players.length + this.pendingJoins.size >= MAX_PLAYERS) return;
     if (this.pendingJoins.has(s.id)) return;
     const card = new JoinCard(this.audio, s.controllerType, this.players.length + this.pendingJoins.size + 1,
-      (colorIdx, nameIdx) => this.confirmJoin(s, colorIdx, nameIdx));
+      (colorIdx, nameIdx, modelIdx) => this.confirmJoin(s, colorIdx, nameIdx, modelIdx));
     const cam = new THREE.PerspectiveCamera(70, 1, 0.1, SKY_FAR);
     const pane = this.players.length + this.pendingJoins.size;
     this.pendingJoins.set(s.id, { source: s, card, camera: cam, angle: Math.random() * 6 });
@@ -282,16 +282,17 @@ export class Game {
     this.ui.toast('Say hello to a new friend!');
   }
 
-  private confirmJoin(s: InputSource, colorIdx: number, nameIdx: number): void {
+  private confirmJoin(s: InputSource, colorIdx: number, nameIdx: number, modelIdx: number): void {
     this.pendingJoins.delete(s.id);
     const idx = this.players.length;
     const color = AVATAR_COLORS[colorIdx % AVATAR_COLORS.length];
     const name = NICKNAMES[nameIdx % NICKNAMES.length];
+    const model = AVATAR_MODELS[((modelIdx % AVATAR_MODELS.length) + AVATAR_MODELS.length) % AVATAR_MODELS.length];
     const spawn = this.spawnPoint.clone();
     spawn.x += Math.cos(idx * Math.PI / 2) * 2.2;
     spawn.z += Math.sin(idx * Math.PI / 2) * 2.2;
     const entity = new PlayerEntity(
-      this.nextEntityId(), name, color.hex, spawn,
+      this.nextEntityId(), name, color.hex, spawn, model.id,
     );
     entity.yaw = Math.atan2(this.spawnPoint.x - spawn.x, this.spawnPoint.z - spawn.z);
     this.scene.add(entity.avatar.group);
@@ -428,6 +429,11 @@ export class Game {
       {
         toggleFly: () => { p.entity.flying = !p.entity.flying; p.entity.vel.y = 0; },
         toggleCamera: () => { p.firstPerson = !p.firstPerson; },
+        cycleCostume: () => {
+          const m = p.entity.cycleModel();
+          const def = modelDef(m);
+          this.ui.toast(`${p.entity.name} is now a ${def.name}! ${def.icon}`);
+        },
         goHome: () => { p.respawnAt(this.spawnPoint.clone()); },
         toggleSound: () => { this.audio.setMuted(!this.audio.muted); this.saveSettings(); },
         openHelp: () => {
