@@ -10,7 +10,7 @@ import { AnimalWorld, ANIMAL_KINDS } from './core/animals';
 import {
   blockDef, CHEST, CHEST_OPEN, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, isChestBlock,
   isDoorBlock, isDoorTopBlock, isExplosiveBlock, isSolidBlock, isStairsBlock,
-  ROCK, rotateStairFacing, SAPLING, StairFacing, STAIRS, WATER,
+  ROCK, rotateStairFacing, SAPLING, soundFamilyOf, StairFacing, STAIRS, WATER,
 } from './core/blocks';
 import { StarField } from './core/collectibles';
 import { BlastInfo, DynamiteManager } from './core/dynamite';
@@ -107,10 +107,12 @@ export class Game {
   saplings = new Map<number, number>();
   saplingGrowSeconds = 30;
   private lastLandSound = new Map<number, number>();
+  private lastFootAt = new Map<number, number>();
+  private footAlt = false;
   private stepEvents = {
-    landed: false, bounced: null as number | null,
+    landed: false, landedOn: 0, bounced: null as number | null,
     steppedOnMusic: null as null | { note: number; x: number; y: number; z: number },
-    steppedOnSparkle: false, splashed: false,
+    steppedOnSparkle: false, splashed: false, footfall: false, footfallOn: 0,
   };
   private rafId = 0;
 
@@ -379,7 +381,12 @@ export class Game {
     const e = p.entity;
     if (ev.landed && this.time - (this.lastLandSound.get(e.id) ?? -9) > 0.25) {
       this.lastLandSound.set(e.id, this.time);
-      this.audio.land();
+      this.audio.land(soundFamilyOf(ev.landedOn));
+    }
+    if (ev.footfall && this.time - (this.lastFootAt.get(e.id) ?? -9) > 0.18) {
+      this.lastFootAt.set(e.id, this.time);
+      this.footAlt = !this.footAlt;
+      this.audio.footstep(soundFamilyOf(ev.footfallOn), this.footAlt);
     }
     if (ev.bounced) this.audio.bounce();
     if (ev.steppedOnMusic) {
@@ -390,13 +397,16 @@ export class Game {
     }
     if (ev.splashed) {
       this.particles.burst(e.pos.x, e.pos.y + 0.3, e.pos.z, 0x7fd0f0, 8, 0.6);
-      this.audio.land();
+      this.audio.splash();
     }
     ev.landed = false;
+    ev.landedOn = 0;
     ev.bounced = null;
     ev.steppedOnMusic = null;
     ev.steppedOnSparkle = false;
     ev.splashed = false;
+    ev.footfall = false;
+    ev.footfallOn = 0;
   }
 
   private openMenu(p: LocalPlayer): void {
@@ -686,7 +696,7 @@ export class Game {
     this.world.set(x, y, z, CHEST_OPEN);
     const treasure = rollTreasure();
     this.grantTreasure(lp, treasure, x, y, z);
-    this.audio.collect();
+    this.audio.chestOpen();
     this.audio.sparkle();
     this.particles.burst(x + 0.5, y + 1.05, z + 0.5, 0xffd24a, 24, 1.5);
     this.ui.toast(`${treasure.icon} ${treasure.message}`, 3200);
@@ -801,7 +811,7 @@ export class Game {
           else this.world.stairFacing.delete(i);
           if (blockDef(cid).sparkle) this.sparkleBlocks.add(i);
         }
-        this.audio.place();
+        this.audio.place(soundFamilyOf(id));
         const def = blockDef(id);
         this.particles.burst(px + 0.5, py + 0.5, pz + 0.5, new THREE.Color(def.color[0], def.color[1], def.color[2]), 7, 0.7);
         if (id === SAPLING) this.saplings.set(worldIdx(px, py, pz), this.time);
@@ -849,7 +859,7 @@ export class Game {
           const c = blockDef(b).color;
           this.particles.burst(hit.x + 0.5, y + 0.5, hit.z + 0.5, new THREE.Color(c[0], c[1], c[2]), 9, 0.9);
         }
-        this.audio.remove();
+        this.audio.remove(soundFamilyOf(hit.block));
         void lp;
       },
       interact: (lp: LocalPlayer): void => {
