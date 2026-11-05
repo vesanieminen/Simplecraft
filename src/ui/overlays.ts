@@ -163,6 +163,7 @@ export class PaletteOverlay extends Overlay {
       const def = blockDef(id);
       const cell = document.createElement('div');
       cell.className = 'palette-cell';
+      cell.dataset.id = String(id);
       cell.style.background = `rgb(${def.color.map((x) => Math.round(x * 255)).join(',')})`;
       cell.innerHTML = `<div>${def.icon}</div><div class="pn">${def.name}</div>`;
       cell.addEventListener('click', () => {

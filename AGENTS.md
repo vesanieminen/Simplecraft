@@ -141,5 +141,8 @@ event. Renaming a storage key orphans the family's existing saves.
   the effects live in `Game.grantTreasure` (no inventory, so prizes happen to
   the world: star counters, `starField.spawnAt` stars, `playerEntity.zoomTime`
   / `boingTime`, `animals.spawn`). Opened = `CHEST_OPEN` in the voxel, so it
-  needs no extra save field. Terrain hides `CHESTS_PER_WORLD` chests in
-  `generateTerrain` step 6 — remember `idx` strides y by 1, not by `WORLD_SY`.
+  needs no extra save field — once a lid is up it is open in that world
+  forever, and an empty one toasts `EMPTY_CHEST_MESSAGE`. Chests are NOT in
+  `PALETTE`/`FAVORITES` on purpose: they are only *found* in the environment,
+  never built. Terrain hides `CHESTS_PER_WORLD` chests in `generateTerrain`
+  step 6 — remember `idx` strides y by 1, not by `WORLD_SY`.
