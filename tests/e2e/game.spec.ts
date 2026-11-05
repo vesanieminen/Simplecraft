@@ -2284,7 +2284,7 @@ test('grown-up settings — split layout and sound — come back after a reload'
   await tap(page, 'back');
   await tap(page, 'menu');
   await page.waitForSelector('.menu-list');
-  await selectRow(page, 7); // Sound
+  await selectRow(page, 8); // Sound
   await tap(page, 'jump');
   expect(await page.evaluate(() => (window as any).__lbw.game.audio.muted)).toBe(true);
 
