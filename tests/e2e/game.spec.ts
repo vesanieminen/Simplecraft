@@ -804,17 +804,74 @@ test('swimming: paddling like a proper kid — stroke, surface float, kick-up an
   await frames(page, 10); // let the paddle resume from that yaw
 
   // surface float: stop swimming and the kid bobs near the surface, not
-  // plunging to the bottom
-  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
-  await frames(page, 45);
+  // plunging to the bottom — and the water goes quiet: idle floating must
+  // not keep firing stroke pulls (the endless whoosh was the complaint)
+  await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    (window as any).__testPad.setMove(0, 0);
+    (window as any).__floatStroke = game.lastStroke.get(game.players[0].entity.id) ?? -9;
+  });
+  await page.waitForTimeout(2500); // several stroke intervals of just floating
   const bob = await page.evaluate(() => {
     const e = (window as any).__lbw.game.players[0].entity;
-    return { y: e.pos.y, vy: e.vel.y, head: e.inWaterNow };
+    const game = (window as any).__lbw.game;
+    return {
+      y: e.pos.y, vy: e.vel.y, head: e.inWaterNow,
+      stroke: game.lastStroke.get(e.id) ?? -9, before: (window as any).__floatStroke,
+    };
   });
   expect(bob.y).toBeGreaterThan(lake.base - 1.7); // stayed near the surface
   expect(bob.vy).toBeGreaterThan(-1.2); // …and sinking like a leaf, not a stone
+  expect(bob.stroke).toBe(bob.before); // …and not one stroke pull while floating
 
-  // holding jump kicks up and out of the pond, and the body rights itself on land
+  // the pond is deep: hold the sneak button and the kid DIVES instead of
+  // bobbing at the surface. Move to the middle first — this test pond is
+  // only six cells wide, and near ANY wall nearShore is true (there the
+  // push-off jump is correct behaviour). Open water means no wall within
+  // reach: nothing here may ever launch the kid.
+  await page.evaluate((l: { cx: number; cz: number; base: number }) => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    e.pos.set(l.cx + 0.5, l.base - 3, l.cz + 1.5);
+    e.vel.set(0, 0, 0);
+  }, lake);
+  await frames(page, 4);
+  await page.evaluate(() => (window as any).__testPad.press('back'));
+  await page.waitForFunction(
+    (l: { cx: number; cz: number; base: number }) => {
+      const e = (window as any).__lbw.game.players[0].entity;
+      return e.pos.y < l.base - 4.2 && Math.abs(e.pos.x - (l.cx + 0.5)) < 1.5;
+    },
+    lake, { timeout: 12000 },
+  );
+  const dived = await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    return { y: e.pos.y, swimming: e.swimmingNow };
+  });
+  expect(dived.swimming).toBe(true); // a diver, not a faller
+
+  // …and holding jump in MID-water just kicks you up to the surface — with
+  // the head clear and NO shore in reach, there is no push-off leap. (The
+  // bunny-hopping across open ponds was the complaint; the shore jump-out
+  // lives in its own test, where there IS a shore.)
+  await page.evaluate(() => (window as any).__testPad.set('jump', true));
+  await page.waitForFunction(
+    (l: { base: number }) => (window as any).__lbw.game.players[0].entity.pos.y > l.base - 1.0,
+    lake, { timeout: 15000 },
+  );
+  const midWater = await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    return { y: e.pos.y, swimming: e.swimmingNow, launch: e.waterJump };
+  });
+  expect(midWater.y).toBeGreaterThan(dived.y + 1.0); // kicked up, for sure
+  expect(midWater.swimming).toBe(true); // still swimming at the surface, not airborne
+  expect(midWater.launch).toBe(0); // and the surface push-off never armed
+  await page.evaluate(() => {
+    (window as any).__testPad.set('jump', false);
+    (window as any).__testPad.release('back');
+  });
+
+  // holding jump at the shore kicks up and out of the pond, and the body
+  // rights itself on land
   await page.evaluate(() => {
     (window as any).__lbw.game.players[0].entity.yaw = Math.PI;
     (window as any).__testPad.set('jump', true);

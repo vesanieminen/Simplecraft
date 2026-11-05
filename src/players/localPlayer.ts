@@ -108,19 +108,24 @@ export class LocalPlayer {
     }
 
     // ---- crouch (B / Circle / Ctrl): tap to crouch, tap again to stand ----
-    if (!worldMenuBlock && (frame.pressed.has('crouch') || frame.pressed.has('back'))) {
+    // in water those buttons are the DIVE control instead (see swimDown), so
+    // the squat toggle stays ashore — no half-crouched kids paddling about
+    if (!worldMenuBlock && !this.entity.swimmingNow && (frame.pressed.has('crouch') || frame.pressed.has('back'))) {
       this.entity.toggleCrouch(this.world);
     }
 
     // ---- step simulation ----
     const stepInput = worldMenuBlock
-      ? { moveX: 0, moveY: 0, jump: false, flyUp: false, flyDown: false, dt }
+      ? { moveX: 0, moveY: 0, jump: false, swimDown: false, flyUp: false, flyDown: false, dt }
       : {
           moveX: frame.move.x,
           moveY: frame.move.y,
           // d-pad up doubles as jump — but NOT on a keyboard, where the arrow
           // keys are the look controls (ArrowUp tilts the view, nothing else)
           jump: frame.held.has('jump') || (frame.kind !== 'keyboard' && frame.held.has('up')),
+          // swim down: the sneak buttons (Ctrl / B / ◯) do double duty in
+          // water — the Minecraft convention of shift sinking you
+          swimDown: frame.held.has('crouch') || frame.held.has('back'),
           flyUp: frame.held.has('jump'),
           flyDown: frame.held.has('interact') && this.entity.flying,
           dt,

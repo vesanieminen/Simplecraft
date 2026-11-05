@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { blockDef } from '../core/blocks';
 import {
   canStandAt, CROUCH_H, inWater, moveAabb, PLAYER_H, playerAabb,
-  grounded as groundedTest, headClearOfWater, submergedFraction, MoveResult,
+  grounded as groundedTest, headClearOfWater, nearShore, submergedFraction, MoveResult,
 } from '../core/physics';
 import { World, WORLD_SX, WORLD_SZ, WORLD_SY } from '../core/world';
 import { AvatarParts, animateAvatar, createAvatar, ModelId, nextModel } from './avatar';
@@ -25,6 +25,7 @@ export const BOING_MUL = 1.4;
 
 const JUMP_BUFFER = 0.16; // a jump pressed just before landing still counts
 const SWIM_UP_V = 3.2; // hold jump to kick up through the water
+const SWIM_DOWN_V = -2.6; // hold sneak (Ctrl / B / ◯ / d-pad down) to dive
 const SWIM_SINK_V = -1.8; // fastest anyone sinks when nobody holds jump
 const SWIM_TRIM = 0.62; // this fraction of the body under water is neutral buoyancy
 const STROKE_SECONDS = 0.85; // one breaststroke pull per…
@@ -35,6 +36,8 @@ export interface StepInput {
   moveX: number; // strafe (-1..1)
   moveY: number; // forward (-1..1)
   jump: boolean; // want jump (already edge-handled by caller for buffering)
+  /** in water: hold to swim DOWN (sneak buttons do double duty there) */
+  swimDown?: boolean;
   flyUp: boolean;
   flyDown: boolean;
   dt: number;
@@ -184,23 +187,31 @@ export class PlayerEntity {
       if (input.flyDown) vy -= FLY_VERT;
       this.vel.y += (vy - this.vel.y) * (1 - Math.exp(-12 * dt));
     } else if (swimming) {
-      // gentle buoyancy: hold jump to kick up; deep under floats you back to
-      // the surface, shallow water lets you wade down — like the big game
+      // gentle buoyancy: hold jump to kick up, hold the sneak key to dive;
+      // deep under floats you back to the surface, shallow water lets you
+      // wade down — like the big game
       const targetVy = input.jump ? SWIM_UP_V
+        : input.swimDown ? SWIM_DOWN_V
         : Math.max(SWIM_SINK_V, Math.min(SWIM_UP_V, (submergedFraction(world, this.aabb) - SWIM_TRIM) * 2.2));
       this.vel.y += (targetVy - this.vel.y) * (1 - Math.exp(-6 * dt));
-      // strokes: a pull every strokeT, with a muffled whoosh
+      // strokes: a pull every strokeT, with a muffled whoosh — but only while
+      // the kid is actually paddling. Floating about in the water is quiet
+      // (Nov 2026: the endless underwater whoosh whenever anyone was wet got
+      // a complaint; the entry/exit splashes stay)
+      const paddling = input.jump || !!input.swimDown || Math.hypot(input.moveX, input.moveY) > 0.1;
       this.strokeT -= dt;
       if (this.strokeT <= 0) {
         this.strokeT = STROKE_SECONDS;
-        events.stroked = true;
+        if (paddling) events.stroked = true;
       }
-      // climbing out of a lake: buoyancy alone can never lift a whole block, so
-      // once the head is clear of the surface the jump button becomes a real
-      // jump that carries them up onto the shore.
+      // climbing out of a lake: buoyancy alone can never lift a whole block,
+      // so at the surface the jump button becomes a real jump onto the shore —
+      // but ONLY where a shore (or pool wall) is right there. Out in open
+      // water, held jump just kicks you up to the surface and bobs: no more
+      // endless hopping across the pond (Nov 2026 request).
       if (input.jump) this.jumpBuffer = JUMP_BUFFER;
       this.coyote = 0; // no stale land-jump while paddling
-      if (this.jumpBuffer > 0 && headClearOfWater(world, this.aabb)) {
+      if (this.jumpBuffer > 0 && headClearOfWater(world, this.aabb) && nearShore(world, this.aabb)) {
         this.vel.y = WATER_JUMP_V * (this.boingTime > 0 ? BOING_MUL : 1);
         this.jumpBuffer = 0;
         this.waterJump = WATER_JUMP_TIME;

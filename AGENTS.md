@@ -89,10 +89,17 @@ event. Renaming a storage key orphans the family's existing saves.
   the vertical target is `(frac - SWIM_TRIM) * 2.2`, so deep under drifts you
   up and shallow water lets you wade; a passive kid settles head-out at the
   surface instead of sinking to the bottom (a pure "cap fall speed" swim made
-  walk-ins plunge to the pond floor). Hold jump to kick (`SWIM_UP_V`); the
-  surface push-off jump only fires once `headClearOfWater` (the existing
-  shore-escape rule, keep it). Strokes tick `events.stroked` every
-  `STROKE_SECONDS` → `Game.lastStroke` dedups → `audio.swimStroke`. The avatar
+  walk-ins plunge to the pond floor). Hold jump to kick (`SWIM_UP_V`), hold
+  the sneak buttons (Ctrl / B / ◯ — `stepInput.swimDown`, `SWIM_DOWN_V`; the
+  crouch *toggle* is refused while swimming) to dive. The surface push-off
+  jump needs `headClearOfWater` AND `physics.nearShore` (solid cell at foot/
+  waist one step in any direction) — open water must never bunny-hop the kid
+  (Nov 2026 complaint; the swimming test asserts `waterJump` stays 0 for a
+  mid-pond kick). Strokes tick `events.stroked` every
+  `STROKE_SECONDS` **only while paddling** (move/jump/dive input — idle
+  floating is quiet, Nov 2026 complaint; the swimming test asserts
+  `lastStroke` freezes while floating) → `Game.lastStroke` dedups →
+  `audio.swimStroke`. The avatar
   leans face-down (`syncAvatar` rotation.x ≈ 1.2) with a breaststroke/flutter
   pose from `animateAvatar(..., swimming)`. The avatar group MUST keep
   `rotation.order = 'YXZ'` (set in `createAvatar`): three's default 'XYZ'
