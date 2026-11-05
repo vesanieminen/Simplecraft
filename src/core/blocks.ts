@@ -1,5 +1,5 @@
 /**
- * Block registry — every block type in Little Block World.
+ * Block registry — every block type in Elocraft.
  * Colors are toy-bright, not realistic. No Minecraft assets; all original.
  */
 

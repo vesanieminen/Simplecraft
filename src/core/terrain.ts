@@ -1,5 +1,5 @@
 /**
- * Deterministic, seeded terrain generation for Little Block World.
+ * Deterministic, seeded terrain generation for Elocraft.
  * Style: rolling meadows, a welcoming flat starting meadow, forests,
  * lakes with sandy beaches, small caves, flowers and trees.
  */

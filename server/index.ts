@@ -1,5 +1,5 @@
 /**
- * Little Block World server.
+ * Elocraft server.
  * Serves the app (Vite middleware in dev, built assets in prod) and the
  * world persistence API. Same port for everything — LAN-friendly.
  */
@@ -221,7 +221,7 @@ async function main(): Promise<void> {
       }
     }
     console.log('');
-    console.log('  🧱 Little Block World is running!');
+    console.log('  🧱 Elocraft is running!');
     console.log('  ──────────────────────────────────');
     console.log(`  This computer:   http://localhost:${PORT}`);
     for (const ip of ips) {
