@@ -746,7 +746,13 @@ test('sounds carry the material: stone clacks, dirt thuds, water splashes, feet 
   }, { c: cell, b: ids.STONE });
   expect((await recent()).some((s: string) => s === 'remove:stone')).toBe(true);
 
-  // walking makes footsteps with the material under the feet (grass = soft)
+  // walking makes footsteps with the material under the feet (grass = soft).
+  // CI's shared save can leave craters or stone on the runway, so lay a known
+  // strip of grass for the footstep lap first
+  await page.evaluate((arg: { fx: number; fz: number; gy: number; grass: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let x = arg.fx - 1; x <= arg.fx + 7; x++) S.set(x, arg.gy, arg.fz, arg.grass);
+  }, { fx: site.fx, fz: site.fz, gy: site.gy, grass: ids.GRASS });
   await page.evaluate(() => (window as any).__testPad.setMove(0, -1));
   await waitForMove(page, { x: site.fx + 0.5, z: site.fz + 0.5 }, 2.5);
   await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
