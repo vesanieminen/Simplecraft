@@ -722,6 +722,19 @@ test('kids can jump out of the water onto the shore', async ({ page }) => {
       }
     }
   }, { ...lake, grass: ids.GRASS, air: ids.AIR });
+  // ...and mop up any flow that crept out beyond the fill box before the
+  // source went away: later tests share this spawn meadow
+  await page.evaluate((arg: { cx: number; cz: number; base: number; water: number; flow: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let dx = -10; dx <= 10; dx++) {
+      for (let dz = -10; dz <= 10; dz++) {
+        for (let y = arg.base - 2; y <= arg.base + 4; y++) {
+          const b = S.get(arg.cx + dx, y, arg.cz + dz);
+          if (b === arg.water || b === arg.flow) S.set(arg.cx + dx, y, arg.cz + dz, 0);
+        }
+      }
+    }
+  }, { ...lake, water: ids.WATER, flow: ids.WATER_FLOW });
 });
 
 test('crouch: the red button sneaks — slow shuffle, ledge protection, crawling low gaps', async ({ page }) => {
@@ -829,16 +842,25 @@ test('sand obeys gravity: tumbles down, sinks through water, squashes plants and
 
   // flat, known ground for the test columns (three rows deep), and the kid
   // stands on the south edge row: safely clear of every falling column
-  // until part 5 asks for their head. Any standing water bordering the
-  // runway (shallow ponds dot the meadow) is boxed out with stone first, so
-  // the water sim can never flow into the test columns mid-assertion.
+  // until part 5 asks for their head. A FULL-HEIGHT stone CAISSON rings the
+  // whole site: on this branch terrain ponds and the sea are eternal water
+  // sources that flow, and a CI seed may put the spawn meadow at the sea's
+  // edge. The wall must reach the world roof and the scrub the world floor:
+  // falling water keeps its depth, so a single wet cell left above the wall
+  // re-rains on the site forever (observed in CI). Everything wet inside the
+  // caisson is stoned out — no source survives within, none can enter.
   await page.evaluate((arg: { x0: number; z0: number; gy: number; stone: number; air: number; water: number; flow: number }) => {
     const S = (window as any).__lbw.game.world;
-    for (let x = arg.x0 - 2; x <= arg.x0 + 8; x++) {
-      for (let z = arg.z0 - 2; z <= arg.z0 + 2; z++) {
-        for (let y = arg.gy - 1; y <= arg.gy + 6; y++) {
-          const b = S.get(x, y, z);
-          if (b === arg.water || b === arg.flow) S.set(x, y, z, arg.stone);
+    const SY: number = (window as any).__lbw.dims.sy;
+    for (let x = arg.x0 - 3; x <= arg.x0 + 9; x++) {
+      for (let z = arg.z0 - 3; z <= arg.z0 + 3; z++) {
+        const ring = x === arg.x0 - 3 || x === arg.x0 + 9 || z === arg.z0 - 3 || z === arg.z0 + 3;
+        for (let y = 1; y < SY; y++) {
+          if (ring) S.set(x, y, z, arg.stone);
+          else {
+            const b = S.get(x, y, z);
+            if (b === arg.water || b === arg.flow) S.set(x, y, z, arg.stone);
+          }
         }
       }
     }
@@ -882,6 +904,57 @@ test('sand obeys gravity: tumbles down, sinks through water, squashes plants and
   await setCell(bx, gy + 3, z0, ids.SAND);
   await waitForBlock(bx, gy + 1, z0, ids.SAND);
   expect(await blockAt(bx, gy + 2, z0)).toBe(ids.WATER); // the water it displaced rode up
+  // tidy NOW, and completely: while the sand sank through the puddle, the
+  // displaced water rode up as a column of ETERNAL sources — one sim step
+  // late and each of them has fanned a three-storey flood across the runway
+  // (observed). Scrub every wet cell inside the caisson, then wait for the
+  // scrubbed flow to finish drying before the later parts run.
+  await page.evaluate((arg: { x0: number; z0: number; air: number; water: number; flow: number }) => {
+    const S = (window as any).__lbw.game.world;
+    const SY: number = (window as any).__lbw.dims.sy;
+    for (let x = arg.x0 - 2; x <= arg.x0 + 8; x++) {
+      for (let z = arg.z0 - 2; z <= arg.z0 + 2; z++) {
+        for (let y = 1; y < SY; y++) {
+          const b = S.get(x, y, z);
+          if (b === arg.water || b === arg.flow) S.set(x, y, z, arg.air);
+        }
+      }
+    }
+  }, { x0, z0, air: ids.AIR, water: ids.WATER, flow: ids.WATER_FLOW });
+  try {
+    await page.waitForFunction((arg: { x0: number; z0: number; water: number; flow: number }) => {
+      const S = (window as any).__lbw.game.world;
+      const SY: number = (window as any).__lbw.dims.sy;
+      for (let x = arg.x0 - 2; x <= arg.x0 + 8; x++) {
+        for (let z = arg.z0 - 2; z <= arg.z0 + 2; z++) {
+          for (let y = 1; y < SY; y++) {
+            const b = S.get(x, y, z);
+            if (b === arg.water || b === arg.flow) return false;
+          }
+        }
+      }
+      return true;
+    }, { x0, z0, water: ids.WATER, flow: ids.WATER_FLOW }, { timeout: 8000 });
+  } catch (e) {
+    const dump = await page.evaluate((arg: { x0: number; z0: number; water: number; flow: number }) => {
+      const S = (window as any).__lbw.game.world;
+      const { sz, sy } = (window as any).__lbw.dims;
+      const out: string[] = [];
+      for (let x = arg.x0 - 6; x <= arg.x0 + 12; x++) {
+        for (let z = arg.z0 - 6; z <= arg.z0 + 6; z++) {
+          for (let y = 1; y < sy; y++) {
+            const b = S.get(x, y, z);
+            if (b === arg.water || b === arg.flow) {
+              const lvl = S.waterLevel.get((x * sz + z) * sy + y) ?? -1;
+              out.push(`${x},${y},${z}=${b}/L${lvl}`);
+            }
+          }
+        }
+      }
+      return out.join(' ');
+    }, { x0, z0, water: ids.WATER, flow: ids.WATER_FLOW });
+    throw new Error(`sand dry-wait stuck; wet: ${dump}`);
+  }
 
   // 4) falling sand squashes the tallgrass in its way
   const cx = x0 + 4;
@@ -901,12 +974,32 @@ test('sand obeys gravity: tumbles down, sinks through water, squashes plants and
   await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
   await setCell(dx, gy + 5, z0, ids.SAND);
   await waitForBlock(dx, gy + 3, z0, ids.SAND); // resting above the head, never in it
-  const kid = await page.evaluate(() => {
+  const kid = await page.evaluate((dbg: { x0: number; z0: number; gy: number; water: number; flow: number }) => {
     const e = (window as any).__lbw.game.players[0].entity;
-    return { y: e.pos.y, inWater: e.inWaterNow };
-  });
+    const w = (window as any).__lbw.game.world;
+    const wet: string[] = [];
+    for (let x = dbg.x0 - 8; x <= dbg.x0 + 14; x++) {
+      for (let z = dbg.z0 - 8; z <= dbg.z0 + 8; z++) {
+        for (let y = dbg.gy - 4; y <= dbg.gy + 8; y++) {
+          const b = w.get(x, y, z);
+          if (b === dbg.water || b === dbg.flow) wet.push(`${x},${y},${z}=${b}`);
+        }
+      }
+    }
+    const cols: string[] = [];
+    for (const x of [dbg.x0 + 1, dbg.x0 + 4, dbg.x0 + 7]) {
+      for (let z = dbg.z0 - 4; z <= dbg.z0 + 10; z++) {
+        let s = `x${x} z${z}: `;
+        for (let y = dbg.gy - 6; y <= dbg.gy + 3; y++) s += w.get(x, y, z) + ' ';
+        cols.push(s);
+      }
+    }
+    const site = (window as any).__lbw.dims;
+    void site;
+    return { y: e.pos.y, inWater: e.inWaterNow, wet, cols, kidPos: `${e.pos.x},${e.pos.y},${e.pos.z}` };
+  }, { x0, z0, gy, water: ids.WATER, flow: ids.WATER_FLOW });
   expect(kid.y).toBeCloseTo(gy + 1, 1); // not crushed, not launched, not teleported
-  expect(kid.inWater).toBe(false);
+  expect(kid.inWater, `kid@${kid.kidPos} gy=${gy} x0=${x0} z0=${z0}\n${kid.cols.join('\n')}\n${kid.wet.join(' ')}`).toBe(false);
   expect(pageErrs, pageErrs.join('\n')).toEqual([]);
 
   // tidy up so later tests still find clean grass near spawn
@@ -930,12 +1023,30 @@ test('water flows: a dug channel floods from the source, shallows with reach, fa
   const { fx, fz, gy } = site;
 
   // the course: a one-deep channel along the surface row, walls left standing
-  // on both sides, and an eternal source at the near end. First stone over the
-  // floor and clear any pond water in the band, so nothing but our own source
-  // can supply the channel (CI's shard world may be a beach, or carry a failed
-  // test's puddle).
+  // on both sides, and an eternal source at the near end. A stone WALL rings
+  // the whole site and its floor is sealed, so nothing but our own source can
+  // supply the channel (CI's shard world may be a beach, or carry a failed
+  // test's puddle — and on this branch ponds *flow*, so clearing wet cells
+  // alone is not enough: a source outside the band would refill them).
   await page.evaluate((arg: { fx: number; fz: number; gy: number; air: number; water: number; flow: number; stone: number }) => {
     const S = (window as any).__lbw.game.world;
+    const SY: number = (window as any).__lbw.dims.sy;
+    for (let x = arg.fx - 3; x <= arg.fx + 14; x++) {
+      for (let z = arg.fz - 4; z <= arg.fz + 4; z++) {
+        const ring = x === arg.fx - 3 || x === arg.fx + 14 || z === arg.fz - 4 || z === arg.fz + 4;
+        for (let y = 1; y < SY; y++) {
+          if (ring) S.set(x, y, z, arg.stone);
+        }
+      }
+    }
+    for (let x = arg.fx - 2; x <= arg.fx + 13; x++) {
+      for (let z = arg.fz - 3; z <= arg.fz + 3; z++) {
+        for (let y = 1; y < SY; y++) {
+          const b = S.get(x, y, z);
+          if (b === arg.water || b === arg.flow) S.set(x, y, z, arg.air);
+        }
+      }
+    }
     for (let x = arg.fx - 1; x <= arg.fx + 12; x++) {
       for (let z = arg.fz - 2; z <= arg.fz + 2; z++) {
         S.set(x, arg.gy - 1, z, arg.stone); // sealed floor under the whole course
@@ -1000,11 +1111,32 @@ test('water flows: a dug channel floods from the source, shallows with reach, fa
   await page.evaluate((arg: { x: number; gy: number; fz: number; air: number }) => {
     (window as any).__lbw.game.world.set(arg.x, arg.gy, arg.fz, arg.air);
   }, { x: fx + 2, gy, fz, air: ids.AIR });
-  await page.waitForFunction((arg: { fx: number; fz: number; gy: number; sx: number; air: number }) => {
-    const w = (window as any).__lbw.game.world;
-    for (let x = arg.fx + 3; x <= arg.fx + 10; x++) if (w.get(x, arg.gy, arg.fz) !== arg.air) return false;
-    return w.get(arg.sx, arg.gy - 1, arg.fz) === arg.air;
-  }, { fx, fz, gy, sx: fx + 7, air: ids.AIR }, { timeout: 30000 });
+  try {
+    await page.waitForFunction((arg: { fx: number; fz: number; gy: number; sx: number; air: number }) => {
+      const w = (window as any).__lbw.game.world;
+      for (let x = arg.fx + 3; x <= arg.fx + 10; x++) if (w.get(x, arg.gy, arg.fz) !== arg.air) return false;
+      return w.get(arg.sx, arg.gy - 1, arg.fz) === arg.air;
+    }, { fx, fz, gy, sx: fx + 7, air: ids.AIR }, { timeout: 30000 });
+  } catch (e) {
+    const dump = await page.evaluate((arg: { fx: number; fz: number; gy: number; water: number; flow: number }) => {
+      const w = (window as any).__lbw.game.world;
+      const { sz, sy } = (window as any).__lbw.dims;
+      const out: string[] = [];
+      for (let x = arg.fx - 2; x <= arg.fx + 16; x++) {
+        for (let z = arg.fz - 3; z <= arg.fz + 3; z++) {
+          for (let y = arg.gy - 3; y <= arg.gy + 4; y++) {
+            const b = w.get(x, y, z);
+            if (b === arg.water || b === arg.flow) {
+              const lvl = w.waterLevel.get((x * sz + z) * sy + y) ?? -1;
+              out.push(`${x},${y},${z}=${b}/L${lvl}`);
+            }
+          }
+        }
+      }
+      return out.join(' ');
+    }, { fx, fz, gy, water: ids.WATER, flow: ids.WATER_FLOW });
+    throw new Error(`drain stuck; wet: ${dump}`);
+  }
 
   // water is in the block palette, so kids can make their own ponds
   await tap(page, 'palette');
