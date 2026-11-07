@@ -220,6 +220,38 @@ event. Renaming a storage key orphans the family's existing saves.
   falling water keeps its depth and one wet cell left above a wall re-rains
   on the course forever (the sand and water-flow tests do exactly this, and
   their dry-waits dump wet-cell maps on failure for the next CI sleuth).
+- Fish (`core/fish.ts`, `Game.fish`) live in every column of water: five
+  kinds, **minnow + sunfish school** (a `School` anchor wanders through valid
+  water and the flock follows via anchor-seek + slowly circling offsets +
+  separation; stragglers hurry), puffer/bass/golden prowl alone. `kind` is
+  public (e2e reads it). Fish never leave the water: `swimable()` validates
+  the *destination* column's swim band (`waterRunAt`, water standing on solid
+  ground — never a bare `=== WATER`), so they wade the shoreline steps instead
+  of freezing there; when the water under them goes away (drain, fill, blast)
+  `rescue()` darts them to the nearest pond or they die, and the refill timer
+  drifts new ones back in. They flee swimming kids (the whole school panics).
+  Population is seeded from `world.seed` (mulberry32 — the LCG animals use
+  correlated x/z) and rebuilt in `applyNewWorld`; **no fish are saved**.
+- Fishing (`core/fishing.ts`, `Game.fishing`) hangs off the pet button: the
+  interact hook checks `this.fishing.active(id)` FIRST (a line in the water
+  outranks doors/chests/pets, and reels it in), and an aim whose `lp.target`
+  (not `removeTarget` — it excludes water sources!) is `isWaterId` casts. The
+  bobber flies 0.5 s, plops (`audio.plip`), bobs `biteWait` game-seconds, then
+  **bites** for `biteWindow` — reel during the bite for a fish. Kind comes from
+  `pickFishKind(fish.nearbyKinds(...))` (×3 weight where the kind actually
+  lives), stars only, and `fish.takeNearest` removes the very swimmer caught.
+  Tests hurry bites via `game.fishing.biteWait = [0.1, 0.4]`. Sounds log as
+  `fish:cast/plip/bite/reel/escape/caught:<kind>` into `AudioKit.recent`. The
+  fishing e2e digs the swimming test's below-grade pond recipe (banks wall the
+  water in, no caisson needed since the surface stays under the meadow).
+  The line hangs from a **rod**, never the eyes: `buildRod()` makes a blocky
+  tapered rod per line — one parented to `avatar.rightArm` (swings with the
+  walk, follows the arm after a `cycleModel` costume swap), and one held low
+  right of the angler's own camera when `firstPerson` (layer `ROD_LAYER` 7:
+  `applyAvatarLayers` enables it per camera, so only its owner sees it).
+  `tipWorld(l, angler)` is the single source of truth for the line's start —
+  the active rod tip's world position — used for cast start, geometry and the
+  reel-away distance; the no-avatar fallback is a waist-high hand.
 - Treasure chests: the loot roll is `core/treasure.ts` (weights + messages),
   the effects live in `Game.grantTreasure` (no inventory, so prizes happen to
   the world: star counters, `starField.spawnAt` stars, `playerEntity.zoomTime`

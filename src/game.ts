@@ -14,6 +14,8 @@ import {
 } from './core/blocks';
 import { StarField } from './core/collectibles';
 import { BlastInfo, DynamiteManager } from './core/dynamite';
+import { FISH_DEFS, FishWorld, pickFishKind } from './core/fish';
+import { Angler, FishingManager, ROD_LAYER } from './core/fishing';
 import { ParticleSystem } from './core/particles';
 import { SandGravity } from './core/sand';
 import { WaterFlow } from './core/water';
@@ -107,6 +109,10 @@ export class Game {
   sandFalls!: SandFalls;
   /** water flows: sources push, travelling water spreads, shallows and dries */
   water!: WaterFlow;
+  /** the fish that live in the lakes and seas — some travel in flocks (core/fish.ts) */
+  fish!: FishWorld;
+  /** fishing lines out in the world (core/fishing.ts) */
+  fishing!: FishingManager;
   /**
    * Player-planted saplings: flat world index -> game time when planted.
    * After `saplingGrowSeconds` of game time (public so tests can hurry it)
@@ -165,6 +171,10 @@ export class Game {
 
     this.animals = new AnimalWorld(this.scene, this.world, this.particles, this.audio, gen.spawnX, gen.spawnZ);
     this.starField = new StarField(this.scene, this.world, gen.spawnX, gen.spawnZ);
+    this.fish = new FishWorld(this.scene, this.world, this.particles);
+    this.fishing = new FishingManager(
+      this.scene, this.world, this.particles, this.audio, (m, ms) => this.ui.toast(m, ms),
+    );
 
     // dynamite: sticks that came with the save get their fuses back
     this.dynamite = new DynamiteManager(
@@ -623,6 +633,7 @@ export class Game {
     this.reservedSeats.delete(p.entity.id);
     this.overlays.delete(p.entity.id);
     this.lastLandSound.delete(p.entity.id);
+    this.fishing.clearFor(p.entity.id); // no orphaned bobbers when a kid leaves
     // that controller may still be holding (or has queued) the button press that
     // confirmed leaving: ignore it briefly, otherwise their half of the screen
     // instantly turns back into a join card instead of closing
@@ -871,6 +882,30 @@ export class Game {
     }
   }
 
+  /**
+   * The pet button while this player's line is in the water: bring it in.
+   * A diving bobber means a fish — the kind is drawn from the fishing table,
+   * weighted towards the kinds actually swimming under the bobber. There is
+   * no inventory, so the catch happens right here: stars and a splash.
+   */
+  private reelIn(lp: LocalPlayer): void {
+    const out = this.fishing.reel(lp.entity.id);
+    if (!out) return;
+    if (!out.bite) {
+      this.audio.fishReel();
+      this.ui.toast('🎣 You reeled in an empty hook — try again!', 1900);
+      return;
+    }
+    const kind = pickFishKind(this.fish.nearbyKinds(out.x, out.y, out.z));
+    const def = FISH_DEFS[kind];
+    lp.entity.starsCount += def.stars;
+    // the swimmer of this kind under the bobber is the one that got caught
+    this.fish.takeNearest(out.x, out.y, out.z, kind, 5);
+    this.audio.fishCaught(kind);
+    this.particles.burst(out.x, out.y + 0.2, out.z, 0xffd24a, 14, 1.0);
+    this.ui.toast(`${def.icon} You caught a ${def.name}! +${def.stars} ⭐`, 2800);
+  }
+
   private hooks() {
     return {
       events: this.stepEvents,
@@ -975,6 +1010,12 @@ export class Game {
         void lp;
       },
       interact: (lp: LocalPlayer): void => {
+        // A line already in the water outranks everything: the pet button
+        // reels it in — that is what bites mean.
+        if (this.fishing.active(lp.entity.id)) {
+          this.reelIn(lp);
+          return;
+        }
         // doors and chests come first: the pet button is the family's "do
         // something nice" button, and a door or a treasure chest straight ahead
         // is more pressing than an animal. Aimed at a step, it spins it around.
@@ -989,6 +1030,13 @@ export class Game {
         }
         if (aim && isStairsBlock(aim.block) && aim.dist <= 4.5) {
           this.rotateStairs(aim);
+          return;
+        }
+        // Aimed at the water: the pet button casts a fishing line (the
+        // generous crosshair already found that water within reach).
+        const water = lp.target;
+        if (water && isWaterId(water.block)) {
+          this.fishing.cast(lp.entity.id, this.angler(lp), water.x, water.y, water.z);
           return;
         }
         this.animals.petNearest(lp.entity.pos.x, lp.entity.pos.y + 0.8, lp.entity.pos.z, 2.4);
@@ -1265,6 +1313,10 @@ export class Game {
     this.starField = new StarField(this.scene, this.world, gen.spawnX, gen.spawnZ);
     this.animals.animals.forEach((a) => a.group.removeFromParent());
     this.animals = new AnimalWorld(this.scene, this.world, this.particles, this.audio, gen.spawnX, gen.spawnZ);
+    // the fish move into the new water, and nobody keeps a line in the old sea
+    this.fish.dispose();
+    this.fish = new FishWorld(this.scene, this.world, this.particles);
+    this.fishing.clear();
     this.sparkleBlocks.clear();
     this.saplings.clear();
     this.dynamite.clear(); // no half-burnt sticks from the old world, please
@@ -1328,6 +1380,20 @@ export class Game {
    * entirely, ring and shadow included. Ring + shadow stay on layer 0, so
    * everyone always finds themselves on the map.
    */
+  /** what FishingManager needs to know about one local player this frame */
+  private angler(p: LocalPlayer): Angler {
+    const e = p.entity;
+    return {
+      id: e.id,
+      pos: e.pos,
+      yaw: e.yaw,
+      headHeight: e.headHeight,
+      camera: p.camera,
+      firstPerson: p.firstPerson,
+      rightArm: e.avatar.rightArm,
+    };
+  }
+
   private applyAvatarLayers(cameras: THREE.Camera[]): void {
     const players = this.players;
     for (let i = 0; i < players.length; i++) {
@@ -1339,6 +1405,10 @@ export class Game {
     }
     for (let i = 0; i < players.length; i++) {
       if (!players[i].showOwnBody) players[i].camera.layers.disable(1 + i);
+      // first-person fishing: only the owner's own camera draws the held rod
+      if (players[i].firstPerson && this.fishing.active(players[i].entity.id)) {
+        players[i].camera.layers.enable(ROD_LAYER);
+      }
     }
   }
 
@@ -1353,6 +1423,8 @@ export class Game {
 
     if (!this.frozen) {
       this.animals.update(dt);
+      this.fish.update(dt, this.players.map((p) => p.entity));
+      if (this.fishing.lines.size > 0) this.fishing.update(dt, this.players.map((p) => this.angler(p)));
       this.starField.update(this.time);
       this.dynamite.update(dt);
       this.sand.update(dt);
@@ -1442,6 +1514,7 @@ export class Game {
     '⭐ Find a glowing star!',
     '🗝️ Find a treasure chest!',
     '🪜 Build a staircase!',
+    '🎣 Aim at the water and press the pet button to fish!',
     '🍬 Land on a bouncy block!',
     '🎵 Step on a music block!',
   ];
