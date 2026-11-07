@@ -6,6 +6,8 @@
 
 import { BlockId, blockDef, FAVORITES, PALETTE } from '../core/blocks';
 import { AudioKit } from '../core/audio';
+import { FISH_DEFS, FishKind } from '../core/fish';
+import { FISH_SNACKS, SNACK_BADGES } from '../core/satchel';
 import { computeHeights, themeOf, WORLD_THEMES } from '../core/terrain';
 import { SavedWorldInfo, WATER_LEVEL, WORLD_SX, WORLD_SZ } from '../core/world';
 import { ControllerType, FrameControls } from '../input/types';
@@ -260,6 +262,7 @@ export interface MenuActions {
   cycleCostume(): void;
   goHome(): void;
   toggleSound(): void;
+  openSatchel(): void;
   openHelp(): void;
   openGrownUps(): void;
   leave(): void;
@@ -294,6 +297,15 @@ export class PlayerMenu extends Overlay {
       },
       { icon: '🏠', label: 'Go Home', fn: () => { actions.goHome(); this.close(); } },
       { icon: '🎨', label: 'Blocks', fn: () => { this.close(); window.dispatchEvent(new CustomEvent('lbw-open-palette', { detail: this.player.entity.id })); } },
+      {
+        icon: '🎒',
+        label: 'Satchel',
+        val: () => {
+          const n = player.satchel.total();
+          return n > 0 ? `${n} 🐟` : 'Empty';
+        },
+        fn: () => { this.close(); actions.openSatchel(); },
+      },
       { icon: '🎭', label: 'Costume', val: () => `${modelDef(player.entity.model).icon} ${modelDef(player.entity.model).name}`, fn: () => { actions.cycleCostume(); } },
       { icon: '🎮', label: 'Help', fn: () => { this.close(); actions.openHelp(); } },
       { icon: '🔊', label: 'Sound', val: () => (this.soundOn() ? 'ON' : 'OFF'), fn: () => actions.toggleSound() },
@@ -339,6 +351,95 @@ export class PlayerMenu extends Overlay {
     if (nav.down) { this.sel = (this.sel + 1) % this.items.length; this.audio.uiMove(); this.refresh(); }
     if (nav.up) { this.sel = (this.sel + this.items.length - 1) % this.items.length; this.audio.uiMove(); this.refresh(); }
     if (nav.confirm) { this.audio.uiSelect(); this.items[this.sel].fn(); this.refresh(); }
+    if (nav.back) { this.audio.uiBack(); this.close(); }
+  }
+}
+
+// ---------------------------------------------------------------- satchel
+
+/**
+ * The fish satchel: the day's catch, one row per kind with a ×count and the
+ * boost it grants when eaten. Highlight a row and press A to munch that fish —
+ * the boost kicks in right away, and the row shrinks (or disappears) as the
+ * last of that kind goes.
+ */
+export class SatchelOverlay extends Overlay {
+  private listEl: HTMLDivElement;
+  private rows: { el: HTMLElement; kind: FishKind; label: () => string }[] = [];
+  private sel = 0;
+
+  constructor(
+    audio: AudioKit,
+    type: ControllerType,
+    private player: LocalPlayer,
+    private onEat: (k: FishKind) => void,
+  ) {
+    super(audio, type);
+    const c = this.card(`${player.entity.name}'s Satchel 🎒`);
+    this.listEl = document.createElement('div');
+    this.listEl.className = 'menu-list';
+    c.appendChild(this.listEl);
+    const k = btnLabels(type);
+    this.keys(c, [[k.ud, 'choose a fish'], [k.a, 'eat it!'], [k.b, 'close']]);
+    this.rebuild();
+  }
+
+  /** rebuild the fish rows — the counts change every time one is eaten */
+  private rebuild(): void {
+    this.listEl.textContent = '';
+    this.rows = [];
+    const kinds = this.player.satchel.kinds();
+    if (kinds.length === 0) {
+      const s = document.createElement('div');
+      s.className = 'sub';
+      s.textContent = 'Nothing in here yet — go cast a line at the water! 🎣';
+      this.listEl.appendChild(s);
+      return;
+    }
+    for (const kind of kinds) {
+      const row = document.createElement('div');
+      row.className = 'menu-item';
+      const label = () => {
+        const def = FISH_DEFS[kind];
+        return `${def.icon} ${def.name}  ×${this.player.satchel.counts[kind]}`;
+      };
+      const badge = SNACK_BADGES[FISH_SNACKS[kind].effect];
+      row.innerHTML = `<span class="mi-label"></span><span class="mi-val">${badge}</span>`;
+      const labelEl = row.querySelector('.mi-label')!;
+      labelEl.textContent = label();
+      row.addEventListener('click', () => { this.sel = this.rows.findIndex((r) => r.el === row); this.eat(); });
+      this.listEl.appendChild(row);
+      this.rows.push({ el: row, kind, label });
+    }
+    this.refresh();
+  }
+
+  private eat(): void {
+    const row = this.rows[this.sel];
+    if (!row) return;
+    this.onEat(row.kind); // Game.eatFish: munch, boost, toast
+    this.rebuild();
+    if (this.sel >= this.rows.length) this.sel = 0;
+  }
+
+  private refresh(): void {
+    this.rows.forEach((r, i) => {
+      r.el.classList.toggle('sel', i === this.sel);
+      const labelEl = r.el.querySelector('.mi-label');
+      if (labelEl) labelEl.textContent = r.label();
+    });
+    this.rows[this.sel]?.el.scrollIntoView({ block: 'nearest' });
+  }
+
+  tick(frame: FrameControls, dt: number): void {
+    const nav = this.nav.tick(frame, dt);
+    if (this.rows.length === 0) {
+      if (nav.back || nav.confirm) { this.audio.uiBack(); this.close(); }
+      return;
+    }
+    if (nav.down) { this.sel = (this.sel + 1) % this.rows.length; this.audio.uiMove(); this.refresh(); }
+    if (nav.up) { this.sel = (this.sel + this.rows.length - 1) % this.rows.length; this.audio.uiMove(); this.refresh(); }
+    if (nav.confirm) this.eat();
     if (nav.back) { this.audio.uiBack(); this.close(); }
   }
 }

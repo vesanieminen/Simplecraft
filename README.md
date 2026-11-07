@@ -22,6 +22,8 @@ Creative mode, built for a 5-year-old and a parent on one couch.
   travel in moving schools, and the golden fish is a rare glittering sight.
 - **🎣 Fishing** — aim at the water, press the pet button, and when the
   bobber dives, press again for a fish (see *Fishing* below).
+- **🎒 A fish satchel** — every catch waits in the kid's pouch (see the 🐟
+  chip on the HUD) until they eat it from *Menu → Satchel* for a tasty boost.
 - **Doors you can open, proper stairs, treasure chests hidden in every world,
   slabs, saplings that grow into trees** — and planks that finally look like
   planks.
@@ -57,8 +59,11 @@ gets away.
 - What bites mostly lives where you are fishing. **Minnows and sunfish
   travel in schools** that drift through the water together; puffers and
   bass prowl alone; the **golden fish** is rare and worth a fistful of stars.
-- The catch happens right there in the world (there is no inventory): every
-  fish is worth stars, with a splash and a fanfare.
+- Every fish is worth stars with a splash and a fanfare — and then it goes
+  into your **satchel** 🎒. The 🐟 chip under your name counts the catch, and
+  *Menu → Satchel* lists it: pick a fish and eat it for a tasty boost.
+  Minnows and puffers make your legs **boingy** 🦘, sunfish and bass make
+  your feet **zoomy** 🌈, and a golden fish does both at once.
 - The fish are shy — paddle up to a school and the whole flock darts away.
   Blasting a pond dry is not the way to catch lunch either: the fish rescue
   themselves to the nearest water and new ones drift in over time.
