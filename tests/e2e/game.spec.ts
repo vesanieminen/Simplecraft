@@ -3011,6 +3011,165 @@ test('the meadow has eight kinds of animal now, all petable', async ({ page }) =
   }
 });
 
+test('fish life: five kinds swim the waters, and the little ones travel in moving schools', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  const sample = () => page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    const fish = game.fish;
+    return {
+      count: fish.fishes.length,
+      kinds: [...new Set(fish.fishes.map((f: any) => f.kind))] as string[],
+      schools: fish.schools.map((s: any) => ({
+        kind: s.kind,
+        n: s.fish.length,
+        anchor: [s.anchor.x, s.anchor.y, s.anchor.z],
+        pos: s.fish.map((f: any) => [f.pos.x, f.pos.y, f.pos.z]),
+      })),
+      pos: fish.fishes.map((f: any) => [f.pos.x, f.pos.y, f.pos.z]),
+    };
+  });
+  const before = await sample();
+  expect(before.count).toBeGreaterThanOrEqual(20);
+  for (const kind of ['minnow', 'sunfish', 'puffer', 'bass', 'golden']) {
+    expect(before.kinds, `kind ${kind}`).toContain(kind); // every kind gets a home in every world
+  }
+  expect(before.schools.some((s: any) => s.kind === 'minnow' && s.n >= 4)).toBe(true);
+
+  // the flocks MOVE, stay together, and no fish ever leaves the water
+  await page.waitForTimeout(4000);
+  const after = await page.evaluate((w: { water: number; flow: number }) => {
+    const game = (window as any).__lbw.game;
+    const fish = game.fish;
+    const isW = (id: number) => id === w.water || id === w.flow;
+    return {
+      inWater: fish.fishes.every((f: any) =>
+        isW(game.world.get(Math.floor(f.pos.x), Math.floor(f.pos.y), Math.floor(f.pos.z)))),
+      schools: fish.schools.map((s: any) => ({
+        kind: s.kind,
+        maxFromCentre: Math.max(...s.fish.map((f: any) =>
+          f.pos.distanceTo({ x: s.anchor.x, y: s.anchor.y, z: s.anchor.z }))),
+      })),
+      pos: fish.fishes.map((f: any) => [f.pos.x, f.pos.y, f.pos.z]),
+    };
+  }, { water: ids.WATER, flow: ids.WATER_FLOW });
+  expect(after.inWater).toBe(true); // not one fish flopping about on land
+  for (const s of after.schools) {
+    expect(s.maxFromCentre, `school ${s.kind} stays together`).toBeLessThan(6);
+  }
+  let moved = 0;
+  before.pos.forEach((p: number[], i: number) => {
+    const q = after.pos[i];
+    if (q && Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) > 0.25) moved++;
+  });
+  expect(moved).toBeGreaterThan(before.pos.length / 2); // the lakes are not a still life
+});
+
+test('fishing: cast at the water, wait for the bite, reel in a fish — stars and all', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+
+  // a proper pond right in front (the swimming test's recipe: water stands
+  // a full block BELOW the meadow surface, so the banks wall it in and the
+  // flood sim has nothing to pour out)
+  const pond = await page.evaluate((b: { water: number; grass: number; air: number }) => {
+    const S = (window as any).__lbw.game.world;
+    const e = (window as any).__lbw.game.players[0].entity;
+    const cx = Math.round(e.pos.x), cz = Math.round(e.pos.z);
+    const base = S.surfaceY(cx, cz);
+    const deep = 4;
+    for (let dx = -3; dx <= 3; dx++) {
+      for (let dz = -4; dz <= 4; dz++) {
+        for (let y = base - deep; y <= base + 3; y++) S.set(cx + dx, y, cz + dz, b.air);
+        if (dz <= -2) {
+          for (let y = base - deep; y <= base; y++) S.set(cx + dx, y, cz + dz, b.grass);
+        } else {
+          for (let y = base - deep; y <= base - 1; y++) S.set(cx + dx, y, cz + dz, b.water);
+        }
+      }
+    }
+    // stand on the bank, look down at the middle of the pond
+    e.pos.set(cx + 0.5, base + 1, cz - 2.5);
+    e.vel.set(0, 0, 0);
+    e.yaw = 0;
+    e.pitch = -0.6;
+    return { cx, cz, base };
+  }, { water: ids.WATER, grass: ids.GRASS, air: ids.AIR });
+
+  // the aim finds the water — that is what the pet button casts into
+  await page.waitForFunction('window.__lbw.game.players[0].target !== null && [window.__lbw.ids.WATER, window.__lbw.ids.WATER_FLOW].includes(window.__lbw.game.players[0].target.block)', null, { timeout: 15000 });
+
+  // hurry the fish along so the test does not idle through a real afternoon
+  await page.evaluate(() => { (window as any).__lbw.game.fishing.biteWait = [0.1, 0.4]; });
+  await tap(page, 'interact'); // cast!
+  await page.waitForFunction('window.__lbw.game.fishing.lines.size === 1', null, { timeout: 10000 });
+
+  // waiting → bite
+  await page.waitForFunction(() => {
+    const game = (window as any).__lbw.game;
+    const line = game.fishing.lines.get(game.players[0].entity.id);
+    return !!line && line.phase === 'bite';
+  }, null, { timeout: 20000 });
+  const starsBefore = await page.evaluate(() => (window as any).__lbw.game.players[0].entity.starsCount);
+
+  await tap(page, 'interact'); // reel in the catch!
+  await page.waitForFunction(
+    (s: number) => (window as any).__lbw.game.players[0].entity.starsCount > s,
+    starsBefore, { timeout: 10000 },
+  );
+  const caught = await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    return {
+      lines: game.fishing.lines.size,
+      recent: game.audio.recent.slice(-10).join(','),
+    };
+  });
+  expect(caught.lines).toBe(0); // the bobber comes in with the fish
+  expect(caught.recent).toContain('fish:caught');
+
+  // …and reeling early just gives you an empty hook, no stars
+  await page.evaluate(() => { (window as any).__lbw.game.fishing.biteWait = [30, 31]; });
+  await tap(page, 'interact'); // cast again
+  await page.waitForFunction(() => {
+    const game = (window as any).__lbw.game;
+    const line = game.fishing.lines.get(game.players[0].entity.id);
+    return !!line && line.phase === 'waiting';
+  }, null, { timeout: 10000 });
+  const starsMid = await page.evaluate(() => (window as any).__lbw.game.players[0].entity.starsCount);
+  await tap(page, 'interact'); // reel immediately — nothing on it yet
+  await page.waitForFunction('window.__lbw.game.fishing.lines.size === 0', null, { timeout: 10000 });
+  const starsAfter = await page.evaluate(() => (window as any).__lbw.game.players[0].entity.starsCount);
+  expect(starsAfter).toBe(starsMid); // empty hooks pay nothing
+
+  // fill the pond in so it cannot confuse later tests (same ritual as swimming)
+  await page.evaluate((arg: { cx: number; cz: number; base: number; grass: number; air: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let dx = -4; dx <= 4; dx++) {
+      for (let dz = -5; dz <= 5; dz++) {
+        for (let y = arg.base - 6; y <= arg.base + 3; y++) {
+          S.set(arg.cx + dx, y, arg.cz + dz, y <= arg.base ? arg.grass : arg.air);
+        }
+      }
+    }
+  }, { ...pond, grass: ids.GRASS, air: ids.AIR });
+  await page.evaluate((arg: { cx: number; cz: number; base: number; water: number; flow: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let dx = -10; dx <= 10; dx++) {
+      for (let dz = -10; dz <= 10; dz++) {
+        for (let y = arg.base - 2; y <= arg.base + 4; y++) {
+          const b = S.get(arg.cx + dx, y, arg.cz + dz);
+          if (b === arg.water || b === arg.flow) S.set(arg.cx + dx, y, arg.cz + dz, 0);
+        }
+      }
+    }
+  }, { ...pond, water: ids.WATER, flow: ids.WATER_FLOW });
+  await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); }); // land the refill before the next page boots
+});
+
 // -------------------------------------------------- reported bugs, kept fixed
 
 test('the block palette is a grid: dpad left/right step cells, up/down jump a whole row', async ({ page }) => {

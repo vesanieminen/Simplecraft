@@ -18,6 +18,10 @@ Creative mode, built for a 5-year-old and a parent on one couch.
 - A world that saves itself and survives restarts (one save per world).
 - **Eight friendly animals** — sheep, bunnies, chickens, cows, and new
   pigs, horses, cats and foxes — each with a voice of its own.
+- **Five kinds of fish** live in the lakes and the sea — minnows and sunfish
+  travel in moving schools, and the golden fish is a rare glittering sight.
+- **🎣 Fishing** — aim at the water, press the pet button, and when the
+  bobber dives, press again for a fish (see *Fishing* below).
 - **Doors you can open, proper stairs, treasure chests hidden in every world,
   slabs, saplings that grow into trees** — and planks that finally look like
   planks.
@@ -40,6 +44,23 @@ keyboard) to open the world chooser:
 - Grown-ups can also switch worlds mid-game from *Start → Grown-Ups → Choose
   World*, and the URL takes both: `?seed=12345&world=2`
   (`world` = 0 Meadow, 1 Islands, 2 Mountains, 3 Deep Forest).
+
+## Fishing 🎣
+
+Any lake, pond or flooded sandpit will do: stand on the shore, **aim at the
+water** and press the pet button (**X / ☐**, or **E** on the keyboard) — a
+bobber arcs out and plops onto the surface. A moment later something bites:
+the bobber dives and plops, so press the pet button *again*. Too early and
+the hook comes up empty; too late and the fish gets away.
+
+- What bites mostly lives where you are fishing. **Minnows and sunfish
+  travel in schools** that drift through the water together; puffers and
+  bass prowl alone; the **golden fish** is rare and worth a fistful of stars.
+- The catch happens right there in the world (there is no inventory): every
+  fish is worth stars, with a splash and a fanfare.
+- The fish are shy — paddle up to a school and the whole flock darts away.
+  Blasting a pond dry is not the way to catch lunch either: the fish rescue
+  themselves to the nearest water and new ones drift in over time.
 
 ## My Worlds (saved games)
 

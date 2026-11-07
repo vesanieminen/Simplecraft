@@ -322,6 +322,8 @@ export class Fish {
         this.school.anchor.y + this.offY - this.pos.y,
         this.school.anchor.z + Math.sin(this.offAngle) * this.offRadius - this.pos.z,
       );
+      // a straggler hurries to catch up with the flock
+      if (this.pos.distanceTo(this.school.anchor) > 4) speed *= 2;
       // stay off schoolmates
       for (const other of this.school.fish) {
         if (other === this) continue;
@@ -369,17 +371,24 @@ export class Fish {
     this.render(dt);
   }
 
+  /**
+   * Can this fish occupy (x,y,z)? Water there, and y within the swim band of
+   * THAT column — so fish wade shallows and dive holes, following the bottom
+   * like a real fish instead of freezing at the shoreline step.
+   */
   private swimable(world: World, x: number, y: number, z: number): boolean {
-    if (y < this.yMin || y > this.yMax) return false;
-    return isWaterId(world.get(Math.floor(x), Math.floor(y), Math.floor(z)));
+    if (!isWaterId(world.get(Math.floor(x), Math.floor(y), Math.floor(z)))) return false;
+    const run = waterRunAt(world, x, z) ?? waterRunAround(world, x, y, z);
+    if (!run || run.top - run.bottom < 0.7) return false;
+    return y >= run.bottom + 0.22 && y <= run.top - 0.22;
   }
 
   /** swim inside the deepest water run the fish can reach; false = none found */
   private refreshBounds(world: World): void {
     const run = waterRunAt(world, this.pos.x, this.pos.z) ?? waterRunAround(world, this.pos.x, this.pos.y, this.pos.z);
-    if (run && run.top - run.bottom >= 1.2) {
-      this.yMin = run.bottom + 0.3;
-      this.yMax = run.top - 0.3;
+    if (run && run.top - run.bottom >= 0.7) {
+      this.yMin = run.bottom + 0.22;
+      this.yMax = run.top - 0.22;
     } else {
       this.yMin = -1;
       this.yMax = -1; // marker: nothing to swim in
@@ -454,10 +463,14 @@ export class FishWorld {
     private world: World,
     private particles: ParticleSystem,
   ) {
-    let seed = (world.seed ^ 0x1f05d) & 0x7fffffff;
+    let seed = (world.seed ^ 0x1f05d) >>> 0;
     this.rnd = () => {
-      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-      return seed / 0x7fffffff;
+      // mulberry32: well-mixed pairs, so the x/z placement draws below
+      // actually wander the whole map
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
     // every kind gets a guaranteed home in every world — the same promise the
     // barnyard makes — and the little ones come in actual schools
@@ -535,11 +548,15 @@ export class FishWorld {
 
   private place(kind: FishKind): boolean {
     const d = FISH_DEFS[kind];
-    for (let tries = 0; tries < 160; tries++) {
+    for (let tries = 0; tries < 400; tries++) {
       const x = 5 + this.rnd() * (WORLD_SX - 10);
       const z = 5 + this.rnd() * (WORLD_SZ - 10);
       const run = waterRunAt(this.world, x, z);
-      if (!run || run.top - run.bottom < (d.schooling ? 2.4 : 1.8)) continue;
+      // the first pass wants a proper swim (depth 2.4/1.8); if the search
+      // grows desperate any deeper-than-a-knee puddle of water will do,
+      // because every kind getting a home beats none
+      const want = tries < 200 ? (d.schooling ? 2.4 : 1.8) : 1.2;
+      if (!run || run.top - run.bottom < want) continue;
       const y = (run.bottom + run.top) / 2;
       let school: School | null = null;
       if (d.schooling) {
