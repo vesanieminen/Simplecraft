@@ -7,6 +7,7 @@
 // type-only, so there is no import cycle with core/animals.ts (which uses AudioKit)
 import type { AnimalKind } from './animals';
 import type { SoundFamily } from './blocks';
+import type { FishKind } from './fish';
 
 export class AudioKit {
   private ctx: AudioContext | null = null;
@@ -231,13 +232,63 @@ export class AudioKit {
     this.tone('sine', 120, 60, 0.12, 0.08, 0.01);
   }
 
-  // ------------------------------------------------------------- dynamite
-
   /** a swim stroke underwater: a muffled pull of water, both arms through */
   swimStroke(): void {
     this.noise(0.18, 0.09, 620);
     this.tone('sine', 190, 240, 0.14, 0.045);
   }
+
+  // ------------------------------------------------------------- fishing
+
+  /** the cast: the line whizzes out through the air */
+  castLine(): void {
+    this.log('fish:cast');
+    this.noise(0.26, 0.11, 3000, 0, 'bandpass');
+    this.tone('sine', 950, 320, 0.2, 0.05);
+  }
+
+  /** the bobber plopping down on the water */
+  plip(): void {
+    this.log('fish:plip');
+    this.noise(0.05, 0.16, 1600, 0, 'highpass');
+    this.tone('sine', 420, 700, 0.1, 0.07, 0.01);
+  }
+
+  /** the bite: two hungry bloops out of the water */
+  fishBite(): void {
+    this.log('fish:bite');
+    this.tone('sine', 300, 540, 0.09, 0.13);
+    this.tone('sine', 360, 620, 0.09, 0.11, 0.11);
+    this.noise(0.08, 0.12, 900, 0.03);
+  }
+
+  /** reeling the line back in: a quick little ratchet */
+  fishReel(): void {
+    this.log('fish:reel');
+    for (let i = 0; i < 3; i++) {
+      this.noise(0.03, 0.07, 2600, i * 0.06, 'bandpass');
+      this.tone('square', 620 - i * 60, 480 - i * 60, 0.03, 0.03, i * 0.06);
+    }
+  }
+
+  /** the fish got away: two glugs and a ripple of regret */
+  fishEscape(): void {
+    this.log('fish:escape');
+    this.tone('sine', 500, 260, 0.22, 0.08);
+    this.tone('sine', 380, 190, 0.26, 0.06, 0.16);
+    this.noise(0.1, 0.06, 800, 0.2);
+  }
+
+  /** the catch: a splash, then a happy little fanfare (bigger for a golden one) */
+  fishCaught(kind: FishKind): void {
+    this.log(`fish:caught:${kind}`);
+    this.noise(0.1, 0.2, 1400, 0, 'highpass');
+    this.tone('sine', 340, 680, 0.12, 0.1, 0.02);
+    const notes = kind === 'golden' ? [523, 659, 784, 1047, 1319] : [523, 659, 784];
+    notes.forEach((f, i) => this.tone('triangle', f, f, 0.14, 0.18, 0.1 + i * 0.07));
+  }
+
+  // ------------------------------------------------------------- dynamite
 
   /** the fuse catching: paper thud, then a long hiss */
   dynamiteLight(): void {
