@@ -1980,6 +1980,29 @@ test('a blast carves a crater, marks the rim, and everybody walks away', async (
   expect(after.shakes).toBeGreaterThan(0);          // the player feels it
   expect(after.launched).toBeGreaterThan(0);        // the animals get told
   expect(after.flashed).toBe(true);                // and the screen punches
+
+  // tidy the site for the next test in the shard (they re-boot from this
+  // save): fill the crater in and drain the demonstration water — a lone
+  // eternal WATER cell beside spawn rains on everyone downstream, which is
+  // the documented reason unrelated tests time out waiting for an aim target
+  await page.evaluate((arg: { c: Cell; grass: number; air: number; water: number; flow: number }) => {
+    const S = (window as any).__lbw.game.world;
+    const surf = arg.c.y - 1; // the surface the stick was standing on
+    for (let dx = -5; dx <= 5; dx++) {
+      for (let dz = -5; dz <= 5; dz++) {
+        const cx = arg.c.x + dx, cz = arg.c.z + dz;
+        for (let y = Math.max(1, surf - 4); y <= surf + 4; y++) {
+          const b = S.get(cx, y, cz);
+          if (b === arg.water || b === arg.flow) S.set(cx, y, cz, arg.air);
+          else if (y <= surf && b === arg.air) S.set(cx, y, cz, arg.grass); // the crater
+        }
+      }
+    }
+  }, {
+    c: cell,
+    grass: ids.GRASS, air: ids.AIR, water: ids.WATER, flow: ids.WATER_FLOW,
+  });
+  await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); }); // land the refill before the next page boots
 });
 
 test('hitting a stick with the break button re-lights the stub, it does not come off', async ({ page }) => {
