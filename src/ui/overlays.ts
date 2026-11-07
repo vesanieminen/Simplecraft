@@ -262,7 +262,6 @@ export interface MenuActions {
   cycleCostume(): void;
   goHome(): void;
   toggleSound(): void;
-  openSatchel(): void;
   openHelp(): void;
   openGrownUps(): void;
   leave(): void;
@@ -297,15 +296,6 @@ export class PlayerMenu extends Overlay {
       },
       { icon: '🏠', label: 'Go Home', fn: () => { actions.goHome(); this.close(); } },
       { icon: '🎨', label: 'Blocks', fn: () => { this.close(); window.dispatchEvent(new CustomEvent('lbw-open-palette', { detail: this.player.entity.id })); } },
-      {
-        icon: '🎒',
-        label: 'Satchel',
-        val: () => {
-          const n = player.satchel.total();
-          return n > 0 ? `${n} 🐟` : 'Empty';
-        },
-        fn: () => { this.close(); actions.openSatchel(); },
-      },
       { icon: '🎭', label: 'Costume', val: () => `${modelDef(player.entity.model).icon} ${modelDef(player.entity.model).name}`, fn: () => { actions.cycleCostume(); } },
       { icon: '🎮', label: 'Help', fn: () => { this.close(); actions.openHelp(); } },
       { icon: '🔊', label: 'Sound', val: () => (this.soundOn() ? 'ON' : 'OFF'), fn: () => actions.toggleSound() },
@@ -883,6 +873,7 @@ const PAD_ROWS: [string, string][] = [
   ['START', 'Menu'],
   ['B', 'Back'],
   ['D-PAD', 'Menus'],
+  ['D-PAD DOWN', 'Fish satchel — eat a catch'],
 ];
 
 export class HelpOverlay extends Overlay {
@@ -893,10 +884,12 @@ export class HelpOverlay extends Overlay {
     grid.className = 'pad-help';
     const rename = (s: string): string => {
       if (type !== 'playstation') return s;
+      // word boundaries: bare letter swaps used to mangle 'D-PAD' into 'D-P✕D'
       return s
-        .replace('A', '✕').replace('RT', 'R2').replace('LT', 'L2')
-        .replace('LB / RB', 'L1 / R1').replace('X', '☐').replace('Y', '△')
-        .replace('START', 'OPTIONS').replace('B', '◯');
+        .replace(/\bLB \/ RB\b/g, 'L1 / R1')
+        .replace(/\bRT\b/g, 'R2').replace(/\bLT\b/g, 'L2')
+        .replace(/\bA\b/g, '✕').replace(/\bX\b/g, '☐').replace(/\bY\b/g, '△')
+        .replace(/\bSTART\b/g, 'OPTIONS').replace(/\bB\b/g, '◯');
     };
     for (const [k, what] of PAD_ROWS) {
       const row = document.createElement('div');

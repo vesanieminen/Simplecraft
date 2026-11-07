@@ -436,10 +436,10 @@ test('a player can leave and their half of the split screen closes', async ({ pa
   // the first press on Leave only arms it — kids press everything
   await tap(page, 'menu');
   await page.waitForSelector('.menu-list');
-  await selectRow(page, 11); // Leave
+  await selectRow(page, 10); // Leave
   await tap(page, 'jump');
   expect(await page.evaluate(() => (window as any).__lbw.game.players.length)).toBe(2);
-  expect(await page.evaluate(() => [...document.querySelectorAll('.menu-item')][11].textContent)).toContain('SURE');
+  expect(await page.evaluate(() => [...document.querySelectorAll('.menu-item')][10].textContent)).toContain('SURE');
 
   // the second press lets them go
   await tap(page, 'jump');
@@ -518,7 +518,7 @@ test('when the last player leaves, the welcome screen comes back', async ({ page
 
   await tap(page, 'menu');
   await page.waitForSelector('.menu-list');
-  await selectRow(page, 11); // Leave
+  await selectRow(page, 10); // Leave
   await tap(page, 'jump');
   await tap(page, 'jump');
   await page.waitForFunction('window.__lbw.game.players.length === 0', null, { timeout: 10000 });
@@ -557,7 +557,7 @@ async function selectRow(page: Page, index: number): Promise<void> {
 async function openGrownUpsMenu(page: Page): Promise<void> {
   await tap(page, 'menu');
   await page.waitForSelector('.menu-list');
-  await selectRow(page, 10); // Grown-Ups
+  await selectRow(page, 9); // Grown-Ups
   await tap(page, 'jump');
   await page.waitForTimeout(300);
   expect(await selectedRow(page)).toBe(0);
@@ -1415,7 +1415,7 @@ test('water flows: a dug channel floods from the source, shallows with reach, fa
 async function setFreeze(page: Page, on: boolean): Promise<void> {
   await tap(page, 'menu');
   await page.waitForSelector('.menu-list');
-  await selectRow(page, 10); // Grown-Ups
+  await selectRow(page, 9); // Grown-Ups
   await tap(page, 'jump');
   await selectRow(page, 0); // Freeze Game
   if ((await page.evaluate(() => (window as any).__lbw.game.frozen)) !== on) await tap(page, 'jump');
@@ -1459,7 +1459,7 @@ test('grown-up menu: freeze pauses the world, split screen cycles, reset clears 
   // --- Split Screen cycles through every layout, Reset World wipes edits
   await tap(page, 'menu');
   await page.waitForSelector('.menu-list');
-  await selectRow(page, 10); // Grown-Ups
+  await selectRow(page, 9); // Grown-Ups
   await tap(page, 'jump');
 
   await selectRow(page, 1); // Split Screen
@@ -1717,7 +1717,7 @@ test('menu sub-screens receive controller input (Help screen opens and closes on
   await joinWithPad(page);
   await tap(page, 'menu');
   await page.waitForSelector('.menu-list');
-  await selectRow(page, 8); // Help
+  await selectRow(page, 7); // Help
   await tap(page, 'jump');
   await page.waitForSelector('.pad-help');
   expect(await page.evaluate(() => (window as any).__lbw.game.overlays.size)).toBe(1);
@@ -1980,6 +1980,29 @@ test('a blast carves a crater, marks the rim, and everybody walks away', async (
   expect(after.shakes).toBeGreaterThan(0);          // the player feels it
   expect(after.launched).toBeGreaterThan(0);        // the animals get told
   expect(after.flashed).toBe(true);                // and the screen punches
+
+  // tidy the site for the next test in the shard (they re-boot from this
+  // save): fill the crater in and drain the demonstration water — a lone
+  // eternal WATER cell beside spawn rains on everyone downstream, which is
+  // the documented reason unrelated tests time out waiting for an aim target
+  await page.evaluate((arg: { c: Cell; grass: number; air: number; water: number; flow: number }) => {
+    const S = (window as any).__lbw.game.world;
+    const surf = arg.c.y - 1; // the surface the stick was standing on
+    for (let dx = -5; dx <= 5; dx++) {
+      for (let dz = -5; dz <= 5; dz++) {
+        const cx = arg.c.x + dx, cz = arg.c.z + dz;
+        for (let y = Math.max(1, surf - 4); y <= surf + 4; y++) {
+          const b = S.get(cx, y, cz);
+          if (b === arg.water || b === arg.flow) S.set(cx, y, cz, arg.air);
+          else if (y <= surf && b === arg.air) S.set(cx, y, cz, arg.grass); // the crater
+        }
+      }
+    }
+  }, {
+    c: cell,
+    grass: ids.GRASS, air: ids.AIR, water: ids.WATER, flow: ids.WATER_FLOW,
+  });
+  await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); }); // land the refill before the next page boots
 });
 
 test('hitting a stick with the break button re-lights the stub, it does not come off', async ({ page }) => {
@@ -2284,7 +2307,7 @@ test('costumes: pick one with LB/RB at join, swap anytime in the menu', async ({
   // the Costume row in the player menu cycles every model without page errors
   await tap(page, 'menu');
   await page.waitForSelector('.menu-list');
-  await selectRow(page, 7); // Costume
+  await selectRow(page, 6); // Costume
   const order = ['wizard', 'dino', 'cat', 'knight', 'kid', 'astronaut'];
   for (const want of order) {
     await tap(page, 'jump');
@@ -2950,7 +2973,7 @@ test('the player menu fits inside a half-height stacked pane — no overflow', a
 
   await tap(page, 'menu');
   await page.waitForSelector('.menu-list');
-  await selectRow(page, 11); // the LAST row (Leave) — the one that used to hang off the pane
+  await selectRow(page, 10); // the LAST row (Leave) — the one that used to hang off the pane
 
   const fit = await page.evaluate(() => {
     const pane = document.querySelectorAll('.pane')[0].getBoundingClientRect();
@@ -2958,7 +2981,7 @@ test('the player menu fits inside a half-height stacked pane — no overflow', a
     const last = rows[rows.length - 1].getBoundingClientRect();
     return { count: rows.length, lastTop: last.top, lastBottom: last.bottom, paneTop: pane.top, paneBottom: pane.bottom };
   });
-  expect(fit.count).toBe(12);
+  expect(fit.count).toBe(11);
   expect(fit.lastTop).toBeGreaterThanOrEqual(fit.paneTop - 1);
   expect(fit.lastBottom).toBeLessThanOrEqual(fit.paneBottom + 1);
 });
@@ -2977,7 +3000,7 @@ test('grown-up settings — split layout and sound — come back after a reload'
   await tap(page, 'back');
   await tap(page, 'menu');
   await page.waitForSelector('.menu-list');
-  await selectRow(page, 9); // Sound
+  await selectRow(page, 8); // Sound
   await tap(page, 'jump');
   expect(await page.evaluate(() => (window as any).__lbw.game.audio.muted)).toBe(true);
 
@@ -3170,7 +3193,7 @@ test('fishing: cast at the water, wait for the bite, reel in a fish — stars an
   await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); }); // land the refill before the next page boots
 });
 
-test('the satchel keeps the catch: the HUD chip shows it, and the menu eats one for a tasty boost', async ({ page }) => {
+test('the satchel keeps the catch: the HUD chip shows it, D-pad ▾ opens the pouch, eating gives a tasty boost', async ({ page }) => {
   test.slow();
   await boot(page);
   await joinWithPad(page);
@@ -3222,16 +3245,21 @@ test('the satchel keeps the catch: the HUD chip shows it, and the menu eats one 
   expect(chip.shown).toBe(true);
   expect(chip.text).toContain('🐟 1');
 
-  // the player menu's Satchel row counts the catch…
+  // the main menu stays out of it — the pouch lives in the world now
   await tap(page, 'menu');
   await page.waitForSelector('.menu-list');
-  const row = await page.evaluate(() => [...document.querySelectorAll('.overlay-card .menu-item')][6].textContent ?? '');
-  expect(row).toContain('Satchel');
-  expect(row).toContain('1 🐟');
+  const menu = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('.overlay-card .menu-item')];
+    return { count: rows.length, satchel: rows.some((r) => (r.textContent ?? '').includes('Satchel')) };
+  });
+  expect(menu.count).toBe(11); // the classic menu, no Satchel row
+  expect(menu.satchel).toBe(false);
+  await tap(page, 'back'); // close the menu
+  await page.waitForFunction('window.__lbw.game.overlays.size === 0', null, { timeout: 10000 });
 
-  // …and opens the satchel, where one A press munches the highlighted fish
-  await selectRow(page, 6); // Satchel
-  await tap(page, 'jump');
+  // the satchel action (D-pad ▾ / I) opens the fish inventory right in the
+  // world, where one A press munches the highlighted fish
+  await tap(page, 'satchel');
   await page.waitForSelector('.overlay-card .mi-label');
   const before = await page.evaluate(() => {
     const e = (window as any).__lbw.game.players[0].entity;

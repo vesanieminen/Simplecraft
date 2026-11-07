@@ -5,22 +5,23 @@
 
 import { Action, ControllerType, InputSource, RawFrame, applyDeadzone } from './types';
 
-/** standard button index -> action */
-const BUTTON_MAP: Record<number, Action> = {
-  0: 'jump',      // A / Cross
-  1: 'back',      // B / Circle
-  2: 'interact',  // X / Square
-  3: 'palette',   // Y / Triangle
-  4: 'prevBlock', // Left bumper
-  5: 'nextBlock', // Right bumper
-  6: 'place',     // Left trigger — building on LT, breaking on RT
-  7: 'remove',    // Right trigger   (swapped 2026-11: kids build more than they break)
-  8: 'menu',      // Select/Share doubles as menu for kids? keep start only
-  9: 'menu',      // Start / Options
-  12: 'up',       // D-pad
-  13: 'down',
-  14: 'left',
-  15: 'right',
+/** standard button index -> action(s). D-pad down doubles as the fish
+ *  satchel: in menus it only navigates, in the world it opens the pouch. */
+const BUTTON_MAP: Record<number, Action[]> = {
+  0: ['jump'],      // A / Cross
+  1: ['back'],      // B / Circle
+  2: ['interact'],  // X / Square
+  3: ['palette'],   // Y / Triangle
+  4: ['prevBlock'], // Left bumper
+  5: ['nextBlock'], // Right bumper
+  6: ['place'],     // Left trigger — building on LT, breaking on RT
+  7: ['remove'],    // Right trigger   (swapped 2026-11: kids build more than they break)
+  8: ['menu'],      // Select/Share doubles as menu for kids? keep start only
+  9: ['menu'],      // Start / Options
+  12: ['up'],       // D-pad
+  13: ['down', 'satchel'],
+  14: ['left'],
+  15: ['right'],
 };
 
 export function detectControllerType(id: string): ControllerType {
@@ -62,14 +63,15 @@ export class GamepadSource implements InputSource {
     frame.move = applyDeadzone(axes[0] ?? 0, axes[1] ?? 0, this.deadZone);
     frame.look = applyDeadzone(axes[2] ?? 0, axes[3] ?? 0, this.deadZone);
 
-    for (const [biStr, action] of Object.entries(BUTTON_MAP)) {
+    for (const [biStr, actions] of Object.entries(BUTTON_MAP)) {
       const bi = Number(biStr);
       const btn = gp.buttons[bi];
       if (!btn) continue;
       const pressed = typeof btn.pressed === 'boolean'
         ? btn.pressed || btn.value >= this.triggerThreshold
         : btn.value >= this.triggerThreshold;
-      if (pressed) frame.actions[action] = true;
+      if (!pressed) continue;
+      for (const action of actions) frame.actions[action] = true;
     }
     return frame;
   }

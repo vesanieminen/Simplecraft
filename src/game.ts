@@ -411,6 +411,10 @@ export class Game {
       } else if (frame.pressed.has('palette')) {
         this.openPalette(p);
         p.update(dt, emptyFrame(), this.hooks(), true);
+      } else if (frame.pressed.has('satchel')) {
+        // the fish satchel, right in the world: D-pad ▾ / I opens the pouch
+        this.openSatchel(p);
+        p.update(dt, emptyFrame(), this.hooks(), true);
       } else if (this.frozen) {
         // frozen world: everything stops dead — no walking, jumping or building.
         // the controller can still open the menu to unfreeze.
@@ -484,7 +488,6 @@ export class Game {
         },
         goHome: () => { p.respawnAt(this.spawnPoint.clone()); },
         toggleSound: () => { this.audio.setMuted(!this.audio.muted); this.saveSettings(); },
-        openSatchel: () => { this.openSatchel(p); },
         openHelp: () => {
           this.ui.clearOverlays(idx);
           const h = new HelpOverlay(this.audio, this.typeOf(p));
@@ -600,7 +603,10 @@ export class Game {
     this.ui.addOverlay(idx, pal);
   }
 
-  /** the fish satchel: this kid's day's catch, and the Eat button (menu → Satchel) */
+  /**
+   * The fish satchel inventory, opened right in the world (D-pad ▾ on a
+   * pad, I on the keyboard): this kid's day's catch and the Eat button.
+   */
   private openSatchel(p: LocalPlayer): void {
     const idx = this.players.indexOf(p);
     this.ui.clearOverlays(idx);
@@ -897,8 +903,8 @@ export class Game {
    * The pet button while this player's line is in the water: bring it in.
    * A diving bobber means a fish — the kind is drawn from the fishing table,
    * weighted towards the kinds actually swimming under the bobber. The catch
-   * goes into the kid's satchel (core/satchel.ts), where the HUD chip and
-   * the menu's Satchel row keep count until they eat it.
+   * goes into the kid's satchel (core/satchel.ts): the HUD 🐟 chip counts it,
+   * and D-pad ▾ / I opens the pouch right in the world to eat it.
    */
   private reelIn(lp: LocalPlayer): void {
     const out = this.fishing.reel(lp.entity.id);
@@ -920,8 +926,8 @@ export class Game {
   }
 
   /**
-   * Satchel menu → eat: one fish disappears with a munch, and its tastiness
-   * kicks in right away — see FISH_SNACKS for which boost each kind gives.
+   * Satchel inventory → eat: one fish disappears with a munch, and its
+   * tastiness kicks in right away — see FISH_SNACKS for each kind's boost.
    */
   private eatFish(lp: LocalPlayer, kind: FishKind): void {
     if (!lp.satchel.take(kind)) {
