@@ -1,7 +1,8 @@
 /**
  * Keyboard & mouse source (optional alternate for player 1).
  * WASD move, arrow keys look, Space jump, RMB place, LMB remove,
- * Q/R cycle blocks, F palette, E interact, Esc menu/back, Enter confirm.
+ * Q/R cycle blocks, F palette, I fish satchel, E interact, Esc menu/back,
+ * Enter confirm.
  */
 
 import { Action, ActionGate, InputSource, RawFrame } from './types';
@@ -11,6 +12,7 @@ const KEY_ACTIONS: Record<string, Action> = {
   Enter: 'jump',
   Escape: 'menu',
   KeyF: 'palette',
+  KeyI: 'satchel',
   KeyE: 'interact',
   KeyQ: 'prevBlock',
   KeyR: 'nextBlock',
@@ -39,7 +41,7 @@ export class KeyboardSource implements InputSource {
       this.keys.add(e.code);
       const action = KEY_ACTIONS[e.code];
       if (action) this.gate.flagFresh(action);
-      if (action || ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+      if (action || ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyI', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
         e.preventDefault();
       }
     });

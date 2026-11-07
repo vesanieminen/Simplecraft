@@ -76,9 +76,7 @@ event. Renaming a storage key orphans the family's existing saves.
   rebuilds the avatar and re-parents it (the per-frame `applyAvatarLayers`
   sorts split-screen layers out; don't cache AvatarParts anywhere).
   PlayerMenu rows are index-pinned in several tests — inserting a row shifts
-  the rows below it in `tests/e2e/game.spec.ts`. Current order (0-based):
-  Keep Playing 0, Fly 1, Camera 2, Look Speed 3, Go Home 4, Blocks 5,
-  **Satchel 6**, Costume 7, Help 8, Sound 9, Grown-Ups 10, Leave 11.
+  Grown-Ups/Leave/Help indices in `tests/e2e/game.spec.ts`.
 - Dynamite: the stick is a real voxel (`DYNAMITE`), so it saves, blocks things
   and can be carved by another blast; `DynamiteManager` only owns the animated
   fuse rig (tagged `group.userData.fuse` for leak checks), the blast and the
@@ -264,12 +262,18 @@ event. Renaming a storage key orphans the family's existing saves.
   never built. Terrain hides `CHESTS_PER_WORLD` chests in `generateTerrain`
   step 6 — remember `idx` strides y by 1, not by `WORLD_SY`.
 - Fish satchel (`core/satchel.ts`, `LocalPlayer.satchel`): catches are banked
-  per player, not spent at the bobber — `Game.reelIn` adds the kind, the HUD
-  chip (`hud.ts .pouch`, hidden while empty) and the PlayerMenu 'Satchel' row
-  (index 6, after Blocks) show the count, and `SatchelOverlay` (ui/overlays.ts)
-  lists kinds with ×count + boost badges and eats the highlighted one.
-  `Game.eatFish` takes the fish, applies `FISH_SNACKS[kind]` to
-  `entity.zoomTime`/`boingTime` (there is no health, so boosts ARE the dinner),
-  toasts, and `audio.munch` logs `fish:eat` into `AudioKit.recent`. Like stars
-  and fish, the pouch is **session-only** — never saved. e2e: 'the satchel
-  keeps the catch' (reuses the fishing test's pond recipe and refill ritual).
+  per player, not spent at the bobber — `Game.reelIn` adds the kind and the
+  HUD chip (`hud.ts .pouch`, hidden while empty) counts the catch. The pouch
+  opens **in the world** via a new `satchel` input action — D-pad ▾ on a pad,
+  `I` on the keyboard — never from the PlayerMenu (deliberate: the menu is
+  settings, the pouch is play). Gamepad `BUTTON_MAP` values are now `Action[]`
+  so button 13 can emit `['down', 'satchel']` — D-pad ▾ does nothing else
+  in-world (only `up` is jump, menus consume `down`). `SatchelOverlay`
+  (ui/overlays.ts) lists kinds with ×count + boost badges; A eats the
+  highlighted one. `Game.eatFish` takes the fish, applies `FISH_SNACKS[kind]`
+  to `entity.zoomTime`/`boingTime` (there is no health, so boosts ARE the
+  dinner), toasts, and `audio.munch` logs `fish:eat` into `AudioKit.recent`.
+  Like stars and fish, the pouch is **session-only** — never saved. e2e: 'the
+  satchel keeps the catch' (reuses the fishing test's pond recipe and refill
+  ritual, and asserts the menu has NO Satchel row). The D-pad ▾ satchel
+  button still owes the couch a hardware check.

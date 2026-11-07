@@ -1,8 +1,9 @@
 /**
  * The fish satchel: every fish a kid reels in goes into the little pouch on
- * their back, where it waits until they decide to eat it — Player menu →
- * Satchel, where the day's catch is listed with a count. (It also shows up
- * as a 🐟 chip on the HUD so the kids can SEE they have dinner.)
+ * their back, where it waits until they decide to eat it — D-pad ▾ on a pad
+ * (I on the keyboard) opens the pouch right in the world, listing the day's
+ * catch with a count. (The 🐟 chip on the HUD keeps the total visible even
+ * when the pouch is shut.)
  *
  * Eating is the reward loop after the stars: each kind gives its own tasty
  * boost, so picking dinner is a tiny adventure too. Like stars and the fish

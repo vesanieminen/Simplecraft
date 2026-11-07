@@ -5,12 +5,12 @@
  */
 
 export type Action =
-  | 'jump' | 'back' | 'interact' | 'palette' | 'menu'
+  | 'jump' | 'back' | 'interact' | 'palette' | 'menu' | 'satchel'
   | 'place' | 'remove' | 'prevBlock' | 'nextBlock'
   | 'up' | 'down' | 'left' | 'right' | 'crouch';
 
 export const ALL_ACTIONS: Action[] = [
-  'jump', 'back', 'interact', 'palette', 'menu', 'place', 'remove', 'prevBlock', 'nextBlock',
+  'jump', 'back', 'interact', 'palette', 'menu', 'satchel', 'place', 'remove', 'prevBlock', 'nextBlock',
   'up', 'down', 'left', 'right', 'crouch',
 ];
 
