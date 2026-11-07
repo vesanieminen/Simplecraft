@@ -2,9 +2,10 @@
  * Fishing, the Elocraft way: aim at the water and press the pet button — the
  * bobber arcs out and plops down. A moment later something bites: the bobber
  * dives, there is a splash and a sound, and pressing the pet button again
- * reels in a fish (see Game.reelIn for what the catch does). Reel in early and
- * the hook comes up empty; wait too long at a bite and the fish gets away.
- * There is no inventory, so the catch happens right here in the world.
+ * reels in a fish (see Game.reelIn for what the catch does — it goes into
+ * the angler's satchel, core/satchel.ts, where it can be eaten later).
+ * Reel in early and the hook comes up empty; wait too long at a bite and
+ * the fish gets away.
  */
 
 import * as THREE from 'three';

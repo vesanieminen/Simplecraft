@@ -34,6 +34,15 @@ html, body {
   border: 3px solid var(--ink); border-radius: 14px;
   padding: 4px 12px; font-size: calc(16px * var(--ui-scale, 1));
 }
+/* the fish satchel chip under the name tag — hidden while the pouch is empty */
+.hud .pouch {
+  position: absolute; top: 52px; right: 10px;
+  background: rgba(199, 236, 255, 0.92);
+  border: 3px solid var(--ink); border-radius: 14px;
+  padding: 4px 12px; font-size: calc(16px * var(--ui-scale, 1));
+  display: none;
+}
+.hud .pouch.on { display: block; }
 .hud .fly-tag {
   position: absolute; top: 52px; left: 10px;
   background: rgba(178, 235, 242, 0.92);

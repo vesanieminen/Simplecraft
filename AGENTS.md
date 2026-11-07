@@ -76,7 +76,9 @@ event. Renaming a storage key orphans the family's existing saves.
   rebuilds the avatar and re-parents it (the per-frame `applyAvatarLayers`
   sorts split-screen layers out; don't cache AvatarParts anywhere).
   PlayerMenu rows are index-pinned in several tests — inserting a row shifts
-  Grown-Ups/Leave/Help indices in `tests/e2e/game.spec.ts`.
+  the rows below it in `tests/e2e/game.spec.ts`. Current order (0-based):
+  Keep Playing 0, Fly 1, Camera 2, Look Speed 3, Go Home 4, Blocks 5,
+  **Satchel 6**, Costume 7, Help 8, Sound 9, Grown-Ups 10, Leave 11.
 - Dynamite: the stick is a real voxel (`DYNAMITE`), so it saves, blocks things
   and can be carved by another blast; `DynamiteManager` only owns the animated
   fuse rig (tagged `group.userData.fuse` for leak checks), the blast and the
@@ -261,3 +263,13 @@ event. Renaming a storage key orphans the family's existing saves.
   `PALETTE`/`FAVORITES` on purpose: they are only *found* in the environment,
   never built. Terrain hides `CHESTS_PER_WORLD` chests in `generateTerrain`
   step 6 — remember `idx` strides y by 1, not by `WORLD_SY`.
+- Fish satchel (`core/satchel.ts`, `LocalPlayer.satchel`): catches are banked
+  per player, not spent at the bobber — `Game.reelIn` adds the kind, the HUD
+  chip (`hud.ts .pouch`, hidden while empty) and the PlayerMenu 'Satchel' row
+  (index 6, after Blocks) show the count, and `SatchelOverlay` (ui/overlays.ts)
+  lists kinds with ×count + boost badges and eats the highlighted one.
+  `Game.eatFish` takes the fish, applies `FISH_SNACKS[kind]` to
+  `entity.zoomTime`/`boingTime` (there is no health, so boosts ARE the dinner),
+  toasts, and `audio.munch` logs `fish:eat` into `AudioKit.recent`. Like stars
+  and fish, the pouch is **session-only** — never saved. e2e: 'the satchel
+  keeps the catch' (reuses the fishing test's pond recipe and refill ritual).

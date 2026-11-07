@@ -18,6 +18,7 @@ export class Hud {
   root: HTMLElement;
   private nameTag: HTMLElement;
   private stars: HTMLElement;
+  private pouch: HTMLElement;
   private flyTag: HTMLElement;
   private boostTag: HTMLElement;
   private crosshair: HTMLElement;
@@ -26,6 +27,7 @@ export class Hud {
   private hints: HTMLElement;
   private lastBlock = -1;
   private lastStars = -1;
+  private lastPouch = -1;
   private lastBoost = '';
 
   constructor(player: LocalPlayer, type: ControllerType) {
@@ -40,6 +42,11 @@ export class Hud {
     this.stars = document.createElement('div');
     this.stars.className = 'stars';
     this.stars.textContent = '⭐ 0';
+
+    // the fish satchel chip (core/satchel.ts): how many caught fish are
+    // waiting under the name tag for dinner — hidden while the pouch is empty
+    this.pouch = document.createElement('div');
+    this.pouch.className = 'pouch';
 
     this.flyTag = document.createElement('div');
     this.flyTag.className = 'fly-tag';
@@ -72,7 +79,7 @@ export class Hud {
     this.hints.textContent =
       `${b.lt} build · ${b.rt} break · ${b.a} jump · ${b.b} sneak · ${b.x} pet · fish · open · ${b.y} blocks · ${b.start} menu`;
 
-    this.root.append(this.nameTag, this.stars, this.flyTag, this.boostTag, this.crosshair, pod, this.hints);
+    this.root.append(this.nameTag, this.stars, this.pouch, this.flyTag, this.boostTag, this.crosshair, pod, this.hints);
   }
 
   update(player: LocalPlayer): void {
@@ -87,6 +94,12 @@ export class Hud {
     if (s !== this.lastStars) {
       this.lastStars = s;
       this.stars.textContent = `⭐ ${s}`;
+    }
+    const f = player.satchel.total();
+    if (f !== this.lastPouch) {
+      this.lastPouch = f;
+      this.pouch.textContent = `🐟 ${f}`;
+      this.pouch.classList.toggle('on', f > 0);
     }
     this.flyTag.classList.toggle('on', player.entity.flying);
     const boost = player.entity.zoomTime > 0 ? '🌈 Zoomy!'

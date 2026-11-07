@@ -288,6 +288,16 @@ export class AudioKit {
     notes.forEach((f, i) => this.tone('triangle', f, f, 0.14, 0.18, 0.1 + i * 0.07));
   }
 
+  /** dinner! three crunch-chomps and a happy little gulp (core/satchel.ts) */
+  munch(): void {
+    this.log('fish:eat');
+    for (let i = 0; i < 3; i++) {
+      this.noise(0.05, 0.15, 1500 + i * 450, i * 0.09, 'bandpass');
+      this.tone('triangle', 300 - i * 45, 180 - i * 30, 0.06, 0.09, i * 0.09);
+    }
+    this.tone('sine', 480, 660, 0.12, 0.07, 0.3); // the gulp
+  }
+
   // ------------------------------------------------------------- dynamite
 
   /** the fuse catching: paper thud, then a long hiss */

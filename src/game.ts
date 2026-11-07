@@ -14,10 +14,11 @@ import {
 } from './core/blocks';
 import { StarField } from './core/collectibles';
 import { BlastInfo, DynamiteManager } from './core/dynamite';
-import { FISH_DEFS, FishWorld, pickFishKind } from './core/fish';
+import { FISH_DEFS, FishKind, FishWorld, pickFishKind } from './core/fish';
 import { Angler, FishingManager, ROD_LAYER } from './core/fishing';
 import { ParticleSystem } from './core/particles';
 import { SandGravity } from './core/sand';
+import { FISH_SNACKS } from './core/satchel';
 import { WaterFlow } from './core/water';
 import { RayHit } from './core/raycast';
 import { Aabb, aabbOverlapsSolid, blockAabb, boxesOverlap, doorPanelAabb, playerAabb } from './core/physics';
@@ -38,7 +39,7 @@ import { SplitLayout, ViewportManager } from './render/viewportManager';
 import { Hud } from './ui/hud';
 import {
   GrownUpsMenu, HelpOverlay, JoinCard, MyWorldsActions, MyWorldsOverlay, Overlay, PaletteOverlay,
-  PlayerMenu, ReconnectOverlay, WorldSelectOverlay,
+  PlayerMenu, ReconnectOverlay, SatchelOverlay, WorldSelectOverlay,
 } from './ui/overlays';
 import { UiManager } from './ui/uiManager';
 
@@ -483,6 +484,7 @@ export class Game {
         },
         goHome: () => { p.respawnAt(this.spawnPoint.clone()); },
         toggleSound: () => { this.audio.setMuted(!this.audio.muted); this.saveSettings(); },
+        openSatchel: () => { this.openSatchel(p); },
         openHelp: () => {
           this.ui.clearOverlays(idx);
           const h = new HelpOverlay(this.audio, this.typeOf(p));
@@ -596,6 +598,15 @@ export class Game {
     const pal = new PaletteOverlay(this.audio, this.typeOf(p), p, (b) => p.setSelected(b));
     this.overlays.set(p.entity.id, pal);
     this.ui.addOverlay(idx, pal);
+  }
+
+  /** the fish satchel: this kid's day's catch, and the Eat button (menu → Satchel) */
+  private openSatchel(p: LocalPlayer): void {
+    const idx = this.players.indexOf(p);
+    this.ui.clearOverlays(idx);
+    const s = new SatchelOverlay(this.audio, this.typeOf(p), p, (k) => this.eatFish(p, k));
+    this.overlays.set(p.entity.id, s);
+    this.ui.addOverlay(idx, s);
   }
 
   private controllerTypeOf(sid: string): ControllerType {
@@ -885,8 +896,9 @@ export class Game {
   /**
    * The pet button while this player's line is in the water: bring it in.
    * A diving bobber means a fish — the kind is drawn from the fishing table,
-   * weighted towards the kinds actually swimming under the bobber. There is
-   * no inventory, so the catch happens right here: stars and a splash.
+   * weighted towards the kinds actually swimming under the bobber. The catch
+   * goes into the kid's satchel (core/satchel.ts), where the HUD chip and
+   * the menu's Satchel row keep count until they eat it.
    */
   private reelIn(lp: LocalPlayer): void {
     const out = this.fishing.reel(lp.entity.id);
@@ -899,11 +911,30 @@ export class Game {
     const kind = pickFishKind(this.fish.nearbyKinds(out.x, out.y, out.z));
     const def = FISH_DEFS[kind];
     lp.entity.starsCount += def.stars;
+    lp.satchel.add(kind);
     // the swimmer of this kind under the bobber is the one that got caught
     this.fish.takeNearest(out.x, out.y, out.z, kind, 5);
     this.audio.fishCaught(kind);
     this.particles.burst(out.x, out.y + 0.2, out.z, 0xffd24a, 14, 1.0);
-    this.ui.toast(`${def.icon} You caught a ${def.name}! +${def.stars} ⭐`, 2800);
+    this.ui.toast(`${def.icon} You caught a ${def.name}! +${def.stars} ⭐ — into the satchel!`, 2800);
+  }
+
+  /**
+   * Satchel menu → eat: one fish disappears with a munch, and its tastiness
+   * kicks in right away — see FISH_SNACKS for which boost each kind gives.
+   */
+  private eatFish(lp: LocalPlayer, kind: FishKind): void {
+    if (!lp.satchel.take(kind)) {
+      this.audio.uiBack(); // someone ate it already: nothing to munch
+      return;
+    }
+    const snack = FISH_SNACKS[kind];
+    if (snack.effect === 'zoom' || snack.effect === 'zoom+boing') lp.entity.zoomTime = snack.seconds;
+    if (snack.effect === 'boing' || snack.effect === 'zoom+boing') lp.entity.boingTime = snack.seconds;
+    this.audio.munch();
+    const e = lp.entity;
+    this.particles.burst(e.pos.x, e.pos.y + 1.35, e.pos.z, 0xffe14d, 12, 0.9);
+    this.ui.toast(`${FISH_DEFS[kind].icon} ${snack.message}`, 2800);
   }
 
   private hooks() {

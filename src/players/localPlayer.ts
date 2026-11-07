@@ -7,6 +7,7 @@
 import * as THREE from 'three';
 import { BlockId, blockDef, FAVORITES } from '../core/blocks';
 import { generousTarget, hitRemovable, hitSolid, RayHit, raycastVoxel } from '../core/raycast';
+import { Satchel } from '../core/satchel';
 import { World } from '../core/world';
 import { FrameControls } from '../input/types';
 import { SKY_FAR } from '../render/sky';
@@ -33,6 +34,8 @@ export class LocalPlayer {
   sourceId = '';
   /** set true while this player's own menu is open (movement stops for them) */
   uiOpen = false;
+  /** the fish they have caught and not eaten yet (core/satchel.ts) */
+  readonly satchel = new Satchel();
 
   private outline: THREE.LineSegments;
   private ghost: THREE.Mesh;
