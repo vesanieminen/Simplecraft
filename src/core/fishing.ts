@@ -21,7 +21,51 @@ export interface Angler {
   pos: THREE.Vector3;
   yaw: number;
   headHeight: number;
+  /** the angler's own camera — the first-person rod rides it */
+  camera: THREE.Camera;
+  firstPerson: boolean;
+  /** the avatar's right arm; the rod is parented so it swings with the arm */
+  rightArm: THREE.Object3D | null;
 }
+
+/** three.js layer for the first-person rod: only the owner's camera enables it */
+export const ROD_LAYER = 7;
+
+/** a little blocky rod: tapered sections and a red grip wrap, matching the bobber */
+function buildRod(): { group: THREE.Group; tip: THREE.Object3D } {
+  const group = new THREE.Group();
+  const seg = (w: number, len: number, y: number, color: number): void => {
+    const m = new THREE.Mesh(
+      new THREE.BoxGeometry(w, len, w),
+      new THREE.MeshLambertMaterial({ color }),
+    );
+    m.position.y = y;
+    group.add(m);
+  };
+  seg(0.06, 0.24, 0.12, 0x8a5a2b);
+  seg(0.048, 0.4, 0.44, 0xa4713c);
+  seg(0.032, 0.36, 0.82, 0xc08a50);
+  const grip = new THREE.Mesh(
+    new THREE.BoxGeometry(0.085, 0.13, 0.085),
+    new THREE.MeshLambertMaterial({ color: 0xd23f3f }),
+  );
+  grip.position.y = 0.1;
+  group.add(grip);
+  const tip = new THREE.Object3D();
+  tip.position.y = 1.02;
+  group.add(tip);
+  return { group, tip };
+}
+
+const disposeGeos = (root: THREE.Object3D): void => {
+  root.traverse((o) => {
+    if (o instanceof THREE.Mesh) o.geometry.dispose();
+  });
+};
+
+const TIP_TMP = new THREE.Vector3();
+const ROD_CAM_POS = new THREE.Vector3(0.34, -0.42, -0.8); // low right of the screen
+const ROD_CAM_TILT = new THREE.Quaternion().setFromEuler(new THREE.Euler(-1.15, 0, 0.15));
 
 export interface ReelOutcome {
   /** true when the bobber was mid-bite: a fish is coming in */
@@ -43,6 +87,12 @@ interface FishingLine {
   cell: { x: number; y: number; z: number }; // the water cell it sits in
   group: THREE.Group; // the bobber: red on white, like a proper bobber
   line: THREE.Line;
+  /** the rod in the kid's hand (hidden in first person, where the camera rod takes over) */
+  rod: THREE.Group | null;
+  rodTip: THREE.Object3D | null;
+  /** the rod held up to the angler's own camera, on its own three.js layer */
+  camRod: THREE.Group | null;
+  camRodTip: THREE.Object3D | null;
 }
 
 const FLIGHT_SECONDS = 0.5; // the cast's little arc
@@ -68,9 +118,32 @@ export class FishingManager {
   }
 
   /** throw a line into the water block (x,y,z); the bobber lands on its top */
-  cast(id: number, hand: THREE.Vector3, x: number, y: number, z: number): void {
+  cast(id: number, angler: Angler, x: number, y: number, z: number): void {
     if (this.lines.has(id)) return;
     const target = new THREE.Vector3(x + 0.5, y + 1.05, z + 0.5);
+    // the rod: one in the hand for other cameras, one in front of the
+    // angler's own camera when the body is hidden (first person)
+    let rod: THREE.Group | null = null;
+    let rodTip: THREE.Object3D | null = null;
+    if (angler.rightArm) {
+      const r = buildRod();
+      r.group.position.set(0, -0.42, 0.06); // the hand end of the arm limb
+      r.group.rotation.x = 0.72; // up and forward (the avatar's front is +Z)
+      r.group.rotation.z = 0.12;
+      angler.rightArm.add(r.group);
+      rod = r.group;
+      rodTip = r.tip;
+    }
+    const cr = buildRod();
+    cr.group.traverse((o) => o.layers.set(ROD_LAYER));
+    this.scene.add(cr.group);
+    // where the bobber leaves the hand: the rod tip in world space
+    const start = new THREE.Vector3();
+    if (rodTip && !angler.firstPerson) {
+      rodTip.getWorldPosition(start);
+    } else {
+      start.copy(angler.camera.localToWorld(ROD_CAM_POS.clone()));
+    }
     const group = new THREE.Group();
     const white = new THREE.Mesh(
       new THREE.SphereGeometry(0.1, 10, 8),
@@ -82,8 +155,8 @@ export class FishingManager {
     );
     red.position.y = 0.09;
     group.add(white, red);
-    group.position.copy(hand);
-    const lineGeo = new THREE.BufferGeometry().setFromPoints([hand.clone(), hand.clone()]);
+    group.position.copy(start);
+    const lineGeo = new THREE.BufferGeometry().setFromPoints([start.clone(), start.clone()]);
     const line = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0xf2f6fa, transparent: true, opacity: 0.85, depthWrite: false }));
     line.renderOrder = 8;
     line.frustumCulled = false;
@@ -93,15 +166,40 @@ export class FishingManager {
       phase: 'flying',
       t: 0,
       waitT: 0,
-      pos: hand.clone(),
-      start: hand.clone(),
+      pos: start.clone(),
+      start: start.clone(),
       target,
       surfaceY: target.y - 0.05,
       cell: { x, y, z },
       group,
       line,
+      rod,
+      rodTip,
+      camRod: cr.group,
+      camRodTip: cr.tip,
     });
     this.audio.castLine();
+  }
+
+  /** where the line hangs from right now: the active rod's tip, world space */
+  private tipWorld(l: FishingLine, angler: Angler): THREE.Vector3 {
+    if (angler.firstPerson) {
+      if (l.camRod && l.camRodTip) {
+        l.camRod.position.copy(angler.camera.localToWorld(TIP_TMP.copy(ROD_CAM_POS)));
+        l.camRod.quaternion.copy(angler.camera.quaternion).multiply(ROD_CAM_TILT);
+        return l.camRodTip.getWorldPosition(new THREE.Vector3());
+      }
+    } else if (l.rod && l.rodTip) {
+      // a costume swap rebuilds the avatar: follow the arm it lives on
+      if (angler.rightArm && l.rod.parent !== angler.rightArm) angler.rightArm.add(l.rod);
+      return l.rodTip.getWorldPosition(new THREE.Vector3());
+    }
+    // no avatar (shouldn't happen): the old waist-high hand
+    return new THREE.Vector3(
+      angler.pos.x + Math.sin(angler.yaw) * 0.5,
+      angler.pos.y + angler.headHeight * 0.72,
+      angler.pos.z + Math.cos(angler.yaw) * 0.5,
+    );
   }
 
   update(dt: number, anglers: readonly Angler[]): void {
@@ -112,11 +210,8 @@ export class FishingManager {
         this.remove(l); // their controller fell asleep mid-cast: tidy up
         continue;
       }
-      const hand = new THREE.Vector3(
-        angler.pos.x + Math.sin(angler.yaw) * 0.5,
-        angler.pos.y + angler.headHeight - 0.15,
-        angler.pos.z + Math.cos(angler.yaw) * 0.5,
-      );
+      const hand = this.tipWorld(l, angler);
+      if (l.camRod) l.camRod.visible = angler.firstPerson;
       l.t += dt;
 
       if (l.phase === 'flying') {
@@ -201,6 +296,14 @@ export class FishingManager {
   private remove(l: FishingLine): void {
     this.lines.delete(l.id);
     this.scene.remove(l.group, l.line);
+    if (l.rod) {
+      l.rod.removeFromParent(); // lives on the avatar's arm, not the scene
+      disposeGeos(l.rod);
+    }
+    if (l.camRod) {
+      this.scene.remove(l.camRod);
+      disposeGeos(l.camRod);
+    }
     l.group.traverse((o) => {
       if (o instanceof THREE.Mesh) o.geometry.dispose();
     });

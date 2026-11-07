@@ -15,7 +15,7 @@ import {
 import { StarField } from './core/collectibles';
 import { BlastInfo, DynamiteManager } from './core/dynamite';
 import { FISH_DEFS, FishWorld, pickFishKind } from './core/fish';
-import { FishingManager } from './core/fishing';
+import { Angler, FishingManager, ROD_LAYER } from './core/fishing';
 import { ParticleSystem } from './core/particles';
 import { SandGravity } from './core/sand';
 import { WaterFlow } from './core/water';
@@ -1036,13 +1036,7 @@ export class Game {
         // generous crosshair already found that water within reach).
         const water = lp.target;
         if (water && isWaterId(water.block)) {
-          const e = lp.entity;
-          const hand = new THREE.Vector3(
-            e.pos.x + Math.sin(e.yaw) * 0.5,
-            e.pos.y + e.headHeight - 0.15,
-            e.pos.z + Math.cos(e.yaw) * 0.5,
-          );
-          this.fishing.cast(e.id, hand, water.x, water.y, water.z);
+          this.fishing.cast(lp.entity.id, this.angler(lp), water.x, water.y, water.z);
           return;
         }
         this.animals.petNearest(lp.entity.pos.x, lp.entity.pos.y + 0.8, lp.entity.pos.z, 2.4);
@@ -1386,6 +1380,20 @@ export class Game {
    * entirely, ring and shadow included. Ring + shadow stay on layer 0, so
    * everyone always finds themselves on the map.
    */
+  /** what FishingManager needs to know about one local player this frame */
+  private angler(p: LocalPlayer): Angler {
+    const e = p.entity;
+    return {
+      id: e.id,
+      pos: e.pos,
+      yaw: e.yaw,
+      headHeight: e.headHeight,
+      camera: p.camera,
+      firstPerson: p.firstPerson,
+      rightArm: e.avatar.rightArm,
+    };
+  }
+
   private applyAvatarLayers(cameras: THREE.Camera[]): void {
     const players = this.players;
     for (let i = 0; i < players.length; i++) {
@@ -1397,6 +1405,10 @@ export class Game {
     }
     for (let i = 0; i < players.length; i++) {
       if (!players[i].showOwnBody) players[i].camera.layers.disable(1 + i);
+      // first-person fishing: only the owner's own camera draws the held rod
+      if (players[i].firstPerson && this.fishing.active(players[i].entity.id)) {
+        players[i].camera.layers.enable(ROD_LAYER);
+      }
     }
   }
 
@@ -1412,7 +1424,7 @@ export class Game {
     if (!this.frozen) {
       this.animals.update(dt);
       this.fish.update(dt, this.players.map((p) => p.entity));
-      if (this.fishing.lines.size > 0) this.fishing.update(dt, this.players.map((p) => p.entity));
+      if (this.fishing.lines.size > 0) this.fishing.update(dt, this.players.map((p) => this.angler(p)));
       this.starField.update(this.time);
       this.dynamite.update(dt);
       this.sand.update(dt);

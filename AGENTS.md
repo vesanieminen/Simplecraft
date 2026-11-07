@@ -244,6 +244,14 @@ event. Renaming a storage key orphans the family's existing saves.
   `fish:cast/plip/bite/reel/escape/caught:<kind>` into `AudioKit.recent`. The
   fishing e2e digs the swimming test's below-grade pond recipe (banks wall the
   water in, no caisson needed since the surface stays under the meadow).
+  The line hangs from a **rod**, never the eyes: `buildRod()` makes a blocky
+  tapered rod per line — one parented to `avatar.rightArm` (swings with the
+  walk, follows the arm after a `cycleModel` costume swap), and one held low
+  right of the angler's own camera when `firstPerson` (layer `ROD_LAYER` 7:
+  `applyAvatarLayers` enables it per camera, so only its owner sees it).
+  `tipWorld(l, angler)` is the single source of truth for the line's start —
+  the active rod tip's world position — used for cast start, geometry and the
+  reel-away distance; the no-avatar fallback is a waist-high hand.
 - Treasure chests: the loot roll is `core/treasure.ts` (weights + messages),
   the effects live in `Game.grantTreasure` (no inventory, so prizes happen to
   the world: star counters, `starField.spawnAt` stars, `playerEntity.zoomTime`

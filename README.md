@@ -48,10 +48,11 @@ keyboard) to open the world chooser:
 ## Fishing 🎣
 
 Any lake, pond or flooded sandpit will do: stand on the shore, **aim at the
-water** and press the pet button (**X / ☐**, or **E** on the keyboard) — a
-bobber arcs out and plops onto the surface. A moment later something bites:
-the bobber dives and plops, so press the pet button *again*. Too early and
-the hook comes up empty; too late and the fish gets away.
+water** and press the pet button (**X / ☐**, or **E** on the keyboard) — your
+kid swings a little rod and a bobber arcs out and plops onto the surface. A
+moment later something bites: the bobber dives and plops, so press the pet
+button *again*. Too early and the hook comes up empty; too late and the fish
+gets away.
 
 - What bites mostly lives where you are fishing. **Minnows and sunfish
   travel in schools** that drift through the water together; puffers and
