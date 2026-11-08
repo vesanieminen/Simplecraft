@@ -156,11 +156,11 @@ milestone; see Roadmap. Today, each computer gets the same saved world.)
 | Left stick | Walk / swim / fly sideways |
 | Right stick | Look around / aim |
 | A / ✕ | Jump (hold while flying = up) |
-| LT / L2 | Place block |
-| RT / R2 | Break block |
+| LT / L2 | **Pet animals · open/close doors · open chests · cast & reel the fishing line · scoop or pour with the bucket** |
+| RT / R2 | **Place block** (with a bucket in hand: scoop the water you look at, or pour it out) |
+| X / ☐ | **Break block** (hold while flying = down) |
 | LB / L1 | Previous block · previous costume on the join card |
 | RB / R1 | Next block · next costume on the join card |
-| X / ☐ | Pet animals · open/close doors (hold while flying = down) |
 | Y / △ | Open the block palette (before anyone joins: choose a world) |
 | D-pad | Navigate menus |
 | Start / Options | Player menu (fly, camera, **costume**, home, help…) |
@@ -178,7 +178,10 @@ Q/R cycle blocks · F palette · E pet animals / open doors · Esc menu · Enter
 
 *(The build/break buttons were swapped in November 2026 — kids build far
 more than they dig, so the comfy left trigger / right mouse button now
-builds. The Grown-Ups cannot turn this back; muscle memory will follow.)*
+builds. And in the same month the interaction moved to **LT / L2** (the
+pet-and-open button), because X was doing double duty as break *and*
+petting. Keyboard: **E** pets and opens, **R-Click** builds, **L-Click**
+breaks. The Grown-Ups cannot turn this back; muscle memory will follow.)*
 
 ## Flowers you can actually pick
 
@@ -336,11 +339,55 @@ way down the cliff.
   RT / R2: scoop a gap across your trench and everything beyond it loses its
   chain to a source and dries up, cell by cell. Or just fill the trench with
   blocks. Sources never break.
-- **Water is in the palette now.** Place a source and give your fort a moat —
-  that source is eternal too, so plan the moat before you dig it.
 - Sand sinks through it (and the displaced water rides up), flowers get
   washed over, and a fresh world's sea sits perfectly still until somebody
   changes something under it.
+
+## The water bucket 🪣
+
+The water block in the palette became a **tool**: every kid always carries
+exactly one bucket, full or empty (the name under the crosshair says which).
+
+- **Empty, look at a spring, press build (RT / R2) or pet (LT / L2)** — the
+  bucket comes back full. Only a *source* fills it: travelling water is too
+  thin to carry, which is the whole water sim in one sentence.
+- **Full, look at a gap, press build** — a new eternal spring appears right
+  there, and the water sets off spreading exactly like the sea does. Moats,
+  waterfalls and indoor ponds are one bucket away.
+- **Scoop the spring back out and the flood runs home**: every cell that
+  spring was feeding loses its chain and dries up — starting from the
+  shallowest, farthest cell and working backwards toward the bucket. The
+  water vanishes in the reverse of the order it arrived, because that is
+  simply how "the shallow end dries first" works.
+- The bucket's full/empty state is session-only, like the fish satchel:
+  going home empties it.
+
+## Rain, snow and the wandering sun 🌦️
+
+Clouds drift across the sky, and now and then it **rains** — a soft hiss, a
+silver curtain, occasionally a faraway crack of thunder through a heavy
+downpour. Snow falls sometimes too, silent and slow. And the sun *circles*:
+sunrise turns the world gold, noon is the bright blue you know, sunset goes
+orange, and night is a deep starlit blue that never, ever goes truly black —
+a pitch-black sky frightens kids, so the lights have a floor under them.
+
+Grown-ups control the sky (*Start → 🧑 Grown-Ups*):
+
+| Row | Choices |
+|---|---|
+| **🌦️ Weather** | Sometimes (a few minutes of dry, maybe a short shower) · Never · Always rain · Always snow |
+| **☀️ Day & Night** | Day and night (the sun circles ~12 real minutes) · Always day · Always night · No sun or moon |
+
+Both choices are saved on the tablet, and a parked sun parks instantly —
+bedtime stories at perpetual sunset, or a rainstorm that never stops,
+whichever the family wants.
+
+## Treasure chests — and the grown-up switch 🔒
+
+(See [Treasure chests](#treasure-chests-) above for the loot.) Because chests
+are placeable now, there is a **🧑 Grown-Ups → 🧰 Treasure Chests: On/Off** row:
+with it **Off**, the chest leaves the palette and no kid can place one — the
+world's hidden chests are still there to find, but the loot spigot is closed.
 
 ## Dynamite 🧨
 

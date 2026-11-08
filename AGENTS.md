@@ -277,3 +277,51 @@ event. Renaming a storage key orphans the family's existing saves.
   satchel keeps the catch' (reuses the fishing test's pond recipe and refill
   ritual, and asserts the menu has NO Satchel row). The D-pad ▾ satchel
   button still owes the couch a hardware check.
+- Treasure chests are **placeable** (palette + `paletteFor(allowChests)`, save
+  version still 4) and a kid's own chest pays random treasure every time. The
+  Grown-Ups row **🧰 Treasure Chests** (`chests`/`toggleChests`) hides the
+  palette entry *and* refuses placement (`chestsAllowed` in `lbw-settings`);
+  hidden worlds still contain terrain chests. The new GrownUps rows
+  (Weather 6, Day & Night 7, Treasure Chests 8) sit **after** Waiting Players
+  so row pins 0–5 hold; **Back is now index 9** — `selectRow(6)` would hit
+  Weather. Chests still never appear in `FAVORITES`.
+- The bucket (`core/bucket.ts`, `BUCKET=39` where WATER sat in `PALETTE`):
+  every kid carries one, `LocalPlayer.bucketFull` is **session-only**. Only a
+  WATER source fills it; pouring sets a new WATER source at the aim's
+  `px/py/pz`. Digging with a bucket scoops; WATER_FLOW still breaks normally.
+  The reverse-order drain is the flow sim's own shallowest-first drying — no
+  extra code. e2e: 'the water bucket scoops a spring…' drives it through
+  `__lbw.bucketAt(playerIdx, aim)` with exact RayHits.
+- Interaction is **LT / L2** (`BUTTON_MAP` 6→interact, 7→place, 2→remove;
+  keyboard E/R-Click/L-Click unchanged). `GAMEPAD_BUTTON_MAP` is exported and
+  mirrored on `__lbw.padMap` — the 'the triggers are the hands' test pins it.
+  Keyboard contract (R-Click builds, L-Click breaks, E interacts) still holds.
+- Crouch is a **pose, not a squash** (`players/avatar.ts`): `parts.chest` is a
+  hip pivot at `CROUCH_HIP=0.5` holding torso/head/arms/upper costume; the
+  fold is `CROUCH_SINK`+`CROUCH_FOLD` (+knee bend `CROUCH_KNEE`), lerped by
+  `parts.crouchT`. The avatar group's scale stays **1** (the old scale.y pose
+  squashed juice-box kids and every costume with them). Lowered head height
+  already flows from `headHeight`; the crouch e2e asserts scale===1, hipY,
+  lean and knee while crouched.
+- Water draws at its depth: `water.ts waterSurfaceHeight(world,x,y,z)` (source
+  0.92, flow `0.92 − level·0.12` floor 0.22, falling water full) feeds the
+  mesher's dedicated **water channel** (`ChunkGeometry.water`,
+  `materials.water`, tiling `textures.waterTexture`, drifting via
+  `chunks.tickWater(dt)` — Game calls it every frame). Physics still treats
+  every wet cell as a full cell. `__lbw.waterSurfaceAt` is the test lens.
+- Sky & weather: `core/weather.ts` `WeatherClock` (game time, public
+  `weatherNow('rain'|'snow'|'off')` on Game; `__lbw.weatherNow`) decides what
+  falls; `render/sky.ts` draws it (sun+moon orbit pivot, stars, cloud puffs,
+  rain/snow `THREE.Points` riding `__lbw.renderCam` — Game sets it each frame
+  before `skyEnv.update(dt, cam)`, dome vertex colours repaint only when the
+  hour moves). Day-phase lives in the sky (`setDayMode('auto'|'day'|'night'|
+  'none')`, `dayPhase()`; `__lbw.setDayMode` / `__lbw.dayPhase`). **Night is
+  never black**: light floors ≥ ~0.3, so the 'no black hole' and 'blackPixels'
+  tests stay green at midnight (the weather test asserts it). Audio:
+  `audio.rainLoop(intensity)` must be re-called ~1×/s (it re-triggers itself;
+  stop via `rainLoopStop()`), thunder only on heavy rain every ≥9 s; both log
+  `weather:rain…/weather:thunder` into `AudioKit.recent` (that ring must not
+  overflow the 'sounds carry the material' test — it samples 25).
+- ⚠️ **This worktree has twice silently reverted working-tree files mid-session**
+  (game.ts, sky.ts, main.ts, tests…): commit early, commit often, and re-check
+  `git status`/`git log` after any mysterious failure.
