@@ -6,11 +6,12 @@
 
 import * as THREE from 'three';
 import {
-  ATLAS_CELL_COUNT, ATLAS_DOOR, ATLAS_PLANKS, blockDef, isCrossBlock, isDoorBlock,
+  ATLAS_CELL_COUNT, ATLAS_DOOR, ATLAS_PLANKS, BlockId, blockDef, isCrossBlock, isDoorBlock,
   isDoorClosedBlock, isFullCellBlock, isOpaqueBlock, isStairsBlock, isTranslucentBlock, isWaterId,
   PLANT_ATLAS_CELLS, SAND, StairFacing, stairBoxes, VoxelBox,
 } from './blocks';
 import { CHUNK, idx as worldIdx, WORLD_SY, World } from './world';
+import { waterSurfaceHeight } from './water';
 
 function hashByte(x: number, y: number, z: number): number {
   let h = (x * 73856093 + y * 19349663 + z * 83492791) | 0;
@@ -99,8 +100,14 @@ export interface ChunkGeometry {
   cross: THREE.BufferGeometry | null;
   /** cubes painted from the block texture atlas (dynamite, grass, stone…) */
   textured: THREE.BufferGeometry | null;
-  /** see-through cubes painted from the same atlas (glass, water) */
+  /** see-through cubes painted from the same atlas (glass) */
   texturedTranslucent: THREE.BufferGeometry | null;
+  /**
+   * Water, on its own: it is drawn at the height its depth says it stands at
+   * (see core/water.ts waterSurfaceHeight) and sampled from a tiling sheet the
+   * game scrolls, so a flood lies flat and the sea shimmers.
+   */
+  water: THREE.BufferGeometry | null;
 }
 
 class GeomBuilder {
@@ -160,7 +167,8 @@ export function buildChunkGeometry(
   const transp = new GeomBuilder();
   const cross = new GeomBuilder();
   const tex = new GeomBuilder();
-  const texT = new GeomBuilder(); // painted glass and water: atlas art, see-through
+  const texT = new GeomBuilder(); // painted glass: atlas art, see-through
+  const wet = new GeomBuilder(); // water: its own tiling sheet, drawn at water height
 
   const x0 = cx * CHUNK, z0 = cz * CHUNK;
 
@@ -171,6 +179,14 @@ export function buildChunkGeometry(
         if (id === 0) continue;
         if (skipSand?.has(worldIdx(x, y, z)) && id === SAND) continue; // in flight
         const def = blockDef(id);
+
+        if (isWaterId(id)) {
+          // Water is the one block that is not drawn as a whole cube: a source
+          // stands nearly full, travelling water lies flatter the farther it has
+          // run, and a column through the air stands full so waterfalls read.
+          addWaterCube(wet, world, x, y, z, id);
+          continue;
+        }
 
         if (isCrossBlock(id)) {
           addCrossQuads(cross, x, y, z, def.atlasCell ?? 2);
@@ -221,8 +237,7 @@ export function buildChunkGeometry(
           const nx = x + f.dir[0], ny = y + f.dir[1], nz = z + f.dir[2];
           const n = world.get(nx, ny, nz);
           if (isFullCellBlock(n)) continue; // that neighbour already covers this face
-          if (n === id) continue; // water-water, glass-glass: hide interior
-          if (isWaterId(id) && isWaterId(n)) continue; // source next to flow: keep ONE face
+          if (n === id) continue; // glass-glass: hide interior (water is meshed separately)
 
           // base tint for this face
           let base = def.color;
@@ -269,8 +284,50 @@ export function buildChunkGeometry(
 
   return {
     opaque: opaque.build(), translucent: transp.build(), cross: cross.build(),
-    textured: tex.build(), texturedTranslucent: texT.build(),
+    textured: tex.build(), texturedTranslucent: texT.build(), water: wet.build(),
   };
+}
+
+/** UVs for one water face: the whole tiling sheet, upright on the sides. */
+function waterFaceUvs(fi: number): [number, number][] {
+  if (fi === FACE_PY || fi === FACE_NY) return [[0, 0], [1, 0], [1, 1], [0, 1]];
+  return [[0, 0], [0, 1], [1, 1], [1, 0]];
+}
+
+/**
+ * One water cell: a box from the cell floor up to the surface its depth says
+ * it stands at. Faces are only drawn where something can actually see them —
+ * a solid neighbour, water at least as deep, or the water directly above and
+ * below hides them.
+ */
+function addWaterCube(
+  g: GeomBuilder, world: World, x: number, y: number, z: number, id: BlockId,
+): void {
+  const h = waterSurfaceHeight(world, x, y, z);
+  const top = y + h;
+  const base = blockDef(id).color;
+  const vary = 1 + (hashByte(x, y, z) - 0.5) * 0.07;
+  for (let fi = 0; fi < 6; fi++) {
+    const f = FACES[fi];
+    const nx = x + f.dir[0], ny = y + f.dir[1], nz = z + f.dir[2];
+    const n = world.get(nx, ny, nz);
+    if (isFullCellBlock(n)) continue; // stone or dirt hides that side of it
+    if (isWaterId(n) && fi !== FACE_PY && fi !== FACE_NY) {
+      // a neighbour as deep as we are covers the shared face; a shallower one
+      // leaves our face to be seen through its surface
+      if (waterSurfaceHeight(world, nx, ny, nz) >= h - 1e-6) continue;
+    } else if (isWaterId(n)) {
+      continue; // the water above or below swallows that face
+    }
+    const shade = FACE_SHADE[fi] * vary;
+    const tint: [number, number, number][] = f.corners.map(() => [
+      base[0] * shade, base[1] * shade, base[2] * shade,
+    ]);
+    const pts = f.corners.map(([ax, ay, az]) => [
+      ax ? x + 1 : x, ay ? top : y, az ? z + 1 : z,
+    ] as [number, number, number]);
+    g.quad(pts[0], pts[1], pts[2], pts[3], f.dir, tint, waterFaceUvs(fi));
+  }
 }
 
 /** textured faces sample the atlas at full brightness; shading comes from AO + face angle */

@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { buildChunkGeometry } from '../core/mesher';
 import { CHUNKS_X, World } from '../core/world';
-import { blockAtlasTexture, plantAtlasTexture } from './textures';
+import { blockAtlasTexture, plantAtlasTexture, waterTexture } from './textures';
 
 interface ChunkMeshes {
   opaque?: THREE.Mesh;
@@ -14,6 +14,7 @@ interface ChunkMeshes {
   cross?: THREE.Mesh;
   tex?: THREE.Mesh;
   texT?: THREE.Mesh;
+  wet?: THREE.Mesh;
 }
 
 export class ChunkMeshManager {
@@ -35,11 +36,20 @@ export class ChunkMeshManager {
       vertexColors: true,
       map: blockAtlasTexture(),
     }),
-    /** the same artwork, see through: glass and water */
+    /** the same artwork, see through: glass */
     texturedTranslucent: new THREE.MeshLambertMaterial({
       vertexColors: true,
       map: blockAtlasTexture(),
       transparent: true, opacity: 0.72, depthWrite: false,
+    }),
+    /**
+     * Water: its own tiling sheet, drifting all the time (see tickWater) so a
+     * lake shimmers and a flood reads as moving water.
+     */
+    water: new THREE.MeshLambertMaterial({
+      vertexColors: true,
+      map: waterTexture(),
+      transparent: true, opacity: 0.78, depthWrite: false,
     }),
   };
 
@@ -87,11 +97,25 @@ export class ChunkMeshManager {
     this.swap(slot, 'cross', geo.cross, this.materials.cross);
     this.swap(slot, 'tex', geo.textured, this.materials.textured);
     this.swap(slot, 'texT', geo.texturedTranslucent, this.materials.texturedTranslucent);
+    this.swap(slot, 'wet', geo.water, this.materials.water);
+  }
+
+  /**
+   * Drift the water sheet (call every frame): the sea crawls sideways and
+   * bobs, so no two looks at the same pond are ever the same picture. The
+   * offset is wrapped back into a whole tile so it never drifts to a huge
+   * number after a long afternoon of building.
+   */
+  tickWater(dt: number): void {
+    const map = this.materials.water.map;
+    if (!map) return;
+    map.offset.x = (map.offset.x + dt * 0.021) % 1;
+    map.offset.y = (map.offset.y + dt * 0.013) % 1;
   }
 
   private swap(
     slot: ChunkMeshes,
-    which: 'opaque' | 'transp' | 'cross' | 'tex' | 'texT',
+    which: 'opaque' | 'transp' | 'cross' | 'tex' | 'texT' | 'wet',
     geo: THREE.BufferGeometry | null,
     mat: THREE.Material,
   ): void {

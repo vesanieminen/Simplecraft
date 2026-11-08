@@ -192,6 +192,14 @@ function getShirtTexture(): THREE.CanvasTexture {
 export interface AvatarParts {
   group: THREE.Group;
   body: THREE.Group;
+  /**
+   * The upper body on its own pivot at hip height: torso, head, face, arms and
+   * everything resting on them. Bending this is what a crouch looks like — the
+   * kid folds at the hips instead of being squashed like a juice box. It stays
+   * at rest height (CROUCH_HIP = 0.5) standing, and sinks + pitches forward
+   * when they sneak.
+   */
+  chest: THREE.Group;
   leftArm: THREE.Object3D;
   rightArm: THREE.Object3D;
   leftLeg: THREE.Object3D;
@@ -200,7 +208,15 @@ export interface AvatarParts {
   tail?: THREE.Object3D;
   ring: THREE.Mesh;
   shadow: THREE.Mesh;
+  /** how deep into the crouch pose this body currently is (0 standing, 1 sneak) */
+  crouchT: number;
 }
+
+/** hip height: the `chest` pivot sits here, so upper-body art keeps its usual y */
+export const CROUCH_HIP = 0.5;
+/** how far the hips drop, and how far the torso folds forward, in a full crouch */
+export const CROUCH_SINK = 0.34;
+export const CROUCH_FOLD = 1.0;
 
 /** small box helper for costume bits; parented so it rides the body/arm motion */
 function costumeBox(
@@ -226,6 +242,17 @@ export function createAvatar(colorHex: string, model: ModelId = 'kid'): AvatarPa
   const body = new THREE.Group();
   group.add(body);
 
+  // The upper body rides its own pivot at hip height, so a crouch can fold the
+  // torso forward and let the hips sink while the legs keep working — and the
+  // `upper` group inside it puts the origin back on the feet, so every piece of
+  // art below keeps the absolute heights it has always had.
+  const chest = new THREE.Group();
+  chest.position.y = CROUCH_HIP;
+  const upper = new THREE.Group();
+  upper.position.y = -CROUCH_HIP;
+  chest.add(upper);
+  body.add(chest);
+
   // fabric, tinted per player: jumper, trousers and a soft head
   const skinMat = new THREE.MeshLambertMaterial({ color, map: getClothTexture() });
   const darkMat = new THREE.MeshLambertMaterial({ color: dark, map: getClothTexture() });
@@ -249,7 +276,7 @@ export function createAvatar(colorHex: string, model: ModelId = 'kid'): AvatarPa
     model === 'kid' ? [lightMat, lightMat, lightMat, lightMat, shirtMat, lightMat] : torsoMat(model),
   );
   torso.position.y = 0.75;
-  body.add(torso);
+  upper.add(torso);
 
   function torsoMat(m: ModelId): THREE.Material | THREE.Material[] {
     if (m === 'astronaut') return whiteCloth;
@@ -267,79 +294,81 @@ export function createAvatar(colorHex: string, model: ModelId = 'kid'): AvatarPa
   const headMat = model === 'robot' || model === 'knight' ? steelCloth : skinMat;
   const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.46), headMat);
   head.position.y = 1.3;
-  body.add(head);
+  upper.add(head);
   const face = new THREE.Mesh(
     new THREE.PlaneGeometry(0.44, 0.44),
     new THREE.MeshBasicMaterial({ map: getFaceTexture(), transparent: true }),
   );
   face.position.set(0, 1.3, 0.235);
-  body.add(face);
+  upper.add(face);
 
-  // arms pivot at shoulders
-  const mkLimb = (w: number, h: number, mat: THREE.Material, x: number, y: number): THREE.Object3D => {
+  // arms pivot at shoulders (and ride the crouch fold), legs at the hips
+  const mkLimb = (
+    parent: THREE.Object3D, w: number, h: number, mat: THREE.Material, x: number, y: number,
+  ): THREE.Object3D => {
     const pivot = new THREE.Object3D();
     pivot.position.set(x, y, 0);
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, w), mat);
     m.position.y = -h / 2;
     pivot.add(m);
-    body.add(pivot);
+    parent.add(pivot);
     return pivot;
   };
   const limbMat = model === 'astronaut' ? whiteCloth : model === 'robot' || model === 'knight' ? steelCloth : darkMat;
   const legMat = model === 'astronaut' ? whiteCloth : model === 'robot' || model === 'knight' ? darkSteel : denimMat;
-  const leftArm = mkLimb(0.16, 0.5, limbMat, -0.34, 1.02);
-  const rightArm = mkLimb(0.16, 0.5, limbMat, 0.34, 1.02);
-  const leftLeg = mkLimb(0.19, 0.45, legMat, -0.14, 0.45);
-  const rightLeg = mkLimb(0.19, 0.45, legMat, 0.14, 0.45);
+  const leftArm = mkLimb(upper, 0.16, 0.5, limbMat, -0.34, 1.02);
+  const rightArm = mkLimb(upper, 0.16, 0.5, limbMat, 0.34, 1.02);
+  const leftLeg = mkLimb(body, 0.19, 0.45, legMat, -0.14, 0.45);
+  const rightLeg = mkLimb(body, 0.19, 0.45, legMat, 0.14, 0.45);
 
   let tail: THREE.Object3D | undefined;
 
   // ---------------------------------------------------------------- costumes
   if (model === 'astronaut') {
     // bubble helmet: glass shell + gold trim, face showing through
-    const helmet = costumeBox(body, 0.66, 0.62, 0.6, 0, 1.32, 0, glassMat);
+    const helmet = costumeBox(upper, 0.66, 0.62, 0.6, 0, 1.32, 0, glassMat);
     void helmet;
-    costumeBox(body, 0.66, 0.08, 0.62, 0, 1.63, 0, goldMat); // brow band
-    costumeBox(body, 0.1, 0.5, 0.08, 0, 1.32, -0.33, goldMat); // back trim
+    costumeBox(upper, 0.66, 0.08, 0.62, 0, 1.63, 0, goldMat); // brow band
+    costumeBox(upper, 0.1, 0.5, 0.08, 0, 1.32, -0.33, goldMat); // back trim
     // backpack + a chest control panel in the player's own colour
-    costumeBox(body, 0.36, 0.44, 0.16, 0, 0.78, -0.27, whiteCloth);
-    costumeBox(body, 0.2, 0.14, 0.04, 0, 0.82, 0.18, new THREE.MeshLambertMaterial({ color }));
-    costumeBox(body, 0.05, 0.05, 0.02, -0.05, 0.82, 0.2, goldMat);
-    costumeBox(body, 0.05, 0.05, 0.02, 0.05, 0.82, 0.2, inkMat);
+    costumeBox(upper, 0.36, 0.44, 0.16, 0, 0.78, -0.27, whiteCloth);
+    costumeBox(upper, 0.2, 0.14, 0.04, 0, 0.82, 0.18, new THREE.MeshLambertMaterial({ color }));
+    costumeBox(upper, 0.05, 0.05, 0.02, -0.05, 0.82, 0.2, goldMat);
+    costumeBox(upper, 0.05, 0.05, 0.02, 0.05, 0.82, 0.2, inkMat);
     // colour stripes on the wrists
     costumeBox(leftArm, 0.19, 0.08, 0.19, 0, -0.42, 0, new THREE.MeshLambertMaterial({ color }));
     costumeBox(rightArm, 0.19, 0.08, 0.19, 0, -0.42, 0, new THREE.MeshLambertMaterial({ color }));
   } else if (model === 'robot') {
     // antenna with a glowing colour tip + chest status light + ear bolts
-    costumeBox(body, 0.04, 0.24, 0.04, 0, 1.86, 0, darkSteel);
+    costumeBox(upper, 0.04, 0.24, 0.04, 0, 1.86, 0, darkSteel);
     const tip = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), new THREE.MeshBasicMaterial({ color }));
     tip.position.set(0, 2.02, 0);
-    body.add(tip);
-    costumeBox(body, 0.12, 0.08, 0.04, 0.14, 0.86, 0.18, new THREE.MeshBasicMaterial({ color }));
-    costumeBox(body, 0.06, 0.12, 0.06, -0.29, 1.34, 0, darkSteel); // ear bolts
-    costumeBox(body, 0.06, 0.12, 0.06, 0.29, 1.34, 0, darkSteel);
-    costumeBox(body, 0.3, 0.1, 0.2, 0, 1.62, 0, darkSteel); // head cap
+    upper.add(tip);
+    costumeBox(upper, 0.12, 0.08, 0.04, 0.14, 0.86, 0.18, new THREE.MeshBasicMaterial({ color }));
+    costumeBox(upper, 0.06, 0.12, 0.06, -0.29, 1.34, 0, darkSteel); // ear bolts
+    costumeBox(upper, 0.06, 0.12, 0.06, 0.29, 1.34, 0, darkSteel);
+    costumeBox(upper, 0.3, 0.1, 0.2, 0, 1.62, 0, darkSteel); // head cap
     // chunky boots
     costumeBox(leftLeg, 0.24, 0.12, 0.26, 0, -0.42, 0.03, darkSteel);
     costumeBox(rightLeg, 0.24, 0.12, 0.26, 0, -0.42, 0.03, darkSteel);
   } else if (model === 'wizard') {
     // pointy colour hat with gold band, a white beard and a flaring robe
-    costumeBox(body, 0.46, 0.08, 0.44, 0, 1.58, 0, new THREE.MeshLambertMaterial({ color })); // brim
-    costumeBox(body, 0.3, 0.2, 0.3, 0, 1.72, 0, new THREE.MeshLambertMaterial({ color }));
-    costumeBox(body, 0.18, 0.2, 0.18, 0, 1.92, 0, new THREE.MeshLambertMaterial({ color: dark }));
-    costumeBox(body, 0.32, 0.07, 0.32, 0, 1.63, 0, goldMat); // band
-    costumeBox(body, 0.34, 0.24, 0.12, 0, 1.08, 0.24, whiteCloth); // beard
-    costumeBox(body, 0.08, 0.1, 0.02, -0.2, 1.2, 0.24, whiteCloth); // moustache tufts
-    costumeBox(body, 0.08, 0.1, 0.02, 0.2, 1.2, 0.24, whiteCloth);
+    costumeBox(upper, 0.46, 0.08, 0.44, 0, 1.58, 0, new THREE.MeshLambertMaterial({ color })); // brim
+    costumeBox(upper, 0.3, 0.2, 0.3, 0, 1.72, 0, new THREE.MeshLambertMaterial({ color }));
+    costumeBox(upper, 0.18, 0.2, 0.18, 0, 1.92, 0, new THREE.MeshLambertMaterial({ color: dark }));
+    costumeBox(upper, 0.32, 0.07, 0.32, 0, 1.63, 0, goldMat); // band
+    costumeBox(upper, 0.34, 0.24, 0.12, 0, 1.08, 0.24, whiteCloth); // beard
+    costumeBox(upper, 0.08, 0.1, 0.02, -0.2, 1.2, 0.24, whiteCloth); // moustache tufts
+    costumeBox(upper, 0.08, 0.1, 0.02, 0.2, 1.2, 0.24, whiteCloth);
     costumeBox(body, 0.68, 0.22, 0.46, 0, 0.42, 0, darkMat); // robe flare over the hips
   } else if (model === 'dino') {
     // snout, back spikes and a tail — the body itself wears the player's colour
-    costumeBox(body, 0.32, 0.2, 0.16, 0, 1.22, 0.31, skinMat);
-    costumeBox(body, 0.06, 0.05, 0.03, -0.07, 1.28, 0.39, inkMat); // nostrils
-    costumeBox(body, 0.06, 0.05, 0.03, 0.07, 1.28, 0.39, inkMat);
-    costumeBox(body, 0.1, 0.14, 0.1, 0, 1.12, 0.1, darkMat); // spine spikes
-    costumeBox(body, 0.09, 0.12, 0.09, 0, 1.1, -0.02, darkMat);
-    costumeBox(body, 0.08, 0.1, 0.08, 0, 1.08, -0.13, darkMat);
+    costumeBox(upper, 0.32, 0.2, 0.16, 0, 1.22, 0.31, skinMat);
+    costumeBox(upper, 0.06, 0.05, 0.03, -0.07, 1.28, 0.39, inkMat); // nostrils
+    costumeBox(upper, 0.06, 0.05, 0.03, 0.07, 1.28, 0.39, inkMat);
+    costumeBox(upper, 0.1, 0.14, 0.1, 0, 1.12, 0.1, darkMat); // spine spikes
+    costumeBox(upper, 0.09, 0.12, 0.09, 0, 1.1, -0.02, darkMat);
+    costumeBox(upper, 0.08, 0.1, 0.08, 0, 1.08, -0.13, darkMat);
     tail = new THREE.Object3D();
     tail.position.set(0, 0.55, -0.2);
     body.add(tail);
@@ -348,14 +377,14 @@ export function createAvatar(colorHex: string, model: ModelId = 'kid'): AvatarPa
     costumeBox(tail, 0.1, 0.1, 0.16, 0, 0.07, -0.46, darkMat);
   } else if (model === 'cat') {
     // ears, muzzle and a tail that wags while walking
-    const earL = costumeBox(body, 0.14, 0.14, 0.06, -0.18, 1.63, 0, new THREE.MeshLambertMaterial({ color }));
-    const earR = costumeBox(body, 0.14, 0.14, 0.06, 0.18, 1.63, 0, new THREE.MeshLambertMaterial({ color }));
+    const earL = costumeBox(upper, 0.14, 0.14, 0.06, -0.18, 1.63, 0, new THREE.MeshLambertMaterial({ color }));
+    const earR = costumeBox(upper, 0.14, 0.14, 0.06, 0.18, 1.63, 0, new THREE.MeshLambertMaterial({ color }));
     earL.rotation.z = 0.5;
     earR.rotation.z = -0.5;
-    costumeBox(body, 0.26, 0.14, 0.1, 0, 1.16, 0.27, whiteCloth); // muzzle
-    costumeBox(body, 0.06, 0.04, 0.03, 0, 1.22, 0.32, new THREE.MeshLambertMaterial({ color: 0xff9fb1 })); // nose
-    costumeBox(body, 0.05, 0.02, 0.02, -0.14, 1.24, 0.25, inkMat); // whisker nubs
-    costumeBox(body, 0.05, 0.02, 0.02, 0.14, 1.24, 0.25, inkMat);
+    costumeBox(upper, 0.26, 0.14, 0.1, 0, 1.16, 0.27, whiteCloth); // muzzle
+    costumeBox(upper, 0.06, 0.04, 0.03, 0, 1.22, 0.32, new THREE.MeshLambertMaterial({ color: 0xff9fb1 })); // nose
+    costumeBox(upper, 0.05, 0.02, 0.02, -0.14, 1.24, 0.25, inkMat); // whisker nubs
+    costumeBox(upper, 0.05, 0.02, 0.02, 0.14, 1.24, 0.25, inkMat);
     tail = new THREE.Object3D();
     tail.position.set(0, 0.5, -0.24);
     body.add(tail);
@@ -364,15 +393,15 @@ export function createAvatar(colorHex: string, model: ModelId = 'kid'): AvatarPa
     costumeBox(tail, 0.1, 0.12, 0.1, 0, 0.24, -0.3, whiteCloth); // white tip
   } else if (model === 'knight') {
     // steel helm with a colour plume, breastplate with a colour crest, shield
-    costumeBox(body, 0.56, 0.34, 0.54, 0, 1.64, 0, steelCloth); // helm
-    costumeBox(body, 0.56, 0.05, 0.06, 0, 1.46, 0.27, inkMat); // visor slit
-    costumeBox(body, 0.1, 0.2, 0.34, 0, 1.9, 0, new THREE.MeshLambertMaterial({ color })); // plume
-    costumeBox(body, 0.54, 0.5, 0.08, 0, 0.78, 0.2, steelCloth); // breastplate
-    costumeBox(body, 0.2, 0.26, 0.03, 0, 0.78, 0.25, new THREE.MeshLambertMaterial({ color })); // crest
+    costumeBox(upper, 0.56, 0.34, 0.54, 0, 1.64, 0, steelCloth); // helm
+    costumeBox(upper, 0.56, 0.05, 0.06, 0, 1.46, 0.27, inkMat); // visor slit
+    costumeBox(upper, 0.1, 0.2, 0.34, 0, 1.9, 0, new THREE.MeshLambertMaterial({ color })); // plume
+    costumeBox(upper, 0.54, 0.5, 0.08, 0, 0.78, 0.2, steelCloth); // breastplate
+    costumeBox(upper, 0.2, 0.26, 0.03, 0, 0.78, 0.25, new THREE.MeshLambertMaterial({ color })); // crest
     const shield = costumeBox(leftArm, 0.34, 0.4, 0.06, -0.12, -0.34, 0.12, steelCloth);
     void shield;
     costumeBox(leftArm, 0.12, 0.14, 0.03, -0.12, -0.34, 0.16, new THREE.MeshLambertMaterial({ color })); // boss
-    costumeBox(body, 0.2, 0.08, 0.2, 0, 1.09, 0, darkSteel); // pauldron collar
+    costumeBox(upper, 0.2, 0.08, 0.2, 0, 1.09, 0, darkSteel); // pauldron collar
   }
 
   // player ring (helps kids find themselves)
@@ -395,8 +424,11 @@ export function createAvatar(colorHex: string, model: ModelId = 'kid'): AvatarPa
   shadow.userData.noFade = true;
   group.add(shadow);
 
-  return { group, body, leftArm, rightArm, leftLeg, rightLeg, tail, ring, shadow };
+  return { group, body, chest, leftArm, rightArm, leftLeg, rightLeg, tail, ring, shadow, crouchT: 0 };
 }
+
+/** how far the knees fold under while sneaking (feet trail back: a crawl) */
+const CROUCH_KNEE = -1.25;
 
 export function animateAvatar(
   parts: AvatarParts, walkPhase: number, moving: boolean, airborne: boolean, dt: number,
@@ -406,31 +438,49 @@ export function animateAvatar(
   const target = moving ? Math.sin(walkPhase) : Math.sin(walkPhase) * 0.15;
   let armA = airborne ? 1.1 : target * 0.85;
   let legA = airborne ? -0.5 : target * 0.9;
-  let sym = false; // breaststroke moves both arms together, not in stride
+
+  // four limb targets: walking strides them in opposite pairs, swimming pulls
+  // both arms together, and a sneak crawls them in hands-and-knees alternation
+  let armL = armA, armR = -armA, legL = legA, legR = -legA;
+  const folded = crouching && !airborne && !swimming;
   if (swimming) {
     const s = Math.sin(walkPhase * 1.3);
     armA = -0.9 - s * 0.7; // reach forward, pull back under
     legA = 0.15 + Math.sin(walkPhase * 2.6) * 0.55; // flutter kick
-    sym = true;
-  } else if (crouching) {
-    // sneak pose: knees bent under them, hands out front, the whole body
-    // squatted down (the group scale below)
-    armA = -0.5 + (moving ? Math.sin(walkPhase) * 0.15 : 0);
-    legA = 0.6 + (moving ? Math.sin(walkPhase) * 0.2 : 0);
+    armL = armR = armA;
+    legL = legR = legA;
+  } else if (folded) {
+    // a proper sneak, not a squashed model: the torso folds over the thighs and
+    // the hips sink (the `chest` pivot below) while hands and knees work
+    const fold = CROUCH_FOLD * parts.crouchT;
+    const s = moving ? Math.sin(walkPhase * 1.7) : 0;
+    legL = CROUCH_KNEE + s * 0.34;
+    legR = CROUCH_KNEE - s * 0.34;
+    // the arms live inside the folding torso, so reaching the ground means
+    // undoing the fold — that is why the target is negative by the fold angle
+    armL = -fold - 0.2 + s * 0.42;
+    armR = -fold - 0.2 - s * 0.42;
   }
+
   const lerpK = 1 - Math.exp(-14 * dt);
-  parts.leftArm.rotation.x += (armA - parts.leftArm.rotation.x) * lerpK;
-  parts.rightArm.rotation.x += ((sym ? armA : -armA) - parts.rightArm.rotation.x) * lerpK;
-  parts.leftLeg.rotation.x += (legA - parts.leftLeg.rotation.x) * lerpK;
-  parts.rightLeg.rotation.x += ((sym ? legA : -legA) - parts.rightLeg.rotation.x) * lerpK;
-  const squat = crouching && !airborne ? 0.62 : 1;
-  parts.group.scale.y += (squat - parts.group.scale.y) * lerpK;
-  if (airborne) {
-    parts.leftArm.rotation.z = -0.5;
-    parts.rightArm.rotation.z = 0.5;
-  } else {
-    parts.leftArm.rotation.z = swimming ? 0.35 : crouching ? 0.18 : 0; // elbows out while paddling
-    parts.rightArm.rotation.z = swimming ? -0.35 : crouching ? -0.18 : 0;
-  }
+  parts.leftArm.rotation.x += (armL - parts.leftArm.rotation.x) * lerpK;
+  parts.rightArm.rotation.x += (armR - parts.rightArm.rotation.x) * lerpK;
+  parts.leftLeg.rotation.x += (legL - parts.leftLeg.rotation.x) * lerpK;
+  parts.rightLeg.rotation.x += (legR - parts.rightLeg.rotation.x) * lerpK;
+  // z-roll of the arms: flung out while falling, tucked in for the breaststroke,
+  // braced out to the sides when sneaking (same sign convention as the fall)
+  const elbowZ = airborne ? -0.5 : swimming ? 0.35 : folded ? -0.3 : 0;
+  parts.leftArm.rotation.z = elbowZ;
+  parts.rightArm.rotation.z = -elbowZ;
+
+  // The crouch itself: hips drop and the upper body pitches forward about the
+  // hip pivot. Nothing is scaled, so the head stays a head and the name ring
+  // under the kid stays round.
+  const crouchTo = folded ? 1 : 0;
+  parts.crouchT += (crouchTo - parts.crouchT) * (1 - Math.exp(-11 * dt));
+  const k = parts.crouchT;
+  parts.chest.position.y = CROUCH_HIP - CROUCH_SINK * k;
+  parts.chest.rotation.x = CROUCH_FOLD * k;
+
   if (parts.tail) parts.tail.rotation.y = Math.sin(walkPhase * 0.55 + 1.3) * 0.3; // costume tails always wag a little
 }

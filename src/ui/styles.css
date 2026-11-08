@@ -156,6 +156,8 @@ html, body {
 }
 .palette-cell .pn { font-size: calc(9px * var(--ui-scale, 1)); font-weight: 700; color: var(--ink); }
 .palette-cell.sel { opacity: 1; transform: scale(1.15); box-shadow: 0 0 0 5px #ffe14d; z-index: 2; }
+/* a tool in the block grid (the bucket): a dashed rim says "this one does something" */
+.palette-cell.tool { border-style: dashed; background-image: linear-gradient(135deg, rgba(255,255,255,0.45), rgba(255,255,255,0)); }
 
 /* menu list */
 .menu-list { display: flex; flex-direction: column; gap: 8px; width: 100%; }

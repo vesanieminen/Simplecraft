@@ -4,7 +4,9 @@
  *    tuft) sampled by the cross-quads with alpha-test cutout;
  *  - a horizontal atlas of 32x32 *block* cells: every block in the game is
  *    painted from here rather than flat-tinted (grass, dirt, stone, planks,
- *    bricks, glass, water, the candy colours, bedrock, scorch, dynamite…).
+ *    bricks, glass, the candy colours, bedrock, scorch, dynamite…);
+ *  - one extra *tileable* sheet for water (waterTexture), which lives outside
+ *    the atlas so the sea can scroll without dragging its neighbours with it.
  *
  * A block face is only a few dozen pixels on screen and side faces lose about
  * half their brightness to the baked face shading, ambient occlusion and
@@ -708,6 +710,53 @@ const BLOCK_ART: Record<number, CellArt> = {
 };
 
 let cachedBlock: THREE.CanvasTexture | null = null;
+
+let cachedWater: THREE.CanvasTexture | null = null;
+
+/**
+ * Water gets its own *tileable* sheet rather than a cell of the block atlas:
+ * a flowing surface wants to move, and sliding the atlas's UVs would drag the
+ * neighbouring artwork across the sea. Every wave here is a whole number of
+ * periods across the tile, so it wraps without a seam, and `Game` drifts the
+ * texture's offset a little every frame — ponds shimmer, floods look like they
+ * are running.
+ */
+export function waterTexture(): THREE.CanvasTexture {
+  if (cachedWater) return cachedWater;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = S;
+  const ctx = canvas.getContext('2d')!;
+  const img = ctx.createImageData(S, S);
+  const px = img.data;
+  const TAU = Math.PI * 2;
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      // three crossing wave trains, all whole periods across the tile
+      const w = Math.sin((x / S) * TAU * 2)
+        + Math.sin((y / S) * TAU * 2 + 1.2)
+        + 0.6 * Math.sin(((x + y) / S) * TAU * 3 + 0.5);
+      const t = (w + 2.6) / 5.2; // 0..1
+      let r: number, g: number, b: number;
+      if (t > 0.76) { r = 0xe8; g = 0xf8; b = 0xff; } // foam sparkle
+      else if (t > 0.58) { r = 0x8f; g = 0xd2; b = 0xf7; } // crest
+      else if (t > 0.32) { r = 0x5c; g = 0xb4; b = 0xee; } // body
+      else { r = 0x3a; g = 0x8e; b = 0xcb; } // trough
+      const i = (y * S + x) * 4;
+      px[i] = r; px[i + 1] = g; px[i + 2] = b; px[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  // same reason as the block atlas: tints in this game are plain linear values
+  tex.colorSpace = THREE.NoColorSpace;
+  cachedWater = tex;
+  return tex;
+}
 
 export function blockAtlasTexture(): THREE.CanvasTexture {
   if (cachedBlock) return cachedBlock;

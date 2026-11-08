@@ -45,6 +45,13 @@ export const STAIRS: BlockId = 35; // a real step: half the cell low, half of it
 export const CHEST: BlockId = 36; // a treasure chest, lid shut
 export const CHEST_OPEN: BlockId = 37; // the same chest with the lid up: treasure already taken
 export const WATER_FLOW: BlockId = 38; // travelling water: spreads, shallows and dries up
+/**
+ * The bucket (core/bucket.ts): NOT a block anyone can stand in — it is the one
+ * palette item that is a *tool*. Emptied, it scoops a spring of WATER up;
+ * full, pressing build pours that spring out again. It is never written into
+ * the voxel grid, so nothing about the world's storage changes.
+ */
+export const BUCKET: BlockId = 39;
 
 /**
  * Cells of the procedural *block* texture atlas (see render/textures.ts).
@@ -188,12 +195,15 @@ const DEFS: BlockDef[] = [
     sideAtlasCell: ATLAS_LEAVES, solid: true, opaque: true,
   },
   {
+    // Water is drawn from its own animated sheet (render/textures.ts
+    // waterTexture), not from the block atlas: a flowing surface wants to move.
+    // Its cell height comes from how deep it is (core/water.ts waterSurfaceHeight).
     id: WATER, name: 'Water', icon: '💧', color: rgb(79, 179, 232),
-    sideAtlasCell: ATLAS_WATER, solid: false, opaque: false, translucent: true,
+    solid: false, opaque: false, translucent: true,
   },
   {
     id: WATER_FLOW, name: 'Flowing Water', icon: '💧', color: rgb(96, 190, 238),
-    sideAtlasCell: ATLAS_WATER, solid: false, opaque: false, translucent: true,
+    solid: false, opaque: false, translucent: true,
   },
   { id: FLOWER_RED, name: 'Flower', icon: '🌷', color: rgb(255, 122, 108), solid: false, opaque: false, cross: true, atlasCell: 0 },
   { id: FLOWER_YELLOW, name: 'Sunflower', icon: '🌼', color: rgb(255, 214, 94), solid: false, opaque: false, cross: true, atlasCell: 1 },
@@ -282,6 +292,13 @@ const DEFS: BlockDef[] = [
     bottomAtlasCell: ATLAS_CHEST_BOTTOM,
     solid: true, opaque: true, solidHeight: 0.85,
   },
+  {
+    // The one palette item that is a tool instead of a brick: scoop a spring
+    // with it, pour the spring out somewhere else (core/bucket.ts). The
+    // player carries it, so it never lands in the voxel grid.
+    id: BUCKET, name: 'Bucket', icon: '🪣', color: rgb(186, 205, 224),
+    solid: false, opaque: false,
+  },
 ];
 
 export const BLOCK_MAP = new Map<BlockId, BlockDef>(DEFS.map((d) => [d.id, d]));
@@ -369,6 +386,10 @@ export function isStairsBlock(id: BlockId): boolean {
 export function isChestBlock(id: BlockId): boolean {
   return id === CHEST || id === CHEST_OPEN;
 }
+/** the bucket tool — scoops a spring up, pours it out again (core/bucket.ts) */
+export function isBucket(id: BlockId): boolean {
+  return id === BUCKET;
+}
 /** collidable height of a block id in its cell (0 for non-solids, 0.5 for a slab) */
 export function solidHeightOf(id: BlockId): number {
   if (id === AIR) return 0;
@@ -402,18 +423,32 @@ export function rotateStairFacing(facing: number): StairFacing {
 }
 
 /**
- * Blocks offered in the child-friendly creative palette (in order). Treasure
- * chests are deliberately NOT here — they are meant to be *found*, hidden in
- * the terrain by terrain.ts, not built. Break one or pet it to open; once a
- * lid is up (CHEST_OPEN) it stays open in that world forever.
+ * Blocks offered in the child-friendly creative palette (in order). The bucket
+ * stands where the water source used to: water is *poured* from a bucket now,
+ * never set down straight from a menu, so kids have to walk a puddle home.
+ * Treasure chests are here only when grown-ups allow building them — see
+ * `paletteFor`, which is the palette the game actually shows.
  */
 export const PALETTE: BlockId[] = [
   GRASS, DIRT, STONE, SAND, WOOD, PLANKS, STAIRS, SLAB, DOOR, BRICKS, GLASS, LEAVES,
-  WATER,
+  BUCKET,
   SAPLING, FLOWER_RED, FLOWER_YELLOW, TALLGRASS,
   GLOW, BOUNCY, SPARKLE, MUSIC, DYNAMITE,
   C_RED, C_ORANGE, C_YELLOW, C_GREEN, C_BLUE, C_PURPLE, C_PINK, C_WHITE,
 ];
+
+/**
+ * The live palette: the base list, plus a treasure chest among the things you
+ * build when grown-ups have left "Treasure Chests" on (Grown-Up Settings).
+ * Chests are still only *found* in a world where they are off — the toggle
+ * decides whether a kid may place one, nothing about the loot inside.
+ */
+export function paletteFor(allowChests: boolean): BlockId[] {
+  if (!allowChests) return PALETTE;
+  const withChests = [...PALETTE];
+  withChests.splice(withChests.indexOf(DOOR) + 1, 0, CHEST);
+  return withChests;
+}
 
 /** Quick-cycling favorites for shoulder buttons. */
 export const FAVORITES: BlockId[] = [

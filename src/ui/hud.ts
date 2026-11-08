@@ -3,15 +3,18 @@
  * player's split-screen pane. Scales with pane size.
  */
 
-import { blockDef } from '../core/blocks';
+import { blockDef, isBucket } from '../core/blocks';
 import { ControllerType } from '../input/types';
 import { LocalPlayer } from '../players/localPlayer';
 
 const BTN_LABELS: Record<ControllerType, Record<string, string>> = {
-  xbox: { a: 'A', b: 'B', x: 'X', y: 'Y', lb: 'LB', rb: 'RB', lt: 'LT', rt: 'RT', start: 'Start', satchel: 'D-pad ▾' },
-  playstation: { a: '✕', b: '◯', x: '☐', y: '△', lb: 'L1', rb: 'R1', lt: 'L2', rt: 'R2', start: 'Options', satchel: 'D-Pad ▾' },
-  generic: { a: 'A', b: 'B', x: 'X', y: 'Y', lb: 'L1', rb: 'R1', lt: 'L2', rt: 'R2', start: 'Menu', satchel: 'D-Pad ▾' },
-  keyboard: { a: 'Space', b: 'Ctrl', x: 'E', y: 'F', lb: 'Q', rb: 'R', lt: 'R-Click', rt: 'L-Click', start: 'Esc', satchel: 'I' },
+  // Nov 2026: the left trigger is the "do the thing" trigger (pet, doors,
+  // chests, fishing), the right trigger puts blocks down, and breaking moved
+  // onto the west face button. On the keyboard that is E / R-Click / L-Click.
+  xbox: { a: 'A', b: 'B', y: 'Y', lb: 'LB', rb: 'RB', start: 'Start', satchel: 'D-pad ▾', interact: 'LT', build: 'RT', mine: 'X' },
+  playstation: { a: '✕', b: '◯', y: '△', lb: 'L1', rb: 'R1', start: 'Options', satchel: 'D-Pad ▾', interact: 'L2', build: 'R2', mine: '☐' },
+  generic: { a: 'A', b: 'B', y: 'Y', lb: 'L1', rb: 'R1', start: 'Menu', satchel: 'D-Pad ▾', interact: 'L2', build: 'R2', mine: 'X' },
+  keyboard: { a: 'Space', b: 'Ctrl', y: 'F', lb: 'Q', rb: 'R', start: 'Esc', satchel: 'I', interact: 'E', build: 'R-Click', mine: 'L-Click' },
 };
 
 export class Hud {
@@ -28,6 +31,7 @@ export class Hud {
   private lastBlock = -1;
   private lastStars = -1;
   private lastPouch = -1;
+  private lastCarrying = '';
   private lastBoost = '';
 
   constructor(player: LocalPlayer, type: ControllerType) {
@@ -74,21 +78,24 @@ export class Hud {
 
     this.hints = document.createElement('div');
     this.hints.className = 'hints';
-    // LT-position button builds, RT-position breaks (2026-11 control swap —
-    // on keyboard that means R-Click builds, L-Click breaks)
+    // The left trigger pets and opens, the right trigger builds, the west
+    // button breaks (Nov 2026 remap — on keyboard: E · R-Click · L-Click)
     this.hints.textContent =
-      `${b.lt} build · ${b.rt} break · ${b.a} jump · ${b.b} sneak · ${b.x} pet · fish · open · ${b.y} blocks · ${b.satchel} eat · ${b.start} menu`;
+      `${b.interact} pet · fish · open · ${b.build} build · ${b.mine} break · ${b.a} jump · ${b.b} sneak · ${b.y} blocks · ${b.satchel} eat · ${b.start} menu`;
 
     this.root.append(this.nameTag, this.stars, this.pouch, this.flyTag, this.boostTag, this.crosshair, pod, this.hints);
   }
 
   update(player: LocalPlayer): void {
-    if (player.selected !== this.lastBlock) {
+    // the bucket's name tells the whole story: empty, or carrying a spring
+    const carrying = isBucket(player.selected) ? (player.bucketFull ? 'Bucket — full 💧' : 'Bucket — empty') : '';
+    if (player.selected !== this.lastBlock || carrying !== this.lastCarrying) {
       this.lastBlock = player.selected;
+      this.lastCarrying = carrying;
       const def = blockDef(player.selected);
       this.swatch.style.background = `rgb(${def.color.map((c) => Math.round(c * 255)).join(',')})`;
       this.swatch.textContent = def.icon;
-      this.blockName.textContent = def.name;
+      this.blockName.textContent = carrying || def.name;
     }
     const s = player.entity.starsCount ?? 0;
     if (s !== this.lastStars) {

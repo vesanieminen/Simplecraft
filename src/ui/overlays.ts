@@ -4,7 +4,7 @@
  * own input source — no mouse required anywhere.
  */
 
-import { BlockId, blockDef, FAVORITES, PALETTE } from '../core/blocks';
+import { BlockId, blockDef, FAVORITES, isBucket } from '../core/blocks';
 import { AudioKit } from '../core/audio';
 import { FISH_DEFS, FishKind } from '../core/fish';
 import { FISH_SNACKS, SNACK_BADGES } from '../core/satchel';
@@ -158,24 +158,29 @@ export class JoinCard extends Overlay {
 export class PaletteOverlay extends Overlay {
   private sel = 0;
   private cells: HTMLElement[] = [];
+  private blocks: BlockId[];
 
   constructor(
     audio: AudioKit,
     type: ControllerType,
     player: LocalPlayer,
+    blocks: BlockId[],
     private onPick: (b: BlockId) => void,
   ) {
     super(audio, type);
+    this.blocks = blocks;
     const c = this.card('Pick a block!');
     const grid = document.createElement('div');
     grid.className = 'palette-grid';
-    const startIdx = PALETTE.indexOf(player.selected);
+    const startIdx = this.blocks.indexOf(player.selected);
     this.sel = startIdx >= 0 ? startIdx : 0;
-    PALETTE.forEach((id) => {
+    this.blocks.forEach((id) => {
       const def = blockDef(id);
       const cell = document.createElement('div');
-      cell.className = 'palette-cell';
+      // the bucket is a tool, not a brick: it wears a dashed rim in the grid
+      cell.className = `palette-cell${isBucket(id) ? ' tool' : ''}`;
       cell.dataset.id = String(id);
+      cell.dataset.tool = isBucket(id) ? '1' : '0';
       cell.style.background = `rgb(${def.color.map((x) => Math.round(x * 255)).join(',')})`;
       cell.innerHTML = `<div>${def.icon}</div><div class="pn">${def.name}</div>`;
       cell.addEventListener('click', () => {
@@ -208,8 +213,8 @@ export class PaletteOverlay extends Overlay {
   }
 
   private select(n: number): void {
-    if (n < 0) n = PALETTE.length - 1;
-    if (n >= PALETTE.length) n = 0;
+    if (n < 0) n = this.blocks.length - 1;
+    if (n >= this.blocks.length) n = 0;
     this.sel = n;
     this.audio.uiMove();
     this.refresh();
@@ -223,12 +228,12 @@ export class PaletteOverlay extends Overlay {
   private moveVert(d: number): void {
     const cols = this.cols();
     const col = this.sel % cols;
-    const rows = Math.ceil(PALETTE.length / cols);
+    const rows = Math.ceil(this.blocks.length / cols);
     let row = Math.floor(this.sel / cols) + d;
     if (row < 0) row = rows - 1;
     if (row >= rows) row = 0;
     let n = row * cols + col;
-    if (n >= PALETTE.length) n = PALETTE.length - 1; // a short last row: snap to its end
+    if (n >= this.blocks.length) n = this.blocks.length - 1; // a short last row: snap to its end
     this.sel = n;
     this.audio.uiMove();
     this.refresh();
@@ -243,7 +248,7 @@ export class PaletteOverlay extends Overlay {
     if (frame.pressed.has('nextBlock')) this.move(1);
     if (frame.pressed.has('prevBlock')) this.move(-1);
     if (nav.confirm) {
-      this.onPick(PALETTE[this.sel]);
+      this.onPick(this.blocks[this.sel]);
       this.audio.uiSelect();
       this.close();
     }
@@ -449,6 +454,14 @@ export interface GrownUpActions {
   waiting: () => string;
   frozen: () => boolean;
   layout: () => string;
+  /** sky and weather: what the grown-up menu shows and cycles */
+  weather: () => string;
+  cycleWeather: () => string;
+  dayMode: () => string;
+  cycleDay: () => string;
+  /** whether kids may place treasure chests from the palette */
+  chests: () => string;
+  toggleChests: () => void;
 }
 
 export class GrownUpsMenu extends Overlay {
@@ -484,6 +497,26 @@ export class GrownUpsMenu extends Overlay {
           if (this.waitingArmed) { actions.sendWaitingHome(); this.waitingArmed = false; }
           else this.waitingArmed = true;
         },
+      },
+      // Everything above this line is row-pinned by the e2e suite (0 Freeze …
+      // 5 Waiting Players), and 'Back' stays last so those six never move.
+      {
+        icon: '🌦️',
+        label: 'Weather',
+        val: () => actions.weather(),
+        fn: () => { actions.cycleWeather(); },
+      },
+      {
+        icon: '🌗',
+        label: 'Day & Night',
+        val: () => actions.dayMode(),
+        fn: () => { actions.cycleDay(); },
+      },
+      {
+        icon: '📦',
+        label: 'Treasure Chests',
+        val: () => actions.chests(),
+        fn: () => { actions.toggleChests(); },
       },
       { icon: '◀️', label: 'Back', fn: () => this.close() },
     ];
@@ -865,13 +898,13 @@ const PAD_ROWS: [string, string][] = [
   ['LEFT STICK', 'Walk around'],
   ['RIGHT STICK', 'Look / aim'],
   ['A', 'Jump'],
-  ['LT', 'Place block'],
-  ['RT', 'Break block'],
+  ['LT', 'Pet · fish · open doors & chests · turn stairs'],
+  ['RT', 'Place block · pour or fill the bucket'],
+  ['X', 'Break block'],
   ['LB / RB', 'Prev / next block · costume at join'],
-  ['X', 'Pet · fish · open doors & chests · turn stairs'],
   ['Y', 'Block palette'],
   ['START', 'Menu'],
-  ['B', 'Back'],
+  ['B', 'Back · tap in the world to crouch'],
   ['D-PAD', 'Menus'],
   ['D-PAD DOWN', 'Fish satchel — eat a catch'],
 ];

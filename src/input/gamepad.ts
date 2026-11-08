@@ -5,17 +5,22 @@
 
 import { Action, ControllerType, InputSource, RawFrame, applyDeadzone } from './types';
 
-/** standard button index -> action(s). D-pad down doubles as the fish
- *  satchel: in menus it only navigates, in the world it opens the pouch. */
+/** standard button index -> action(s).
+ *  2026-11-08: the family asked for interaction on the left trigger, so the
+ *  triggers became "do the thing" (L2/LT: pet, open a door or chest, cast the
+ *  rod, spin a step) and "put it down" (R2/RT: build) — the way the big game
+ *  does it. Breaking moved onto the west face button (X / ☐), which used to be
+ *  the interact button. D-pad down doubles as the fish satchel: in menus it
+ *  only navigates, in the world it opens the pouch. */
 const BUTTON_MAP: Record<number, Action[]> = {
   0: ['jump'],      // A / Cross
   1: ['back'],      // B / Circle
-  2: ['interact'],  // X / Square
+  2: ['remove'],    // X / Square  — break a block
   3: ['palette'],   // Y / Triangle
   4: ['prevBlock'], // Left bumper
   5: ['nextBlock'], // Right bumper
-  6: ['place'],     // Left trigger — building on LT, breaking on RT
-  7: ['remove'],    // Right trigger   (swapped 2026-11: kids build more than they break)
+  6: ['interact'],  // Left trigger  — pet · open doors & chests · fish · turn stairs
+  7: ['place'],     // Right trigger — build (was LT until Nov 2026)
   8: ['menu'],      // Select/Share doubles as menu for kids? keep start only
   9: ['menu'],      // Start / Options
   12: ['up'],       // D-pad
@@ -23,6 +28,9 @@ const BUTTON_MAP: Record<number, Action[]> = {
   14: ['left'],
   15: ['right'],
 };
+
+/** exported for the e2e suite: the pad layout is a promise to the couch */
+export const GAMEPAD_BUTTON_MAP = BUTTON_MAP;
 
 export function detectControllerType(id: string): ControllerType {
   const s = id.toLowerCase();
