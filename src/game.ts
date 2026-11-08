@@ -8,10 +8,13 @@ import * as THREE from 'three';
 import { AudioKit } from './core/audio';
 import { AnimalWorld, ANIMAL_KINDS } from './core/animals';
 import {
-  blockDef, CHEST, CHEST_OPEN, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, isChestBlock,
-  isDoorBlock, isDoorTopBlock, isExplosiveBlock, isSolidBlock, isStairsBlock, isWaterId,
+  blockDef, CHEST, CHEST_OPEN, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, isBucket, isChestBlock,
+  isDoorBlock, isDoorTopBlock, isExplosiveBlock, isSolidBlock, isStairsBlock, isWaterId, paletteFor,
   ROCK, rotateStairFacing, SAPLING, soundFamilyOf, StairFacing, STAIRS, WATER,
 } from './core/blocks';
+import { pourableAt, useBucket } from './core/bucket';
+import { WeatherClock, WeatherKind, WeatherMode } from './core/weather';
+import { DayMode } from './render/sky';
 import { StarField } from './core/collectibles';
 import { BlastInfo, DynamiteManager } from './core/dynamite';
 import { FISH_DEFS, FishKind, FishWorld, pickFishKind } from './core/fish';
@@ -101,6 +104,24 @@ export class Game {
   private lastRevision = 0;
   private saveTimer: number | undefined;
   private skyEnv!: SkyEnv;
+  /**
+   * Sky settings (Grown-Up menu): the weather mode a grown-up chose, the
+   * day-night mode, and whether kids may place treasure chests. All three
+   * live in the saved settings, so the tablet keeps the family's choices.
+   */
+  weatherMode: WeatherMode = 'auto';
+  dayMode: DayMode = 'auto';
+  chestsAllowed = true;
+  /** what falls from the sky and how hard — pure, testable (core/weather.ts) */
+  readonly weather = new WeatherClock();
+  /** which weather the rain hiss carries right now (null = quiet) */
+  private rainSound: WeatherKind | null = null;
+  /** game time of the last thunder crack, so rumble is rare but not scripted */
+  private lastThunder = 0;
+  /** game time of the last bucket hint, so fiddling with a bucket never spams */
+  private lastBucketHint = -10;
+  /** the camera the last frame rendered through — the sky sits on it */
+  private renderCam: THREE.Camera | null = null;
   private time = 0;
   private sparkleBlocks = new Set<number>();
   dynamite!: DynamiteManager;
@@ -160,6 +181,9 @@ export class Game {
     this.chunks = new ChunkMeshManager(this.scene, this.world);
     this.chunks.rebuildAll();
     this.skyEnv = createSky(this.scene);
+    // the saved sky settings (if any) decide what the first frame looks like
+    this.skyEnv.setDayMode(this.dayMode);
+    if (this.weather.kind) this.skyEnv.setWeather(this.weather.kind, this.weather.intensity);
     this.particles = new ParticleSystem(this.scene);
 
     // sparkle blocks placed by players emit drifting sparkles
@@ -516,6 +540,34 @@ export class Game {
             layout: () => (this.layout === 'auto' ? 'Smart'
               : this.layout === 'horizontal' ? 'Left/Right'
               : this.layout === 'vertical' ? 'Up/Down' : '2×2 Grid'),
+            // ---- the sky and the treasure (all persisted in settings) ----
+            weather: () => this.weatherLabel(),
+            cycleWeather: () => {
+              const order: WeatherMode[] = ['auto', 'off', 'rain', 'snow'];
+              this.weatherMode = order[(order.indexOf(this.weatherMode) + 1) % order.length];
+              this.weather.setMode(this.weatherMode);
+              this.saveSettings();
+              return this.weatherLabel();
+            },
+            dayMode: () => this.dayLabel(),
+            cycleDay: () => {
+              const order: DayMode[] = ['auto', 'day', 'night', 'none'];
+              this.setDayMode(order[(order.indexOf(this.dayMode) + 1) % order.length]);
+              this.saveSettings();
+              return this.dayLabel();
+            },
+            chests: () => (this.chestsAllowed ? 'On' : 'Off'),
+            toggleChests: () => {
+              this.chestsAllowed = !this.chestsAllowed;
+              this.saveSettings();
+              // a kid with a chest in hand right now: send it home
+              for (const p of this.players) {
+                if (!this.chestsAllowed && (p.selected === CHEST || p.selected === CHEST_OPEN)) p.setSelected(ROCK);
+              }
+              this.ui.toast(this.chestsAllowed
+                ? 'Treasure chests unlocked — a few may hide in the next world'
+                : 'Treasure chests hidden', 2600);
+            },
           },
           );
           this.overlays.set(p.entity.id, g);
@@ -598,7 +650,7 @@ export class Game {
   private openPalette(p: LocalPlayer): void {
     const idx = this.players.indexOf(p);
     this.ui.clearOverlays(idx);
-    const pal = new PaletteOverlay(this.audio, this.typeOf(p), p, (b) => p.setSelected(b));
+    const pal = new PaletteOverlay(this.audio, this.typeOf(p), p, paletteFor(this.chestsAllowed), (b) => p.setSelected(b));
     this.overlays.set(p.entity.id, pal);
     this.ui.addOverlay(idx, pal);
   }
@@ -943,6 +995,35 @@ export class Game {
     this.ui.toast(`${FISH_DEFS[kind].icon} ${snack.message}`, 2800);
   }
 
+  /**
+   * One bucket press, both directions: an empty pail scoops the spring the
+   * kid aims at (and the flood that spring fed runs home, shallowest first),
+   * a full one pours a new spring into the gap in front of whatever they aim
+   * at. The full/empty flag lives on the player — session-only, like the
+   * fish satchel: buckets do not survive a reload.
+   */
+  private bucketAction(lp: LocalPlayer, hit: RayHit): boolean {
+    const res = useBucket(this.world, lp.bucketFull, hit);
+    if (!res.ok) {
+      if (res.reason === 'flow' && this.time - this.lastBucketHint > 3) {
+        this.lastBucketHint = this.time;
+        this.ui.toast('Running water is too quick to catch — scoop a still spring 💧', 2400);
+      }
+      return false;
+    }
+    lp.bucketFull = res.kind === 'filled';
+    if (res.kind === 'filled') {
+      this.audio.plip();
+      this.particles.burst(res.x + 0.5, res.y + 0.7, res.z + 0.5, 0x4aa3e8, 7, 0.8);
+      this.ui.toast(`${lp.entity.name} scooped a bucket of water 💧`, 1500);
+    } else {
+      this.audio.splash();
+      this.particles.burst(res.x + 0.5, res.y + 1.1, res.z + 0.5, 0x4aa3e8, 8, 0.8);
+      this.ui.toast(`${lp.entity.name} poured the bucket — a new spring!`, 1800);
+    }
+    return true;
+  }
+
   private hooks() {
     return {
       events: this.stepEvents,
@@ -951,6 +1032,15 @@ export class Game {
         if (!this.world.inBounds(px, py, pz)) return false;
         if (py <= 0) return false;
         const id = lp.selected;
+        // Treasure chests answer to a grown-up: hidden is hidden — even from
+        // a hotbar that still holds one from before the switch flipped.
+        if (!this.chestsAllowed && (id === CHEST || id === CHEST_OPEN)) {
+          this.ui.toast('A grown-up hid the treasure chests (Player menu → Grown-Ups)', 2200);
+          return false;
+        }
+        // 🪣 The bucket is a tool, not a brick: an empty one scoops the spring
+        // you are looking at, a full one pours a new spring into the gap.
+        if (isBucket(id)) return this.bucketAction(lp, hit);
         // A door is TWO blocks high and you always build it from its bottom
         // half: the upper half comes with it, so the cell above has to be free.
         if (isDoorTopBlock(id)) return false;
@@ -1007,6 +1097,12 @@ export class Game {
         return true;
       },
       tryRemove: (lp: LocalPlayer, hit: RayHit): void => {
+        // 🪣 Digging with a bucket scoops: a spring hops into the pail instead
+        // of flashing "no" like bedrock does. (Flowing water still breaks
+        // normally — that is how you carve a flood back into its banks.)
+        if (isBucket(lp.selected) && !lp.bucketFull && hit.block === WATER) {
+          if (this.bucketAction(lp, hit)) return;
+        }
         const def = blockDef(hit.block);
         if (isExplosiveBlock(hit.block)) {
           // hitting dynamite never takes it off: you light the stub and it pops
@@ -1053,6 +1149,17 @@ export class Game {
           this.reelIn(lp);
           return;
         }
+        // 🪣 A bucket in hand outranks the fishing cast: the LT button fills
+        // the pail from a spring, or pours it out into the gap you look at.
+        // (Anything the bucket cannot do falls through: petting still works.)
+        if (isBucket(lp.selected) && lp.target) {
+          const hit = lp.target;
+          const wantsWater = !lp.bucketFull && hit.block === WATER;
+          const wantsPour = lp.bucketFull && pourableAt(this.world, hit.px, hit.py, hit.pz);
+          if (wantsWater || wantsPour) {
+            if (this.bucketAction(lp, hit)) return;
+          }
+        }
         // doors and chests come first: the pet button is the family's "do
         // something nice" button, and a door or a treasure chest straight ahead
         // is more pressing than an animal. Aimed at a step, it spins it around.
@@ -1079,6 +1186,37 @@ export class Game {
         this.animals.petNearest(lp.entity.pos.x, lp.entity.pos.y + 0.8, lp.entity.pos.z, 2.4);
       },
     };
+  }
+
+  // -------------------------------------------------------------------- sky
+  // The two sky switches in Grown-Up Settings, plus the helpers tests (and the
+  // debug console) use to make the weather happen on purpose.
+
+  /** what the weather row in the menu shows */
+  private weatherLabel(): string {
+    return this.weatherMode === 'auto' ? 'Sometimes' : this.weatherMode === 'off' ? 'Never'
+      : this.weatherMode === 'rain' ? 'Always rain' : 'Always snow';
+  }
+
+  /** what the day & night row in the menu shows */
+  private dayLabel(): string {
+    return this.dayMode === 'auto' ? 'Day and night' : this.dayMode === 'day' ? 'Always day'
+      : this.dayMode === 'night' ? 'Always night' : 'No sun or moon';
+  }
+
+  /** Park the sun and moon, or let the clock run again. */
+  setDayMode(mode: DayMode): void {
+    this.dayMode = mode;
+    this.skyEnv.setDayMode(mode);
+  }
+
+  /**
+   * Start (or stop) falling weather right away — the grown-up menu cycles the
+   * mode through the clock, and this is the immediate door the tests use.
+   * Returns the intensity chosen, 0..1.
+   */
+  weatherNow(kind: WeatherKind | null): number {
+    return this.weather.force(kind, kind === null ? 0 : 45);
   }
 
   // ------------------------------------------------------------- explosions
@@ -1148,17 +1286,28 @@ export class Game {
     try {
       const raw = localStorage.getItem(this.settingsKey);
       if (!raw) return;
-      const s = JSON.parse(raw) as { layout?: string; muted?: boolean };
+      const s = JSON.parse(raw) as {
+        layout?: string; muted?: boolean; chests?: boolean; weather?: string; day?: string;
+      };
       if (s.layout === 'auto' || s.layout === 'horizontal' || s.layout === 'vertical' || s.layout === 'grid2x2') {
         this.layout = s.layout;
       }
       if (typeof s.muted === 'boolean') this.audio.muted = s.muted;
+      if (typeof s.chests === 'boolean') this.chestsAllowed = s.chests;
+      if (s.weather === 'auto' || s.weather === 'off' || s.weather === 'rain' || s.weather === 'snow') {
+        this.weatherMode = s.weather;
+        this.weather.setMode(s.weather);
+      }
+      if (s.day === 'auto' || s.day === 'day' || s.day === 'night' || s.day === 'none') this.dayMode = s.day;
     } catch { /* corrupted settings: defaults win */ }
   }
 
   private saveSettings(): void {
     try {
-      localStorage.setItem(this.settingsKey, JSON.stringify({ layout: this.layout, muted: this.audio.muted }));
+      localStorage.setItem(this.settingsKey, JSON.stringify({
+        layout: this.layout, muted: this.audio.muted,
+        chests: this.chestsAllowed, weather: this.weatherMode, day: this.dayMode,
+      }));
     } catch { /* storage unavailable */ }
   }
 
@@ -1483,9 +1632,33 @@ export class Game {
         }
       }
       this.particles.update(dt);
-      this.skyEnv.update(dt);
+
+      // The sky: the sun and moon circle on their clock (which a grown-up can
+      // park), and the weather clock decides when rain or snow falls. The rain
+      // hiss follows the sky, and a proper downpour occasionally cracks.
+      this.weather.update(dt);
+      const wKind = this.weather.kind;
+      this.skyEnv.setWeather(wKind, this.weather.intensity);
+      if (wKind === 'rain' && this.weather.intensity > 0.05) {
+        if (this.time - this.lastThunder > 9 && this.weather.intensity > 0.7 && Math.random() < dt * 0.05) {
+          this.lastThunder = this.time;
+          this.audio.thunder();
+        }
+        this.audio.rainLoop(this.weather.intensity); // re-triggers itself ~1×/s while it rains
+        this.rainSound = 'rain';
+      } else if (wKind === 'snow') {
+        this.audio.rainLoopStop(); // snow falls silent
+        this.rainSound = null;
+      } else if (this.rainSound !== null) {
+        this.audio.rainLoopStop();
+        this.rainSound = null;
+      }
+      this.skyEnv.update(dt, this.renderCam ?? this.idleCamera);
     }
 
+    // water drift: the tiling wave sheet slides a touch every frame so a pond
+    // never freezes into a still painting
+    this.chunks.tickWater(dt);
     this.chunks.update(4);
 
     if (!this.frozen && this.players.length > 0) {
@@ -1499,6 +1672,7 @@ export class Game {
 
     // cameras for render
     const cameras: THREE.Camera[] = [];
+    this.renderCam = this.players[0]?.camera ?? this.idleCamera;
     for (const p of this.players) cameras.push(p.camera);
     for (const pj of this.pendingJoins.values()) {
       pj.angle += dt * 0.15;

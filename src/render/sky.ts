@@ -1,13 +1,13 @@
 /**
- * Sky, lights, clouds, weather and the day-night cycle.
+ * Sky, lights, clouds, rain/snow and the day-night cycle.
  *
  * The sun and moon circle the world once every `DAY_SECONDS`, and the lights,
  * fog and dome colours all follow the clock — morning gold at 0.25, high noon
- * at 0.5, sunset orange at 0.75, and a blue-black night that never goes truly
- * black (a pitch-black sky frightens kids, so the lights have a floor). Grown-ups
- * can park the clock at noon or midnight, or hide the sun and moon entirely
- * with the Flashlight option. Clouds darken and rain or snow starts and stops
- * on its own (or whenever a grown-up says so — core/weather.ts).
+ * at 0.5, sunset orange at 0.75, and a blue-black night that keeps real colour
+ * and a light floor (a pitch-black sky frightens kids, and the e2e sky test
+ * counts near-black pixels). Grown-ups can park the clock at noon or midnight
+ * or hide the sun, moon and clouds entirely. Clouds darken and rain or snow
+ * starts and stops when core/weather.ts says so; this file only draws it.
  */
 
 import * as THREE from 'three';
@@ -15,149 +15,110 @@ import { WORLD_SX, WORLD_SZ } from '../core/world';
 import { WeatherKind } from '../core/weather';
 
 export const DAY_SECONDS = 12 * 60;
-/** the sun's elevation at an hour of the day cycle (0..1); > 0 means it is up */
+/** the sun's elevation at a day-phase (0..1); > 0 means the sun is up */
 export function sunElevation(hour: number): number {
   return Math.sin(hour * Math.PI * 2);
 }
 
-/** A slow cloud field: puffy boxes that drift, darken with the weather, and
- *  (in Flashlight mode) fade away to a clean clear sky. */
+export const SKY_RADIUS = 320;
+/** matches the fog, so the renderer can clear to it: nothing in this game should
+ *  ever be able to show the raw canvas, and a black gap frightens kids */
+export const SKY_CLEAR = 0xbfe0f5;
+/** Camera far plane. The dome is centred on the MIDDLE of the world, so the most
+ *  a camera can be from its centre is the half-diagonal (~91) plus the build
+ *  ceiling (~44) — stay well clear of dome + that, or three clips a hole in the
+ *  sky and the black canvas shows through it. */
+export const SKY_FAR = SKY_RADIUS + 200;
+
+/** One soft blob sprite, reused by clouds and snowflakes. */
+function blobTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
+  g.addColorStop(0, 'rgba(255,255,255,0.95)');
+  g.addColorStop(0.7, 'rgba(255,255,255,0.55)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.NoColorSpace; // sky colours here are plain linear values
+  return t;
+}
+
+/** A slow cloud field: puffy textured quads that drift and fade with the sky. */
 class Clouds {
-  private readonly field = new THREE.Group();
-  private readonly canvas: HTMLCanvasElement;
-  private readonly tex: THREE.CanvasTexture;
   private readonly mat: THREE.MeshBasicMaterial;
   private readonly groups: THREE.Group[] = [];
-  private readonly opacities: number[] = [];
   private readonly speeds: number[] = [];
-  private readonly span = new THREE.Vector3(WORLD_SX * 2.6, 0, WORLD_SZ * 2.6);
+  private readonly spanX = WORLD_SX * 2.6;
 
   constructor(scene: THREE.Scene) {
-    this.canvas = document.createElement('canvas');
-    this.canvas.width = 128;
-    this.canvas.height = 128;
-    const ctx = this.canvas.getContext('2d')!;
-    const paint = (color: string, alpha: number) => {
-      ctx.clearRect(0, 0, 128, 128);
-      ctx.fillStyle = color;
-      for (const p of [
-        [0.40, 0.52, 0.22], [0.56, 0.44, 0.24], [0.30, 0.60, 0.16],
-        [0.66, 0.58, 0.18], [0.48, 0.62, 0.15],
-      ]) {
-        ctx.globalAlpha = alpha;
-        ctx.beginPath();
-        ctx.arc(p[0] * 128, p[1] * 128, p[2] * 128, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    };
-    paint('#ffffff', 0.82);
-    this.tex = new THREE.CanvasTexture(this.canvas);
     this.mat = new THREE.MeshBasicMaterial({
-      map: this.tex, transparent: true, side: THREE.DoubleSide,
-      depthWrite: false, fog: false, opacity: 0.8,
+      map: blobTexture(), transparent: true, side: THREE.DoubleSide,
+      depthWrite: false, fog: false, opacity: 0,
     });
     const geo = new THREE.PlaneGeometry(1, 1);
     let seed = 20261108;
     const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
     for (let i = 0; i < 12; i++) {
-      const puffs = new THREE.Group();
+      const puff = new THREE.Group();
       const n = 4 + Math.floor(rnd() * 5);
       for (let p = 0; p < n; p++) {
         const m = new THREE.Mesh(geo, this.mat);
-        const s = 14 + rnd() * 26;
-        m.scale.set(s, s * (0.28 + rnd() * 0.18), 1);
-        m.position.set((p - n / 2) * 11 + rnd() * 6, (rnd() - 0.5) * 4, (rnd() - 0.5) * 12);
-        puffs.add(m);
+        const s = 16 + rnd() * 30;
+        m.scale.set(s, s * (0.35 + rnd() * 0.2), 1);
+        m.position.set((p - n / 2) * 12 + rnd() * 6, (rnd() - 0.5) * 5, (rnd() - 0.5) * 14);
+        puff.add(m);
       }
-      puffs.rotation.x = -Math.PI / 2;
-      puffs.position.set(
-        (rnd() - 0.5) * this.span.x + WORLD_SX / 2,
-        96 + rnd() * 36,
-        (rnd() - 0.5) * this.span.z + WORLD_SZ / 2,
+      puff.rotation.x = -Math.PI / 2;
+      puff.position.set(
+        rnd() * this.spanX - this.spanX / 4 + WORLD_SX / 2,
+        96 + rnd() * 40,
+        rnd() * WORLD_SZ * 1.5 - WORLD_SZ * 0.25,
       );
-      const sc = 0.7 + rnd() * 1.4;
-      puffs.scale.setScalar(sc);
-      this.field.add(puffs);
-      this.groups.push(puffs);
-      this.opacities.push(0.55 + rnd() * 0.4);
-      this.speeds.push(2.2 + rnd() * 3.4);
+      puff.scale.setScalar(0.7 + rnd() * 1.4);
+      scene.add(puff);
+      this.groups.push(puff);
+      this.speeds.push(2 + rnd() * 3.5);
     }
-    scene.add(this.field);
   }
 
-  /** paint the storm-grey variant once when the first cloud rolls in */
-  setOvercast(on: boolean): void {
-    const ctx = this.canvas.getContext('2d')!;
-    const g = ctx.createRadialGradient(64, 64, 10, 64, 64, 62);
-    if (on) {
-      g.addColorStop(0, 'rgba(156,168,186,0.95)');
-      g.addColorStop(1, 'rgba(156,168,186,0)');
-    } else {
-      g.addColorStop(0, 'rgba(255,255,255,0.95)');
-      g.addColorStop(1, 'rgba(255,255,255,0)');
-    }
-    ctx.clearRect(0, 0, 128, 128);
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(64, 64, 62, 0, Math.PI * 2);
-    ctx.fill();
-    this.tex.needsUpdate = true;
-  }
-
-  update(dt: number, darkness: number, wet: number, hidden: boolean): void {
-    const fade = hidden ? 0 : 0.55 + darkness * 0.35 + wet * 0.4;
-    this.field.visible = fade > 0.01;
-    if (!this.field.visible) return;
+  update(dt: number, opacity: number, darkness: number): void {
+    const o = Math.max(0, Math.min(1, opacity));
+    this.mat.visible = o > 0.01;
+    if (!this.mat.visible) return;
+    this.mat.opacity = o * 0.85;
+    this.mat.color.setRGB(1 - darkness * 0.45, 1 - darkness * 0.42, 1 - darkness * 0.3);
     for (let i = 0; i < this.groups.length; i++) {
       const g = this.groups[i];
       g.position.x += this.speeds[i] * dt;
-      if (g.position.x > WORLD_SX / 2 + this.span.x / 2) g.position.x -= this.span.x;
-      g.position.y = 96 + (i * 13) % 36 + Math.sin(this.field.position.x * 0.01 + i) * 2;
-      void g;
+      if (g.position.x > WORLD_SX + this.spanX * 0.6) g.position.x -= this.spanX * 1.2;
     }
-    this.mat.opacity = Math.min(0.96, fade * 0.9);
-  }
-
-  follow(worldX: number, worldZ: number): void {
-    this.field.position.x = ((worldX * 0.6) % this.span.x + this.span.x) % this.span.x - this.span.x / 2 + WORLD_SX / 2;
-    this.field.position.z = ((worldZ * 0.6) % this.span.z + this.span.z) % this.span.z - this.span.z / 2 + WORLD_SZ / 2;
   }
 }
 
-/** Rain or snow: one drifting Points cloud centred on the camera. */
+/** Rain or snow: one drifting Points cloud that rides the camera, so a kid
+ *  always stands inside the weather. Points keeps it one draw call. */
 class Precipitation {
-  readonly points: THREE.Points;
   private readonly pos: Float32Array;
-  private readonly vel: Float32Array;
-  private readonly span = 52;
+  private readonly points: THREE.Points;
+  private readonly mat: THREE.PointsMaterial;
+  private readonly span = 46;
   private kind: WeatherKind | null = null;
-  private intensity = 0;
+  private opacity = 0;
 
   constructor(scene: THREE.Scene) {
-    const n = 1600;
+    const n = 1400;
     this.pos = new Float32Array(n * 3);
-    this.vel = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) this.respawn(i, true);
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
-    const tex = (() => {
-      const c = document.createElement('canvas');
-      c.width = c.height = 16;
-      const ctx = c.getContext('2d')!;
-      const g = ctx.createRadialGradient(8, 8, 1, 8, 8, 7);
-      g.addColorStop(0, 'rgba(255,255,255,1)');
-      g.addColorStop(1, 'rgba(255,255,255,0)');
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, 16, 16);
-      const t = new THREE.CanvasTexture(c);
-      t.colorSpace = THREE.NoColorSpace;
-      return t;
-    })();
-    const mat = new THREE.PointsMaterial({
-      map: tex, color: 0xbcd6ef, size: 0.14, transparent: true, opacity: 0.85,
+    this.mat = new THREE.PointsMaterial({
+      map: blobTexture(), color: 0x9fc0e8, size: 0.12, transparent: true, opacity: 0,
       depthWrite: false, sizeAttenuation: true, fog: false,
     });
-    this.points = new THREE.Points(geo, mat);
+    this.points = new THREE.Points(geo, this.mat);
     this.points.frustumCulled = false;
     this.points.visible = false;
     scene.add(this.points);
@@ -166,69 +127,47 @@ class Precipitation {
   private respawn(i: number, initial = false): void {
     const o = i * 3;
     this.pos[o] = (Math.random() - 0.5) * this.span;
-    this.pos[o + 1] = initial ? Math.random() * 34 : 28 + Math.random() * 8;
+    this.pos[o + 1] = initial ? Math.random() * 32 : 22 + Math.random() * 10;
     this.pos[o + 2] = (Math.random() - 0.5) * this.span;
   }
 
   set(kind: WeatherKind | null, intensity: number): void {
-    if (kind === this.kind && intensity === this.intensity) return;
-    const kindChanged = kind !== this.kind;
-    this.kind = kind;
-    this.intensity = intensity;
-    const mat = this.points.material as THREE.PointsMaterial;
-    this.points.visible = kind !== null && intensity > 0.02;
-    if (!kind) return;
-    if (kindChanged) {
+    if (kind !== this.kind) {
+      this.kind = kind;
       for (let i = 0; i < this.pos.length / 3; i++) this.respawn(i, true);
-      (this.points.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
+      if (kind === 'snow') {
+        this.mat.color.set(0xffffff);
+        this.mat.size = 0.3;
+      } else {
+        this.mat.color.set(0x9fc0e8);
+        this.mat.size = 0.12;
+      }
     }
-    if (kind === 'snow') {
-      mat.color.set(0xffffff);
-      mat.size = 0.22;
-      mat.opacity = 0.9;
-    } else {
-      mat.color.set(0xa9c8e8);
-      mat.size = 0.12;
-      mat.opacity = 0.8;
-    }
+    this.opacity = kind ? 0.4 + intensity * 0.5 : 0;
+    this.points.visible = this.opacity > 0.01;
   }
 
   update(dt: number, cam: THREE.Camera): void {
-    if (!this.points.visible || !this.kind) return;
+    this.mat.opacity = this.opacity;
+    if (!this.points.visible) return;
     const snow = this.kind === 'snow';
-    const fall = snow ? 2.4 : 26;
-    const sway = snow ? 1.6 : 0;
+    const fall = snow ? 2.2 : 24;
+    const sway = snow ? 1.5 : 0;
     const t = performance.now() * 0.001;
+    const attr = this.points.geometry.getAttribute('position') as THREE.BufferAttribute;
     for (let i = 0; i < this.pos.length / 3; i++) {
       const o = i * 3;
-      this.pos[o + 1] -= (fall + (i % 7) * (snow ? 0.15 : 1.4)) * dt;
-      this.pos[o] += Math.sin(t * 1.4 + i * 0.7) * sway * dt;
+      this.pos[o + 1] -= (fall + (i % 7) * (snow ? 0.12 : 1.6)) * dt;
+      this.pos[o] += Math.sin(t * 1.3 + i * 0.7) * sway * dt;
       this.pos[o + 2] += Math.cos(t * 1.1 + i * 0.3) * sway * dt;
-      if (this.pos[o + 1] < -10) this.respawn(i);
+      if (this.pos[o + 1] < -8) this.respawn(i);
     }
-    (this.points.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
-    this.points.position.set(cam.position.x, cam.position.y + 14, cam.position.z);
+    attr.needsUpdate = true;
+    this.points.position.set(cam.position.x, cam.position.y + 12, cam.position.z);
   }
 }
 
-export interface SkyEnv {
-  /**
-   * Advance the sky by `dt` seconds of game time. `hour` is the day-phase
-   * (0..1) that drives everything visible here.
-   */
-  update(dt: number, hour: number): void;
-  /** park the sun and moon (Flashlight mode) instead of orbiting them */
-  hideDaymarks(hidden: boolean): void;
-  /** the dome (for tests and fog colour reads) */
-  get dome(): THREE.Mesh;
-}
-
-export const SKY_RADIUS = 320;
-export const SKY_CLEAR = 0xbfe0f5;
-export const SKY_FAR = SKY_RADIUS + 200;
-
 interface SkyStop {
-  hour: number;
   top: THREE.Color;
   horizon: THREE.Color;
   fog: THREE.Color;
@@ -240,69 +179,106 @@ interface SkyStop {
   amb: number;
 }
 
+const mk = (
+  top: number, horizon: number, fog: number, sunC: number,
+  hemiSky: number, hemiGround: number, hemi: number, dirI: number, ambI: number,
+): SkyStop => ({
+  top: new THREE.Color(top), horizon: new THREE.Color(horizon), fog: new THREE.Color(fog),
+  sun: new THREE.Color(sunC),
+  hemiSky: new THREE.Color(hemiSky), hemiGround: new THREE.Color(hemiGround),
+  hemi, dir: dirI, amb: ambI,
+});
+
+// The day's palette, keyed by day-phase. Night keeps real colour and a light
+// floor everywhere: even the darkest stop stays clear of the black-pixel census.
+const STOPS: { hour: number; s: SkyStop }[] = [
+  { hour: 0.00, s: mk(0x203a66, 0xb06a4a, 0x8f7a8c, 0xffd9a0, 0x7688b8, 0x5a5244, 0.55, 0.32, 0.30) },
+  { hour: 0.25, s: mk(0x4f86d8, 0xf2c47a, 0xc6dcec, 0xffe3b0, 0xa8c6e8, 0x86795c, 0.88, 1.05, 0.30) },
+  { hour: 0.35, s: mk(0x4585d8, 0xd8ecfb, 0xbfe0f5, 0xfff6e0, 0xcfe8ff, 0x9a8b6a, 1.05, 1.60, 0.25) },
+  { hour: 0.50, s: mk(0x4585d8, 0xd8ecfb, 0xbfe0f5, 0xfff6e0, 0xcfe8ff, 0x9a8b6a, 1.05, 1.60, 0.25) },
+  { hour: 0.68, s: mk(0x4f7fd0, 0xe8c896, 0xcbd9ea, 0xffe0b4, 0xc4d6ee, 0x90805f, 0.92, 1.20, 0.28) },
+  { hour: 0.76, s: mk(0x3e5f9e, 0xf09a58, 0xb0a8c0, 0xffa860, 0x8a86b6, 0x66564a, 0.58, 0.25, 0.34) },
+  { hour: 0.83, s: mk(0x27406e, 0xb46a62, 0x77819f, 0xffc8a0, 0x6d78a8, 0x544f4c, 0.42, 0.08, 0.38) },
+  { hour: 1.00, s: mk(0x203a66, 0xb06a4a, 0x8f7a8c, 0xffd9a0, 0x7688b8, 0x5a5244, 0.55, 0.32, 0.30) },
+];
+
+export type DayMode = 'auto' | 'day' | 'night' | 'none';
+
+export interface SkyEnv {
+  /** Advance the sky by `dt` seconds of game time; snow rides `camera`. */
+  update(dt: number, camera: THREE.Camera): void;
+  /** the day-phase clock the sky currently shows (0..1) */
+  dayPhase(): number;
+  /** auto clock / parked day / parked night / no sun, moon or clouds */
+  setDayMode(mode: DayMode): void;
+  /** start, change or stop falling weather (core/weather.ts decides when) */
+  setWeather(kind: WeatherKind | null, intensity: number): void;
+  /** the dome mesh — centred on the world middle, kept past every far plane */
+  getDome(): THREE.Mesh;
+}
+
 export function createSky(scene: THREE.Scene): SkyEnv {
+  // The sky hangs around the middle of the world, not the coordinate origin: on a
+  // 128-block map the origin is a CORNER, and a dome centred there reaches 450
+  // blocks from a camera near spawn — past the far plane, which used to punch a
+  // black hole in the sky once the welcome camera had drifted around a little.
   const sky = new THREE.Group();
+  sky.position.set(WORLD_SX / 2, 0, WORLD_SZ / 2);
   scene.add(sky);
 
-  // gradient dome — vertex colours rewritten every few frames
+  // gradient dome — the vertex colours are repainted whenever the clock moves
   const domeGeo = new THREE.SphereGeometry(SKY_RADIUS, 24, 16);
-  const colors = new Float32Array(domeGeo.attributes.position.count * 3);
+  const pos = domeGeo.attributes.position as THREE.BufferAttribute;
+  const colors = new Float32Array(pos.count * 3);
   domeGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  const domeMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false });
-  const dome = new THREE.Mesh(domeGeo, domeMat);
+  const dome = new THREE.Mesh(
+    domeGeo,
+    new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false }),
+  );
   sky.add(dome);
 
-  // sun and moon ride a pivot so the whole system can orbit the world centre
+  // the sun and moon ride one pivot so they stay opposite each other all day
   const orbit = new THREE.Group();
   sky.add(orbit);
-  const sun = new THREE.Mesh(
-    new THREE.SphereGeometry(11, 20, 14),
-    new THREE.MeshBasicMaterial({ color: 0xfff2a8, fog: false }),
-  );
-  sun.position.set(0, 200, 0);
-  orbit.add(sun);
-  const glow = new THREE.Mesh(
-    new THREE.SphereGeometry(26, 20, 14),
-    new THREE.MeshBasicMaterial({
-      color: 0xffe9a0, fog: false, transparent: true, opacity: 0.35,
-      depthWrite: false, blending: THREE.AdditiveBlending,
-    }),
-  );
-  glow.position.copy(sun.position);
-  orbit.add(glow);
-  const moon = new THREE.Mesh(
-    new THREE.SphereGeometry(8, 16, 12),
-    new THREE.MeshBasicMaterial({ color: 0xdde6f5, fog: false }),
-  );
-  moon.position.set(0, -210, 40);
-  const moonGlow = new THREE.Mesh(
-    new THREE.SphereGeometry(16, 16, 12),
-    new THREE.MeshBasicMaterial({
-      color: 0xc7d8f2, fog: false, transparent: true, opacity: 0.2,
-      depthWrite: false, blending: THREE.AdditiveBlending,
-    }),
-  );
-  moonGlow.position.copy(moon.position);
-  orbit.add(moon, moonGlow);
+  const mkBall = (r: number, color: number, glowColor: number, glowOpacity: number): THREE.Mesh => {
+    const ball = new THREE.Mesh(
+      new THREE.SphereGeometry(r, 16, 12),
+      new THREE.MeshBasicMaterial({ color, fog: false }),
+    );
+    const glow = new THREE.Mesh(
+      new THREE.SphereGeometry(r * 1.8, 16, 12),
+      new THREE.MeshBasicMaterial({
+        color: glowColor, fog: false, transparent: true, opacity: glowOpacity,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+      }),
+    );
+    ball.add(glow);
+    return ball;
+  };
+  const sun = mkBall(10, 0xfff2a8, 0xffe9a0, 0.3);
+  sun.position.set(0, 230, 120);
+  const moon = mkBall(7, 0xe6ecf8, 0xc7d8f2, 0.2);
+  moon.position.set(0, -230, -120);
+  orbit.add(sun, moon);
 
-  // stars: a quiet dome of points that fade in at dusk
-  const starCount = 900;
-  const starPos = new Float32Array(starCount * 3);
-  for (let i = 0; i < starCount; i++) {
+  // stars: a dome of points that fade in after dusk
+  const starN = 900;
+  const starPos = new Float32Array(starN * 3);
+  for (let i = 0; i < starN; i++) {
     const v = new THREE.Vector3().randomDirection();
-    if (v.y < 0.02) v.y = 0.02 + Math.random() * 0.4;
-    v.normalize().multiplyScalar(SKY_RADIUS * 0.8);
+    if (v.y < 0.05) v.y = 0.05 + Math.random() * 0.9;
+    v.normalize().multiplyScalar(SKY_RADIUS * 0.9);
     starPos.set([v.x, v.y, v.z], i * 3);
   }
   const starGeo = new THREE.BufferGeometry();
   starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
   const starMat = new THREE.PointsMaterial({
-    color: 0xffffff, size: 1.7, sizeAttenuation: false,
+    color: 0xffffff, size: 1.6, sizeAttenuation: false,
     transparent: true, opacity: 0, depthWrite: false, fog: false,
   });
   const stars = new THREE.Points(starGeo, starMat);
-  stars.renderOrder = -2;
   stars.frustumCulled = false;
+  stars.renderOrder = -2;
   sky.add(stars);
 
   scene.fog = new THREE.Fog(SKY_CLEAR, 60, 240);
@@ -310,158 +286,122 @@ export function createSky(scene: THREE.Scene): SkyEnv {
   const hemi = new THREE.HemisphereLight(0xcfe8ff, 0x9a8b6a, 1.05);
   scene.add(hemi);
   const dir = new THREE.DirectionalLight(0xfff6e0, 1.6);
+  dir.position.set(60, 90, -30);
   scene.add(dir);
   const amb = new THREE.AmbientLight(0xffffff, 0.25);
   scene.add(amb);
 
-  // the palette. Night never goes black (a dark sky frightens kids).
-  const stops: SkyStop[] = [
-    { // midnight
-      hour: 0.0,
-      top: new THREE.Color(0x0a1330), horizon: new THREE.Color(0x22345c), fog: new THREE.Color(0x18274a),
-      sun: new THREE.Color(0xbcd0ff), hemiSky: new THREE.Color(0x1d2c55), hemiGround: new THREE.Color(0x101a2c),
-      hemi: 0.32, dir: 0.05, amb: 0.28,
-    },
-    { // dawn (the sun is just above the horizon)
-      hour: 0.22,
-      top: new THREE.Color(0x2c4a7c), horizon: new THREE.Color(0xf2b06a), fog: new THREE.Color(0x9fb6d6),
-      sun: new THREE.Color(0xffd28a), hemiSky: new THREE.Color(0x7d96c4), hemiGround: new THREE.Color(0x6a5a44),
-      hemi: 0.7, dir: 0.5, amb: 0.3,
-    },
-    { // morning
-      hour: 0.34,
-      top: new THREE.Color(0x4f86d8), horizon: new THREE.Color(0xcfe6f6), fog: new THREE.Color(0xbfe0f5),
-      sun: new THREE.Color(0xfff0c2), hemiSky: new THREE.Color(0xcfe8ff), hemiGround: new THREE.Color(0x9a8b6a),
-      hemi: 1.0, dir: 1.5, amb: 0.3,
-    },
-    { // noon — exactly what a kid booted the app to before the sun ever moved
-      hour: 0.5,
-      top: new THREE.Color(0x4585d8), horizon: new THREE.Color(0xd8ecfb), fog: new THREE.Color(0xbfe0f5),
-      sun: new THREE.Color(0xfff6e0), hemiSky: new THREE.Color(0xcfe8ff), hemiGround: new THREE.Color(0x9a8b6a),
-      hemi: 1.05, dir: 1.6, amb: 0.25,
-    },
-    { // afternoon
-      hour: 0.68,
-      top: new THREE.Color(0x4f7fd0), horizon: new THREE.Color(0xd8e2f0), fog: new THREE.Color(0xbdd6ea),
-      sun: new THREE.Color(0xffe6bd), hemiSky: new THREE.Color(0xc4d8f2), hemiGround: new THREE.Color(0x8f8060),
-      hemi: 0.95, dir: 1.45, amb: 0.27,
-    },
-    { // sunset
-      hour: 0.78,
-      top: new THREE.Color(0x2e4f88), horizon: new THREE.Color(0xf08a4b), fog: new THREE.Color(0x9aa9c9),
-      sun: new THREE.Color(0xff9c52), hemiSky: new THREE.Color(0x6f7fb0), hemiGround: new THREE.Color(0x4d4234),
-      hemi: 0.55, dir: 0.35, amb: 0.32,
-    },
-    { // dusk
-      hour: 0.86,
-      top: new THREE.Color(0x18264e), horizon: new THREE.Color(0x513a6a), fog: new THREE.Color(0x3a4a70),
-      sun: new THREE.Color(0x9d7bd0), hemiSky: new THREE.Color(0x2f3f6b), hemiGround: new THREE.Color(0x1a2138),
-      hemi: 0.4, dir: 0.12, amb: 0.3,
-    },
-    { // midnight again
-      hour: 1.0,
-      top: new THREE.Color(0x0a1330), horizon: new THREE.Color(0x22345c), fog: new THREE.Color(0x18274a),
-      sun: new THREE.Color(0xbcd0ff), hemiSky: new THREE.Color(0x1d2c55), hemiGround: new THREE.Color(0x101a2c),
-      hemi: 0.32, dir: 0.05, amb: 0.28,
-    },
-  ];
-
-  const mix = (out: THREE.Color, a: THREE.Color, b: THREE.Color, k: number): void => {
-    out.copy(a).lerp(b, k);
-  };
-  const sample = (hour: number, out: SkyStop): void => {
-    let i = 0;
-    while (i < stops.length - 2 && hour >= stops[i + 1].hour) i++;
-    const a = stops[i];
-    const b = stops[i + 1];
-    const k = (hour - a.hour) / Math.max(1e-6, b.hour - a.hour);
-    mix(out.top, a.top, b.top, k);
-    mix(out.horizon, a.horizon, b.horizon, k);
-    mix(out.fog, a.fog, b.fog, k);
-    mix(out.sun, a.sun, b.sun, k);
-    mix(out.hemiSky, a.hemiSky, b.hemiSky, k);
-    mix(out.hemiGround, a.hemiGround, b.hemiGround, k);
-    out.hemi = a.hemi + (b.hemi - a.hemi) * k;
-    out.dir = a.dir + (b.dir - a.dir) * k;
-    out.amb = a.amb + (b.amb - a.amb) * k;
-  };
   const cur: SkyStop = {
-    hour: 0.5, top: new THREE.Color(), horizon: new THREE.Color(), fog: new THREE.Color(),
+    top: new THREE.Color(), horizon: new THREE.Color(), fog: new THREE.Color(),
     sun: new THREE.Color(), hemiSky: new THREE.Color(), hemiGround: new THREE.Color(),
     hemi: 1, dir: 1, amb: 0.25,
   };
+  const mixStop = (hour: number): void => {
+    for (let i = 0; i < STOPS.length - 1; i++) {
+      if (hour <= STOPS[i + 1].hour) {
+        const a = STOPS[i].s;
+        const b = STOPS[i + 1].s;
+        const t = (hour - STOPS[i].hour) / Math.max(1e-9, STOPS[i + 1].hour - STOPS[i].hour);
+        cur.top.copy(a.top).lerp(b.top, t);
+        cur.horizon.copy(a.horizon).lerp(b.horizon, t);
+        cur.fog.copy(a.fog).lerp(b.fog, t);
+        cur.sun.copy(a.sun).lerp(b.sun, t);
+        cur.hemiSky.copy(a.hemiSky).lerp(b.hemiSky, t);
+        cur.hemiGround.copy(a.hemiGround).lerp(b.hemiGround, t);
+        cur.hemi = a.hemi + (b.hemi - a.hemi) * t;
+        cur.dir = a.dir + (b.dir - a.dir) * t;
+        cur.amb = a.amb + (b.amb - a.amb) * t;
+        return;
+      }
+    }
+  };
 
-  const pos = domeGeo.attributes.position as THREE.BufferAttribute;
-  const paintDome = (stop: SkyStop, rain: number): void => {
+  const paintDome = (wet: number): void => {
+    const tmp = new THREE.Color();
     for (let i = 0; i < pos.count; i++) {
-      const y = pos.getY(i) / SKY_RADIUS;
+      const y = pos.getY(i) / SKY_RADIUS; // -1..1
       const t = Math.max(0, Math.min(1, (y + 0.12) / 0.55));
-      const c = new THREE.Color().copy(stop.horizon).lerp(stop.top, t * t * 0.75 + t * 0.25);
-      c.lerp(stop.fog, rain * 0.55);
-      c.toArray(colors, i * 3);
+      tmp.copy(cur.horizon).lerp(cur.top, t * 0.9 + Math.max(0, y - 0.4) * 0.1);
+      if (wet > 0) tmp.lerp(cur.fog, Math.min(1, wet * 0.55 * (1 - t * 0.5)));
+      tmp.toArray(colors, i * 3);
     }
     (domeGeo.attributes.color as THREE.BufferAttribute).needsUpdate = true;
   };
 
   const clouds = new Clouds(scene);
   const precip = new Precipitation(scene);
-  let overcast = false;
-  let rainT = 0;
-  let lastRain = 0;
-  let lastHour = -1;
+
+  let dayMode: DayMode = 'auto';
+  let phase = 0.35; // bright mid-morning at boot: the welcome view stays cheerful
+  let wet = 0; // eased 0..1 weather heaviness (drives cloud & light maths)
+  let weatherKind: WeatherKind | null = null;
+  let painted = -1;
+
+  // The very first frame must already show the dome painted for the boot
+  // phase — otherwise a kid boots into an unpainted sphere for one tick.
+  mixStop(phase);
+  paintDome(0);
+  painted = phase;
 
   return {
-    update(dt: number, hour: number): void {
-      sample(hour, cur);
+    update(dt: number, camera: THREE.Camera): void {
+      // storms roll in and out over seconds instead of snapping
+      const wetTarget = weatherKind ? 0.55 : 0;
+      wet += (wetTarget - wet) * Math.min(1, dt * 0.4);
+
+      if (dayMode === 'auto') phase = (phase + dt / DAY_SECONDS) % 1;
+      const hour = dayMode === 'day' ? 0.5 : dayMode === 'night' ? 0.0 : phase;
       const elev = sunElevation(hour);
-      orbit.rotation.z = (hour + 0.75) * Math.PI * 2; // noon = sun overhead
-      sun.position.y = 200 * Math.sin(elev * Math.PI * 0.5);
-      sun.position.x = 200 * Math.cos(elev * Math.PI * 0.5) * 0.6;
-      glow.position.copy(sun.position);
-      glow.visible = sun.visible = elev > -0.05;
+      mixStop(hour);
 
-      const darkness = Math.max(0, Math.min(1, -elev * 1.4 + 0.22));
-      starMat.opacity = Math.min(0.9, Math.max(0, darkness * 1.1 - 0.15));
+      // sun & moon: the pivot spins once per day, noon up top, midnight below
+      orbit.rotation.z = ((hour + 0.25) % 1) * Math.PI * 2;
+      const marks = dayMode !== 'none';
+      orbit.visible = marks;
+      stars.visible = marks;
+      const darkness = Math.max(0, Math.min(1, -elev)); // 1 at true midnight
+      starMat.opacity = marks ? darkness * 0.85 : 0;
 
-      const rain = rainT;
-      hemi.color.copy(cur.hemiSky).lerp(new THREE.Color(0x6c7891), rain * 0.65);
+      // lights follow the clock; nothing drops below the night floor
+      hemi.color.copy(cur.hemiSky);
       hemi.groundColor.copy(cur.hemiGround);
-      hemi.intensity = cur.hemi * (1 - rain * 0.25);
+      hemi.intensity = cur.hemi * (1 - wet * 0.35);
       dir.color.copy(cur.sun);
-      dir.intensity = cur.dir * (1 - rain * 0.55);
-      dir.position.set(sun.position.x * 0.5 + 40, Math.max(30, sun.position.y * 0.5 + 30), sun.position.z * 0.5 - 40);
-      amb.color.copy(cur.hemiSky);
-      amb.intensity = cur.amb + darkness * 0.06;
-
-      if (Math.abs(hour - lastHour) > 0.004) {
-        lastHour = hour;
-        paintDome(cur, rain);
+      dir.intensity = cur.dir * (1 - wet * 0.55);
+      if (wet > 0.01) {
+        hemi.color.lerp(new THREE.Color(0x8fa3bd), wet * 0.4);
+        dir.color.lerp(new THREE.Color(0xcfd8e6), wet * 0.5);
       }
-      scene.fog!.color.copy(cur.fog).lerp(cur.horizon, rain * 0.25);
-      (scene.fog as THREE.Fog).near = 60 - rain * 8;
-      (scene.fog as THREE.Fog).far = 240 - rain * 90;
+      amb.intensity = cur.amb + wet * 0.08;
 
-      // clouds fade in with weather; rain darkens them
-      clouds.update(dt, darkness, rain, false);
-      if ((rain > 0.05) !== overcast) {
-        overcast = rain > 0.05;
-        clouds.setOvercast(overcast);
+      // the dome repaints only when the clock actually moved (~2 s of game time)
+      if (Math.abs(hour - painted) > 0.01) {
+        painted = hour;
+        paintDome(wet);
       }
+      scene.fog!.color.copy(cur.fog);
+      (scene.fog as THREE.Fog).near = 60 - wet * 20;
+      (scene.fog as THREE.Fog).far = 240 - wet * 90;
 
-      // rain: a soft hiss the whole time it falls
-      if (rainT > 0.02) {
-        rainT = Math.max(0, rainT - dt * 0.35);
-        if (this._audio && performance.now() - lastRain > 900) {
-          lastRain = performance.now();
-          this._audio.rainLoop(rainT);
-        }
-      }
+      // clouds: gentle by default, thicker when weather brews; gone with no sky
+      const cloudOpacity = marks ? 0.3 + wet * 0.5 + darkness * 0.1 : 0;
+      clouds.update(dt, cloudOpacity, darkness);
+
+      // rain/snow ride the camera the world is being rendered from
+      precip.update(dt, camera);
     },
-    hideDaymarks(): void {
-      orbit.visible = false;
+    dayPhase(): number {
+      return dayMode === 'day' ? 0.5 : dayMode === 'night' ? 0.0 : phase;
     },
-    get dome(): THREE.Mesh {
+    setDayMode(mode: DayMode): void {
+      dayMode = mode;
+    },
+    setWeather(kind: WeatherKind | null, intensity: number): void {
+      weatherKind = kind;
+      precip.set(kind, intensity);
+    },
+    getDome(): THREE.Mesh {
       return dome;
     },
-  } as SkyEnv & { _audio?: { rainLoop(i: number): void } };
+  };
 }
