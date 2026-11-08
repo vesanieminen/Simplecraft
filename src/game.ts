@@ -1219,6 +1219,19 @@ export class Game {
     return this.weather.force(kind, kind === null ? 0 : 45);
   }
 
+  /** the day-phase clock the sky is showing, 0..1 (tests and debug) */
+  get dayPhase(): number {
+    return this.skyEnv.dayPhase();
+  }
+
+  /**
+   * Drive the bucket from the console (tests): pad aim adds too much noise for
+   * a deterministic flood, so this hands the bucket action the exact aim cell.
+   */
+  bucketForTest(p: LocalPlayer, hit: RayHit): boolean {
+    return this.bucketAction(p, hit);
+  }
+
   // ------------------------------------------------------------- explosions
 
   /**

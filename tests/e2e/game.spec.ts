@@ -1003,6 +1003,26 @@ test('crouch: the red button sneaks — slow shuffle, ledge protection, crawling
   // tap B (the Back button): crouch on — and the shuffle is slow
   await tap(page, 'back');
   await page.waitForFunction('window.__lbw.game.players[0].entity.crouching === true', null, { timeout: 8000 });
+  await frames(page, 30); // the fold eases in over a quarter second
+
+  // the pose itself: the kid FOLDS — hips sink, torso leans, knees bend — and
+  // the body is never squashed. (The old crouch scaled the whole model down;
+  // a squashed juice-box kid read as a bug, and costumes rode the shrink too.)
+  const pose = await page.evaluate(() => {
+    const av = (window as any).__lbw.game.players[0].entity.avatar;
+    const parts = av.userData.parts;
+    return {
+      scale: av.scale.y, crouchT: parts.crouchT,
+      hipY: parts.chest.position.y, lean: parts.chest.rotation.x,
+      knee: parts.rightLeg.rotation.x,
+    };
+  });
+  expect(pose.scale, 'the avatar is never squashed').toBeCloseTo(1, 3);
+  expect(pose.crouchT, 'fully crouched').toBeGreaterThan(0.9);
+  expect(pose.hipY, 'hips dropped from their standing 0.5').toBeLessThan(0.25);
+  expect(pose.lean, 'torso folded forward').toBeGreaterThan(0.5);
+  expect(pose.knee, 'knees bent under').toBeLessThan(-0.6);
+
   await page.evaluate(() => (window as any).__testPad.setMove(0, -1));
   await waitForMove(page, { x: fx + 0.5, z: fz + 0.5 }, 1.0);
   const sneaking = await e();
@@ -1340,6 +1360,20 @@ test('water flows: a dug channel floods from the source, shallows with reach, fa
     expect(c.id, `cell +${k}`).toBe(ids.WATER_FLOW);
     expect(c.lvl, `depth +${k}`).toBe(k);
   }
+
+  // and the water DRAWS at its depth: a spring fills its cell (less the shine),
+  // a shallow flow only half-fills it — no more floating ribbons of full cubes
+  const surfaceAt = (x: number, y: number) =>
+    page.evaluate((c: { x: number; y: number; z: number }) => (window as any).__lbw.waterSurfaceAt(c.x, c.y, c.z),
+      { x, y, z: fz });
+  expect(await surfaceAt(fx + 2, gy), 'spring surface').toBeCloseTo(0.92, 2);
+  const s2 = await surfaceAt(fx + 4, gy);
+  expect(s2, 'depth-2 surface shallows').toBeGreaterThan(0.55);
+  expect(s2, 'depth-2 surface shallows').toBeLessThan(0.8);
+  const s5 = await surfaceAt(fx + 7, gy);
+  expect(s5, 'depth-5 surface is a ripple').toBeGreaterThanOrEqual(0.22);
+  expect(s5, 'depth-5 surface is a ripple').toBeLessThan(0.45);
+  expect(await surfaceAt(fx + 9, gy), 'dry cell draws nothing').toBe(0);
   // and the supply runs out: nothing wet past six cells
   expect((await cellAt(fx + 9, gy)).id).toBe(ids.AIR);
   expect((await cellAt(fx + 10, gy)).id).toBe(ids.AIR);
@@ -1393,12 +1427,21 @@ test('water flows: a dug channel floods from the source, shallows with reach, fa
     throw new Error(`drain stuck; wet: ${dump}`);
   }
 
-  // water is in the block palette, so kids can make their own ponds
+  // the bucket is in the block palette where the water block used to be:
+  // kids carry a spring around instead of tiling the meadow with ponds
   await tap(page, 'palette');
   await page.waitForSelector('.palette-grid');
-  const waterIcon = await page.evaluate(() =>
-    [...document.querySelectorAll('.palette-cell')].some((c) => c.textContent?.includes('\u{1F4A7}')));
-  expect(waterIcon).toBe(true);
+  const paletteIcons = await page.evaluate(() => {
+    const cells = [...document.querySelectorAll('.palette-cell')];
+    return {
+      bucket: cells.some((c) => c.textContent?.includes('\u{1FA83}')),
+      water: cells.some((c) => c.textContent?.includes('\u{1F4A7}')),
+      toolMarked: cells.some((c) => c.classList.contains('tool')),
+    };
+  });
+  expect(paletteIcons.bucket).toBe(true);
+  expect(paletteIcons.water).toBe(false);
+  expect(paletteIcons.toolMarked).toBe(true);
   await tap(page, 'back'); // close the palette again
   await page.waitForSelector('.palette-grid', { state: 'detached' });
 
@@ -2789,7 +2832,8 @@ test('treasure chests: every world hides them, and the pet button trades a lid f
   expect(await blockAtCell(page, chest)).toBe(ids.CHEST);
   expect(await blockAtCell(page, chest, 1)).toBe(ids.AIR);
 
-  // and confirm the palette really no longer offers the chest
+  // and the palette offers the chest too now — kids place their own treasure
+  // (a grown-up can hide the row again in Grown-Up Settings; a later test does)
   await tap(page, 'palette');
   await page.waitForSelector('.palette-grid');
   const chestInPalette = await page.evaluate((chestId: number) => {
@@ -2797,7 +2841,7 @@ test('treasure chests: every world hides them, and the pet button trades a lid f
       (c) => Number((c as HTMLElement).dataset.id) === chestId,
     );
   }, ids.CHEST);
-  expect(chestInPalette).toBe(false);
+  expect(chestInPalette).toBe(true);
   await tap(page, 'back'); // close the palette again
 
   const tally = () => page.evaluate(() => {
@@ -3446,4 +3490,185 @@ test('keyboard arrows only tilt the view — ArrowUp never jumps', async ({ page
     startY, { timeout: 5000 },
   );
   await page.evaluate(() => (window as any).__testPad.release('up'));
+});
+
+test('the triggers are the hands: L2 pets and opens, R2 builds, X breaks', async ({ page }) => {
+  await boot(page);
+  // Nov 2026 remap: the triggers are the hands kids already hold the pad with.
+  // L2/LT is the nice button (pet · fish · open · pour), R2/RT builds (and
+  // pours), X/Square breaks. Keyboard keeps E · R-Click · L-Click.
+  const map = await page.evaluate(() => (window as any).__lbw.padMap as Record<string, string[]>);
+  expect(map[6], 'L2 / LT').toContain('interact');
+  expect(map[7], 'R2 / RT').toContain('place');
+  expect(map[2], 'X / Square').toContain('remove');
+  expect(map[0], 'A / Cross still jumps').toContain('jump');
+});
+
+test('the water bucket scoops a spring, pours a new one, and a cut-off flood runs home', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  const site = await clearRunway(page);
+  const { fx, fz, gy } = site;
+
+  // the same sealed stone course the flow test swears by: a full-height
+  // caisson, a stone floor, and a spring feeding a channel of travelling water
+  await page.evaluate((arg: { fx: number; fz: number; gy: number; air: number; water: number; stone: number }) => {
+    const S = (window as any).__lbw.game.world;
+    const SY: number = (window as any).__lbw.dims.sy;
+    for (let x = arg.fx - 3; x <= arg.fx + 12; x++) {
+      for (let z = arg.fz - 3; z <= arg.fz + 3; z++) {
+        const ring = x === arg.fx - 3 || x === arg.fx + 12 || z === arg.fz - 3 || z === arg.fz + 3;
+        for (let y = 1; y < SY; y++) if (ring) S.set(x, y, z, arg.stone);
+      }
+    }
+    for (let x = arg.fx - 2; x <= arg.fx + 11; x++) {
+      for (let z = arg.fz - 2; z <= arg.fz + 2; z++) {
+        S.set(x, arg.gy - 1, z, arg.stone); // sealed floor
+        for (let y = arg.gy; y <= arg.gy + 2; y++) S.set(x, y, z, arg.air);
+      }
+    }
+    S.set(arg.fx + 2, arg.gy, arg.fz, arg.water);
+  }, { fx, fz, gy, air: ids.AIR, water: ids.WATER, stone: ids.STONE });
+
+  await page.waitForFunction((arg: { x: number; gy: number; fz: number; flow: number }) =>
+    (window as any).__lbw.game.world.get(arg.x, arg.gy, arg.fz) === arg.flow,
+  { x: fx + 7, gy, fz, flow: ids.WATER_FLOW }, { timeout: 20000 });
+
+  // 🪣 the bucket is in hand: scooping the SPRING empties the channel behind it
+  await page.evaluate((b: number) => (window as any).__lbw.game.players[0].setSelected(b), ids.BUCKET);
+  const scooped = await page.evaluate((arg: { x: number; gy: number; fz: number; water: number }) =>
+    (window as any).__lbw.bucketAt(0, { block: arg.water, x: arg.x, y: arg.gy, z: arg.fz, px: arg.x, py: arg.gy + 1, pz: arg.fz, dist: 1 }),
+  { x: fx + 2, gy, fz, water: ids.WATER });
+  expect(scooped, 'the bucket came back full').toBe(true);
+  expect(await page.evaluate(() => (window as any).__lbw.game.players[0].bucketFull)).toBe(true);
+  expect(await page.evaluate((c: { x: number; y: number; z: number }) =>
+    (window as any).__lbw.game.world.get(c.x, c.y, c.z), { x: fx + 2, y: gy, z: fz })).toBe(ids.AIR);
+
+  // the flood runs HOME the way it came: the shallow far end dries first, the
+  // deep near end last — reverse flow order, watched from inside the page
+  const order = await page.evaluate((arg: { src: number; fz: number; gy: number; air: number }) =>
+    new Promise<Record<string, number>>((resolve) => {
+      const w = (window as any).__lbw.game.world;
+      const t0 = performance.now();
+      const times: Record<string, number> = {};
+      const timer = setInterval(() => {
+        for (let k = 5; k >= 1; k--) {
+          const key = 'd' + k;
+          if (times[key] === undefined && w.get(arg.src + k, arg.gy, arg.fz) === arg.air) times[key] = performance.now() - t0;
+        }
+        if (Object.keys(times).length === 5 || performance.now() - t0 > 30000) {
+          clearInterval(timer);
+          resolve(times);
+        }
+      }, 50);
+    }), { src: fx + 2, fz, gy, air: ids.AIR });
+  for (let k = 5; k >= 2; k--) {
+    expect(order['d' + k], `depth ${k} dries no later than depth ${k - 1}`).toBeDefined();
+    if (order['d' + (k - 1)] !== undefined) {
+      expect(order['d' + k], `depth ${k} dries before depth ${k - 1}`).toBeLessThanOrEqual(order['d' + (k - 1)] + 250);
+    }
+  }
+
+  // full bucket, aimed at a gap: a NEW spring appears and the water sets off
+  // spreading from where it landed
+  const poured = await page.evaluate((arg: { x: number; gy: number; fz: number; stone: number }) =>
+    (window as any).__lbw.bucketAt(0, { block: arg.stone, x: arg.x, y: arg.gy - 1, z: arg.fz, px: arg.x, py: arg.gy, pz: arg.fz, dist: 1 }),
+  { x: fx + 8, gy, fz, stone: ids.STONE });
+  expect(poured, 'the bucket poured out').toBe(true);
+  expect(await page.evaluate(() => (window as any).__lbw.game.players[0].bucketFull)).toBe(false);
+  expect(await page.evaluate((c: { x: number; y: number; z: number }) =>
+    (window as any).__lbw.game.world.get(c.x, c.y, c.z), { x: fx + 8, y: gy, z: fz })).toBe(ids.WATER);
+  await page.waitForFunction((arg: { x: number; gy: number; fz: number; flow: number }) =>
+    (window as any).__lbw.game.world.get(arg.x, arg.gy, arg.fz) === arg.flow,
+  { x: fx + 10, gy, fz, flow: ids.WATER_FLOW }, { timeout: 20000 });
+
+  // scoop the new spring and the fresh flood runs home too
+  const scooped2 = await page.evaluate((arg: { x: number; gy: number; fz: number; water: number }) =>
+    (window as any).__lbw.bucketAt(0, { block: arg.water, x: arg.x, y: arg.gy, z: arg.fz, px: arg.x, py: arg.gy + 1, pz: arg.fz, dist: 1 }),
+  { x: fx + 8, gy, fz, water: ids.WATER });
+  expect(scooped2).toBe(true);
+  await page.waitForFunction((arg: { x1: number; x2: number; gy: number; fz: number; air: number }) => {
+    const w = (window as any).__lbw.game.world;
+    for (let x = arg.x1; x <= arg.x2; x++) if (w.get(x, arg.gy, arg.fz) !== arg.air) return false;
+    return true;
+  }, { x1: fx + 9, x2: fx + 11, gy, fz, air: ids.AIR }, { timeout: 30000 });
+
+  // tidy up so later tests find clean grass (and bank the refill before boot)
+  await page.evaluate((arg: { fx: number; fz: number; gy: number; grass: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let x = arg.fx - 2; x <= arg.fx + 11; x++) {
+      for (let z = arg.fz - 2; z <= arg.fz + 2; z++) S.set(x, arg.gy, z, arg.grass);
+    }
+  }, { fx, fz, gy, grass: ids.GRASS });
+  await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); });
+});
+
+test('rain falls on the meadow and the sun circles the sky', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+
+  // a grown-up turns the rain on: the clock goes wet, the audio starts hissing
+  const strength = await page.evaluate(() => (window as any).__lbw.weatherNow('rain'));
+  expect(strength).toBeGreaterThan(0);
+  await page.waitForFunction('window.__lbw.game.weather.isActive === true', null, { timeout: 8000 });
+  const wet = await page.evaluate(() => ({
+    kind: (window as any).__lbw.game.weather.kind as string | null,
+    hiss: (window as any).__lbw.game.audio.recent.some((r: string) => r.startsWith('weather:rain')),
+  }));
+  expect(wet.kind).toBe('rain');
+  expect(wet.hiss, 'the rain hiss reached the audio kit').toBe(true);
+
+  // the grown-up menu grew three rows under Waiting Players — the old rows
+  // stay exactly where every other test pins them
+  await tap(page, 'menu');
+  await page.waitForSelector('.menu-list');
+  await selectRow(page, 9); // Grown-Ups
+  await tap(page, 'jump');
+  await page.waitForSelector('.menu-list');
+  const labels = await page.evaluate(() =>
+    [...document.querySelectorAll('.menu-item')].map((r) => r.textContent ?? ''));
+  expect(labels[0]).toContain('Freeze');
+  expect(labels[5], 'Waiting Players keeps row 5').toContain('Waiting Players');
+  expect(labels.some((l) => l.includes('Weather'))).toBe(true);
+  expect(labels.some((l) => l.includes('Day & Night'))).toBe(true);
+  expect(labels.some((l) => l.includes('Treasure Chests'))).toBe(true);
+  await tap(page, 'back'); // close Grown-Ups
+  await tap(page, 'back'); // close the player menu
+
+  // snow, then dry: the clock follows the grown-up's wheel
+  await page.evaluate(() => (window as any).__lbw.weatherNow('snow'));
+  await page.waitForFunction('window.__lbw.game.weather.kind === "snow"', null, { timeout: 8000 });
+  await page.evaluate(() => (window as any).__lbw.weatherNow('off'));
+  await page.waitForFunction('window.__lbw.game.weather.isActive === false', null, { timeout: 8000 });
+
+  // the sun: parked at midnight the light drops low but never vanishes...
+  await page.evaluate(() => (window as any).__lbw.setDayMode('night'));
+  await page.waitForFunction(() => {
+    let dir = 0, hemi = 0;
+    (window as any).__lbw.game.scene.traverse((o: any) => {
+      if (o.isDirectionalLight) dir = o.intensity;
+      if (o.isHemisphereLight) hemi = o.intensity;
+    });
+    return dir < 0.4 && hemi >= 0.3;
+  }, null, { timeout: 8000 });
+  // ...parked at noon it is proper day again...
+  await page.evaluate(() => (window as any).__lbw.setDayMode('day'));
+  await page.waitForFunction(() => {
+    let dir = 0;
+    (window as any).__lbw.game.scene.traverse((o: any) => { if (o.isDirectionalLight) dir = o.intensity; });
+    return dir > 1.5;
+  }, null, { timeout: 8000 });
+  // ...and in auto mode the clock actually circles
+  await page.evaluate(() => (window as any).__lbw.setDayMode('auto'));
+  const t0 = await page.evaluate(() => (window as any).__lbw.dayPhase());
+  await page.waitForFunction((p: number) => Math.abs((window as any).__lbw.dayPhase() - p) > 1e-4, t0, { timeout: 15000 });
+
+  // midnight is blue, never the void: the sky test's black-pixel census passes
+  await page.evaluate(() => (window as any).__lbw.setDayMode('night'));
+  await frames(page, 30);
+  expect(await blackPixels(page), 'midnight keeps real colour').toBeLessThan(600);
 });

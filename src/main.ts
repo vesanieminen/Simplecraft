@@ -7,6 +7,7 @@ import { WORLD_SX, WORLD_SY, WORLD_SZ, CHUNK } from './core/world';
 import { buildChunkGeometry } from './core/mesher';
 import { waterSurfaceHeight } from './core/water';
 import { Game } from './game';
+import { GAMEPAD_BUTTON_MAP } from './input/gamepad';
 import { VirtualPadSource } from './input/virtual';
 
 async function boot(): Promise<void> {
@@ -26,6 +27,9 @@ async function boot(): Promise<void> {
       waterSurfaceAt: (x: number, y: number, z: number) => number;
       weatherNow: (kind: string) => number;
       setDayMode: (mode: string) => void;
+      dayPhase: () => number;
+      bucketAt: (playerIdx: number, aim: Record<string, number>) => boolean;
+      padMap: Record<string, unknown>;
     };
   };
   // test/demo hook: virtual controllers drive the same input abstraction
@@ -53,6 +57,19 @@ async function boot(): Promise<void> {
     setDayMode: (mode: string) => {
       const g = (window as unknown as { __lbw: { game: Game } }).__lbw.game;
       g.setDayMode(mode as 'auto' | 'day' | 'night' | 'none');
+    },
+    /** the sun-clock the sky shows right now (0..1) */
+    dayPhase: () => (window as unknown as { __lbw: { game: Game } }).__lbw.game.dayPhase,
+    /** the controller button → action table, so tests can pin the mapping */
+    padMap: GAMEPAD_BUTTON_MAP,
+    /**
+     * Scoop or pour with the bucket, deterministically (the pad's aim would
+     * add too much noise for a flood test). `aim` is a RayHit — the cell the
+     * kid looks at plus the empty cell in front of it.
+     */
+    bucketAt: (playerIdx: number, aim: Record<string, number>) => {
+      const g = (window as unknown as { __lbw: { game: Game } }).__lbw.game;
+      return g.bucketForTest(g.players[playerIdx], aim as never);
     },
   };
 }
