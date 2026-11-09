@@ -343,34 +343,41 @@ a block above the water, place a block or dig a step to make a stair.
 
 ## Water flows 💧
 
-Water now behaves like the big game. The sea is made of **source** blocks:
-eternal, and unbreakable — you will never drain the ocean or fall through it.
-But dig into the shore and the sea **flows in**, and it obeys two rules that
-are the same ones outside:
+Water behaves like the big game, down to the numbers. The sea is made of
+**source** blocks: eternal, and unbreakable — you will never drain the ocean
+or fall through it. But dig into the shore and the sea **flows in**, and it
+obeys the same rules the big game uses:
 
-1. **It only spreads where it has something under it.** Water never leans out
+1. **It spreads exactly seven blocks.** A spring pushes travelling water out
+   up to seven cells — one ninth thinner per cell — and then stops. That tidy
+   ring is the reach, not a limitation: it is precisely how far water spreads
+   in the big game.
+2. **It only spreads where it has something under it.** Water never leans out
    into thin air: a cell spreads sideways only into a neighbour with ground (or
    settled water) below it.
-2. **Where it runs out of ground, it falls — straight down.** Not diagonally,
-   not a step at a time: the whole drop at once. A hillside flood is a staircase
-   of waterfalls that fills each flat it lands on, which is what water actually
-   looks like coming down a hill.
+3. **Where it runs out of ground, it falls — straight down.** Not diagonally,
+   not a step at a time: the whole drop at once, and a fall *costs nothing* —
+   falling water keeps its full depth. So a hillside flood is a staircase of
+   waterfalls, and the pool at the bottom of a waterfall runs the full seven
+   blocks again from where the water lands.
+4. **Two sources feed a third.** Where a stream is squeezed between two
+   springs — beside and beside, or beside and above — it becomes a spring
+   itself. Dig a scoop in a 2×2 pond and a third source grows to fill it,
+   the same trick kids use for infinite water outside. (New springs are
+   eternal like the sea; break the ones you don't want with a bucket first.)
 
-There is no tidy ring where a spring gives up. Travelling water gets a little
-thinner as it runs, so a flood peters out into a damp sheet; a single spring can
-soak tens of blocks of flat ground before it does. A channel you dig into a pond
-fills up visibly, cell by cell, and a waterfall keeps its depth all the way
-down the cliff.
-
-- **Flowing water is real shallow water.** A one-cell sheet lying on the ground
-  is drawn thin, thinner the further it is from its spring; a body more than one
-  cell deep stands to its brim. The surface is smoothed across cell corners, so
-  a flood is one continuous sheet of water rather than a stack of tiles.
+- **Flowing water is real shallow water, at the big game's exact heights.**
+  A spring's surface stands eight-ninths of the way up its cell, and travelling
+  water loses exactly one ninth per cell of reach — the seventh cell is a thin
+  one-ninth sheet. The surface is smoothed across cell corners, so a flood is
+  one continuous sheet of water rather than a stack of tiles.
 - **Break the flow to fight a flood.** Travelling water *can* be broken with
   RT / R2: scoop a gap across your trench and everything beyond it loses its
   chain to a source and gives up — the shallow end first, then back up the
   channel towards the water. Or just fill the trench with blocks. Sources never
-  break.
+  break. (This drying is the one place we borrow from Bedrock: Java's water
+  never drains by itself, but a flood that never ends is no fun for kids —
+  and the water bucket relies on it.)
 - Sand sinks through it (and the displaced water rides up), flowers get
   washed over, and a fresh world's sea sits perfectly still until somebody
   changes something under it.

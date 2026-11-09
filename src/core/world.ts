@@ -133,7 +133,7 @@ export class World {
   /** flow depth of a WATER_FLOW cell; -1 for anything else (sources are depth 0) */
   flowLevelAt(x: number, y: number, z: number): number {
     if (this.get(x, y, z) !== WATER_FLOW) return -1;
-    return this.waterLevel.get(idx(x, y, z)) ?? 6;
+    return this.waterLevel.get(idx(x, y, z)) ?? 7;
   }
 
   /**
@@ -247,7 +247,7 @@ export class World {
     if (save.waterLevels) {
       for (const [k, v] of Object.entries(save.waterLevels)) {
         const i = Number(k);
-        if (Number.isInteger(i) && i >= 0 && i < this.data.length && v >= 0 && v <= 6) {
+        if (Number.isInteger(i) && i >= 0 && i < this.data.length && v >= 0 && v <= 7) {
           this.waterLevel.set(i, v);
         }
       }

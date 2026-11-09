@@ -241,22 +241,34 @@ event. Renaming a storage key orphans the family's existing saves.
   travelling water; its depth lives in `world.waterLevel` (flat index → level),
   saved as **version 4** `waterLevels` (server merges it like the other maps).
   The sim is a dirty set driven by the same `World.onCellChanged` hook as sand.
-  **Two rules are the whole model, and both came from the user (Nov 2026):**
-  (1) water spreads sideways only into a cell with **something under it**
-  (`supported`: solid or settled water) — it never leans out into thin air;
-  (2) where it runs out of ground it **falls straight down** — a cell with no
-  footing, or one a drop put in mid-air (`pouring` set, cleared when a cell
-  comes to rest on ground), feeds only the column below it and NEVER spreads
-  sideways. Letting mid-air cells spread was the old bug: one spring at the top
-  of a hill backed the whole slope up and drew it as a diagonal stack of blue
-  plates. `MAX_WATER_LEVEL` (24) is a runaway bound, not a reach the player
-  sees; sideways spread costs +1 per cell and falling keeps the depth, so what
-  stops a flood is terrain. A cell is held up only by a **strictly deeper**
-  side neighbour or by water falling in from above, so a cut-off flood cannot
-  prop itself up: the shallow end fails first and `drain` cascades the news
-  (≤`CASCADE_CELLS`=4 per step), which is the dry line walking back up the
-  channel. `world.set` deletes the level entry; improving an existing flow
-  cell's depth needs `world.touchAt` (same id, so `set` early-returns). Anything
+  **The model is Minecraft parity (Nov 2026 rewrite), four rules:** (1) a
+  spring reaches **exactly seven cells** — `MAX_WATER_LEVEL` is 7, sideways
+  spread costs +1 level per cell and level 7 cells stop; (2) water spreads
+  sideways only into a cell with **something under it** (`supported`: solid or
+  settled water) — it never leans out into thin air; (3) where it runs out of
+  ground it **falls straight down keeping its depth** — a cell with no footing,
+  or one a drop put in mid-air (`pouring` set, cleared when a cell comes to
+  rest on ground), feeds only the column below it and NEVER spreads sideways;
+  a WATER source over a hole never moves, it pours from `y − 1` (full-strength
+  column, pool runs 7 again from the base). Letting mid-air cells spread was
+  the old bug: one spring at the top of a hill backed the whole slope up and
+  drew it as a diagonal stack of blue plates. (4) **Two sources feed a third**
+  (`makesSource`, checked in `evaluate` before the supply math): a flow cell
+  with ≥2 horizontal `WATER` neighbours, or ≥1 plus a `WATER` above, standing
+  on ground/settled water, converts to `WATER` (level entry deleted). Traps:
+  those new springs are eternal **and unbreakable** like the sea (bucket them
+  away in tests, or overwrite with `world.set`), and digging a corner off the
+  shore really does leave a spring behind — Java does the same. Held up only
+  by a **strictly deeper** side neighbour or by water falling in from above,
+  so a cut-off flood cannot prop itself up: the shallow end fails first and
+  `drain` cascades the news (≤`CASCADE_CELLS`=4 per step), which is the dry
+  line walking back up the channel. **Bedrock divergence, deliberate:** Java
+  water never drains on its own; ours does (the user picked it, and the bucket
+  depends on "pull the spring, the flood runs home").
+  `world.set` deletes the level entry; improving an existing flow
+  cell's depth needs `world.touchAt` (same id, so `set` early-returns). Levels
+  0..7 are the whole scale — `world.applySave` clamps waterLevels to `v <= 7`,
+  `flowLevelAt` defaults to 7, and `server/index.ts` validates 0..7. Anything
   wet is `blocks.isWaterId(id)` — physics, sand (displaced water rides up),
   blasts (skip both ids), animals/collectibles all use it, never a bare
   `=== WATER`. Terrain writes cells directly (no hook), so a fresh sea starts
@@ -391,10 +403,11 @@ event. Renaming a storage key orphans the family's existing saves.
   three-quarter view for eyeballing it.
 - Water draws at its depth (`water.ts waterSurfaceHeight(world,x,y,z)`): submerged
   cell (water above) or a falling cell → **1** (a full cell — this is what stops
-  a deep body drawing as a stack of thin plates); the brim of a body of water
-  (water under it) → `SOURCE_SURFACE` 0.92; a one-cell **sheet** on the ground →
-  `0.92 − level·SURFACE_STEP(0.06)`, floor `MIN_WATER_SURFACE` 0.22. So a soak
-  lies flat and thin, a pool stands to its brim, and a waterfall is a solid
+  a deep body drawing as a stack of thin plates); otherwise the big game's nine
+  steps: **`(8 − level) / 9`** — a source or a full-strength plunge stands
+  8/9, level 4 stands 4/9, and the seventh cell of a reach is a thin 1/9 sheet
+  (`level = world.flowLevelAt`, 0 for WATER). So a soak lies flat and thin, a
+  pool stands to its brim, and a waterfall is a solid
   ribbon. The mesher's **water channel** (`ChunkGeometry.water`,
   `materials.water`, tiling `textures.waterTexture`, drifting via
   `chunks.tickWater(dt)` — Game calls it every frame) draws each cell as a box

@@ -72,6 +72,13 @@ function validSave(x: unknown): x is WorldSave {
       if (v !== 0 && v !== 1 && v !== 2 && v !== 3) return false;
     }
   }
+  if (s.waterLevels !== undefined) {
+    for (const [k, v] of Object.entries(s.waterLevels)) {
+      const i = Number(k);
+      if (!Number.isInteger(i) || i < 0 || i > 4_200_000) return false;
+      if (!Number.isInteger(v) || v < 0 || v > 7) return false;
+    }
+  }
   if (s.savedAt !== undefined && typeof s.savedAt !== 'number') return false;
   return true;
 }

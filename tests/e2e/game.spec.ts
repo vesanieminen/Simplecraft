@@ -1301,7 +1301,7 @@ test('sand obeys gravity: tumbles down, sinks through water, squashes plants and
   }, { x0, z0, gy, grass: ids.GRASS, air: ids.AIR });
 });
 
-test('water flows: a dug channel floods from the source, shallows with reach, falls deep and dries when cut off', async ({ page }) => {
+test('water flows: a dug channel floods from the source, reaches exactly seven, falls deep, makes new springs and dries when cut off', async ({ page }) => {
   test.slow();
   await boot(page);
   await joinWithPad(page);
@@ -1352,10 +1352,14 @@ test('water flows: a dug channel floods from the source, shallows with reach, fa
     S.set(arg.fx + 2, arg.gy, arg.fz, arg.water);
   }, { fx, fz, gy, air: ids.AIR, water: ids.WATER, flow: ids.WATER_FLOW, stone: ids.STONE });
 
-  // water creeps: wait until the flood has covered the whole dug channel
+  // water creeps: wait until the flood has covered the whole reach — the far
+  // end is the seventh cell out from the source, Minecraft's range exactly
   await page.waitForFunction((arg: { x6: number; gy: number; fz: number; flow: number }) =>
     (window as any).__lbw.game.world.get(arg.x6, arg.gy, arg.fz) === arg.flow,
-  { x6: fx + 10, gy, fz, flow: ids.WATER_FLOW }, { timeout: 20000 });
+  { x6: fx + 9, gy, fz, flow: ids.WATER_FLOW }, { timeout: 20000 });
+  // let a couple more steps run — if the sim could push past seven cells, this
+  // is where the eighth would appear
+  await page.waitForTimeout(1500);
 
   const cellAt = (x: number, y: number) => page.evaluate((c: { x: number; y: number; z: number }) => {
     const w = (window as any).__lbw.game.world;
@@ -1367,20 +1371,21 @@ test('water flows: a dug channel floods from the source, shallows with reach, fa
   }, { x, y, z: fz });
 
   // the source stands eternal and full; the channel shallows one step per cell,
-  // and it keeps going: what stops a flood is running out of ground, not a tidy
-  // ring six cells from the spring (that cap was the old model's biggest tell)
+  // and it stops dead at seven — Minecraft's range exactly. The eighth cell of
+  // the dig stays dry even though there is ground under it: reach, not
+  // terrain, is what ends a flood.
   expect((await cellAt(fx + 2, gy)).id).toBe(ids.WATER);
-  for (let k = 1; k <= 8; k++) {
+  for (let k = 1; k <= 7; k++) {
     const c = await cellAt(fx + 2 + k, gy);
     expect(c.id, `cell +${k}`).toBe(ids.WATER_FLOW);
     expect(c.lvl, `depth +${k}`).toBe(k);
   }
-  // and the bank past the end of the dig stays dry: ground is the limit
-  const past = await cellAt(fx + 11, gy);
-  expect([ids.WATER, ids.WATER_FLOW], 'nothing wet past the end of the dig').not.toContain(past.id);
+  const past = await cellAt(fx + 10, gy);
+  expect([ids.WATER, ids.WATER_FLOW], 'the flood stops at seven blocks').not.toContain(past.id);
 
-  // and the water DRAWS at its depth: a spring fills its cell (less the shine),
-  // a shallow flow only half-fills it — no more floating ribbons of full cubes
+  // and the water DRAWS at its depth — the big game's nine steps of surface
+  // height: (8 − level)/9, so a spring stands 8/9 full and the seventh cell
+  // of the reach is a thin 1/9 sheet. No more floating ribbons of full cubes.
   const surfaceAt = (x: number, y: number) =>
     page.evaluate((c: { x: number; y: number; z: number }) => (window as any).__lbw.waterSurfaceAt(c.x, c.y, c.z),
       { x, y, z: fz });
@@ -1389,16 +1394,10 @@ test('water flows: a dug channel floods from the source, shallows with reach, fa
   expect(await page.evaluate(() => (window as any).__lbw.game.scene.children
     .filter((o: any) => o.isMesh && o.material === (window as any).__lbw.game.chunks.materials.water).length),
     'the water channel is live').toBeGreaterThan(0);
-  expect(await surfaceAt(fx + 2, gy), 'spring surface').toBeCloseTo(0.92, 2);
-  // The sheet falls away gently — about a finger's width per cell, so a soak
-  // reads as one damp surface rather than a staircase of tiles.
-  const s2 = await surfaceAt(fx + 4, gy);
-  expect(s2, 'depth-2 surface shallows').toBeGreaterThan(0.7);
-  expect(s2, 'depth-2 surface shallows').toBeLessThan(0.9);
-  const s5 = await surfaceAt(fx + 7, gy);
-  expect(s5, 'depth-5 surface is thinner still').toBeGreaterThan(0.5);
-  expect(s5, 'depth-5 surface is thinner still').toBeLessThan(s2);
-  expect(await surfaceAt(fx + 10, gy), 'far end of the channel').toBeGreaterThanOrEqual(0.22);
+  expect(await surfaceAt(fx + 2, gy), 'spring surface').toBeCloseTo(8 / 9, 3);
+  expect(await surfaceAt(fx + 4, gy), 'depth-2 surface').toBeCloseTo(6 / 9, 3);
+  expect(await surfaceAt(fx + 7, gy), 'depth-5 surface').toBeCloseTo(3 / 9, 3);
+  expect(await surfaceAt(fx + 9, gy), 'far end of the reach').toBeCloseTo(1 / 9, 3);
   // a dry cell draws nothing at all
   expect(await surfaceAt(fx + 12, gy), 'dry cell draws nothing').toBe(0);
 
@@ -1451,6 +1450,23 @@ test('water flows: a dug channel floods from the source, shallows with reach, fa
     throw new Error(`drain stuck; wet: ${dump}`);
   }
 
+  // Two sources feed a third: with the channel dry again, stand a spring on
+  // either side of a dry cell. The flow that meets in the middle has two
+  // source blocks squeezing it from the sides, so it becomes a source itself —
+  // the 2×2 scoop kids use to multiply a spring, straight out of the big game.
+  await page.evaluate((arg: { x1: number; x2: number; gy: number; fz: number; water: number }) => {
+    const S = (window as any).__lbw.game.world;
+    S.set(arg.x1, arg.gy, arg.fz, arg.water);
+    S.set(arg.x2, arg.gy, arg.fz, arg.water);
+  }, { x1: fx + 3, x2: fx + 5, gy, fz, water: ids.WATER });
+  await page.waitForFunction((arg: { x: number; gy: number; fz: number; water: number }) =>
+    (window as any).__lbw.game.world.get(arg.x, arg.gy, arg.fz) === arg.water,
+  { x: fx + 4, gy, fz, water: ids.WATER }, { timeout: 10000 });
+  // the new spring stands full like its parents, and carries no flow depth —
+  // it is an eternal source now, not a travelling cell on somebody's chain
+  expect(await surfaceAt(fx + 4, gy), 'the new source stands 8/9 full').toBeCloseTo(8 / 9, 3);
+  expect((await cellAt(fx + 4, gy)).lvl, 'a source has no flow level').toBe(-1);
+
   // the bucket is in the block palette where the water block used to be:
   // kids carry a spring around instead of tiling the meadow with ponds
   await tap(page, 'palette');
@@ -1482,7 +1498,7 @@ test('water flows: a dug channel floods from the source, shallows with reach, fa
   await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); });
 });
 
-test('water on a slope runs DOWN it: no blue plates hanging in the air, no six-cell ring', async ({ page }) => {
+test('water on a slope runs DOWN it: no blue plates hanging in the air, and the seven-block reach still ends the flood', async ({ page }) => {
   test.slow();
   await boot(page);
   await joinWithPad(page);
@@ -1526,11 +1542,13 @@ test('water on a slope runs DOWN it: no blue plates hanging in the air, no six-c
     S.set(arg.x0, arg.gy + 1, arg.z0, arg.water); // a spring at the top step
   }, { x0, x1, z0: fz, z1: fz, gy, air: ids.AIR, stone: ids.STONE, water: ids.WATER });
 
-  // the flood has to reach the bottom step, twelve cells downstream and six
-  // blocks below the spring — three times past the reach cap the old model drew
+  // the flood has to climb DOWN the staircase: each step is a two-cell flat
+  // ending in a drop, and water falls keeping its depth. The reach is spent a
+  // level per cell, so the seventh cell out — the far edge of step four — is
+  // where the stream runs out of supply, exactly as in the big game.
   await page.waitForFunction((arg: { x: number; y: number; z: number; flow: number }) =>
     (window as any).__lbw.game.world.get(arg.x, arg.y, arg.z) === arg.flow,
-  { x: x1, y: gy - 6 + 1, z: fz, flow: ids.WATER_FLOW }, { timeout: 30000 });
+  { x: x0 + 7, y: gy - 2, z: fz, flow: ids.WATER_FLOW }, { timeout: 30000 });
 
   // and every wet cell must either be standing on something or be on its way
   // down: that is the whole complaint. The old sim let water spread sideways
@@ -1545,11 +1563,12 @@ test('water on a slope runs DOWN it: no blue plates hanging in the air, no six-c
       const id = w.get(x, y, z);
       return id === WATER || id === WATER_FLOW;
     };
-    const out = { wetCells: 0, hanging: [] as string[], falling: 0 };
+    const out = { wetCells: 0, hanging: [] as string[], falling: 0, beyond: [] as string[] };
     for (let x = arg.x0; x <= arg.x1; x++) for (let z = arg.z0; z <= arg.z1; z++) {
       for (let y = arg.y1; y >= arg.y0; y--) {
         if (!wet(x, y, z)) continue;
         out.wetCells++;
+        if (x > arg.x0 + 8) out.beyond.push(`${x},${y},${z}`); // window x0 = x0-1; reach ends at x0+7
         const below = w.get(x, y - 1, z);
         if (below !== AIR && !wet(x, y - 1, z)) continue; // solid footing
         if (wet(x, y - 1, z)) continue; // standing on settled water
@@ -1562,6 +1581,11 @@ test('water on a slope runs DOWN it: no blue plates hanging in the air, no six-c
 
   expect(audit.wetCells, 'the staircase got wet').toBeGreaterThan(12);
   expect(audit.hanging, `water hanging in the air at ${audit.hanging.join(' ')}`).toEqual([]);
+  // and the seven-block reach ends the flood even though the staircase keeps
+  // going down for twice as long: the lower steps stay as dry as the day they
+  // were carved. (In the big game it is reach, not terrain, that ends a
+  // stream — a slope only buys you free depth while the water is FALLING.)
+  expect(audit.beyond, `water past the reach at ${audit.beyond.join(' ')}`).toEqual([]);
 
   // scoop the spring and the whole slope dries: no cell on the hill can hold
   // water up once the chain back to the water is cut
