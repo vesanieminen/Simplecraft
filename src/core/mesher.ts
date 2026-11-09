@@ -288,10 +288,19 @@ export function buildChunkGeometry(
   };
 }
 
-/** UVs for one water face: the whole tiling sheet, upright on the sides. */
-function waterFaceUvs(fi: number): [number, number][] {
-  if (fi === FACE_PY || fi === FACE_NY) return [[0, 0], [1, 0], [1, 1], [0, 1]];
-  return [[0, 0], [0, 1], [1, 1], [1, 0]];
+/**
+ * UVs for one water face, sampled in WORLD units rather than 0..1 per cell.
+ * A per-cell sheet makes every wet cell show one whole tile of the wave art,
+ * so a flat flood reads as a chessboard of blue coasters. Sampling where the
+ * cell actually is makes the art run across a body of water as one continuous
+ * surface, and the drift in `tickWater` slides the whole sheet together.
+ */
+function waterFaceUvs(dir: [number, number, number], pts: [number, number, number][]): [number, number][] {
+  return pts.map(([px, py, pz]) => {
+    if (dir[1] !== 0) return [px, pz] as [number, number]; // the top and the floor: the horizontal plane
+    if (dir[0] !== 0) return [pz, py] as [number, number]; // an east/west wall
+    return [px, py] as [number, number]; // a north/south wall
+  });
 }
 
 /**
@@ -310,12 +319,13 @@ function waterCornerHeights(
 ): [number, number, number, number] {
   const out: [number, number, number, number] = [h, h, h, h];
   for (let i = 0; i < 4; i++) {
-    // index is (x-side) | (z-side << 1): 0 = the cell's own -x/-z corner
+    // index is (x-side) | (z-side << 1): 0 = this cell's own -x/-z corner
     const ax = i & 1;
     const az = i >> 1;
+    // the four cells that meet at the corner (x + ax, z + az)
     let sum = h, n = 1;
-    for (const [dx, dz] of [[-ax, -az], [1 - ax, -az], [-ax, 1 - az], [1 - ax, 1 - az]] as const) {
-      if (dx === 0 && dz === 0) continue;
+    for (const [dx, dz] of [[ax - 1, az - 1], [ax, az - 1], [ax - 1, az], [ax, az]] as const) {
+      if (dx === 0 && dz === 0) continue; // ourselves: already counted
       if (!isWaterId(world.get(x + dx, y, z + dz))) continue;
       sum += waterSurfaceHeight(world, x + dx, y, z + dz);
       n++;
@@ -358,7 +368,7 @@ function addWaterCube(
     const pts = f.corners.map(([ax, ay, az]) => [
       ax ? x + 1 : x, ay ? y + ch[(ax ? 1 : 0) | (az ? 2 : 0)] : y, az ? z + 1 : z,
     ] as [number, number, number]);
-    g.quad(pts[0], pts[1], pts[2], pts[3], f.dir, tint, waterFaceUvs(fi));
+    g.quad(pts[0], pts[1], pts[2], pts[3], f.dir, tint, waterFaceUvs(f.dir, pts));
   }
 }
 
