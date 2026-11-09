@@ -325,20 +325,32 @@ a block above the water, place a block or dig a step to make a stair.
 
 Water now behaves like the big game. The sea is made of **source** blocks:
 eternal, and unbreakable — you will never drain the ocean or fall through it.
-But dig into the shore and the sea **flows in**: water pours straight down at
-full depth, spreads sideways one cell per tick getting one step shallower as
-it goes, and stops dead six cells from any source. A channel you dig into a
-pond fills up visibly, cell by cell, and a waterfall keeps its depth all the
-way down the cliff.
+But dig into the shore and the sea **flows in**, and it obeys two rules that
+are the same ones outside:
 
-- **Flowing water is real shallow water.** Each travelling cell remembers how
-  deep its supply is and is drawn that shallow — a puddle, a knee-deep sheet,
-  a full block by the source. Pools read as one body of water, not a stack of
-  boxes.
+1. **It only spreads where it has something under it.** Water never leans out
+   into thin air: a cell spreads sideways only into a neighbour with ground (or
+   settled water) below it.
+2. **Where it runs out of ground, it falls — straight down.** Not diagonally,
+   not a step at a time: the whole drop at once. A hillside flood is a staircase
+   of waterfalls that fills each flat it lands on, which is what water actually
+   looks like coming down a hill.
+
+There is no tidy ring where a spring gives up. Travelling water gets a little
+thinner as it runs, so a flood peters out into a damp sheet; a single spring can
+soak tens of blocks of flat ground before it does. A channel you dig into a pond
+fills up visibly, cell by cell, and a waterfall keeps its depth all the way
+down the cliff.
+
+- **Flowing water is real shallow water.** A one-cell sheet lying on the ground
+  is drawn thin, thinner the further it is from its spring; a body more than one
+  cell deep stands to its brim. The surface is smoothed across cell corners, so
+  a flood is one continuous sheet of water rather than a stack of tiles.
 - **Break the flow to fight a flood.** Travelling water *can* be broken with
   RT / R2: scoop a gap across your trench and everything beyond it loses its
-  chain to a source and dries up, cell by cell. Or just fill the trench with
-  blocks. Sources never break.
+  chain to a source and gives up — the shallow end first, then back up the
+  channel towards the water. Or just fill the trench with blocks. Sources never
+  break.
 - Sand sinks through it (and the displaced water rides up), flowers get
   washed over, and a fresh world's sea sits perfectly still until somebody
   changes something under it.
@@ -355,10 +367,10 @@ exactly one bucket, full or empty (the name under the crosshair says which).
   there, and the water sets off spreading exactly like the sea does. Moats,
   waterfalls and indoor ponds are one bucket away.
 - **Scoop the spring back out and the flood runs home**: travelling water can
-  only stand on a deeper neighbour, so once its spring is gone the shallow
-  puddles at the end of the reach are the first to fail and the whole cut-off
-  flood is dry inside a second — the same trick the big game plays when you
-  remove a source.
+  only stand where something deeper is holding it up, so once its spring is gone
+  the water collapses from the shallow end and the dry line walks back up the
+  channel towards where the water came from — the same trick the big game plays
+  when you remove a source.
 - The bucket's full/empty state is session-only, like the fish satchel:
   going home empties it.
 

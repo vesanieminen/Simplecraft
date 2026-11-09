@@ -202,32 +202,36 @@ event. Renaming a storage key orphans the family's existing saves.
 - Water flows (`core/water.ts`, `Game.water`): **two ids**. `WATER` (10) is an
   eternal source (the sea, and any a kid places from the palette) — unbreakable,
   never an aim target (`raycast.hitRemovable`), full-cell. `WATER_FLOW` (38) is
-  travelling water; its depth 0..6 lives in `world.waterLevel` (flat index →
-  level), saved as **version 4** `waterLevels` (server merges it like the other
-  maps). The sim is a dirty-set driven by the same `World.onCellChanged` hook as
-  sand: each 0.2 s step re-reads every dirty cell's best supply (a side
-  neighbour one level deeper, or water falling in from **above keeps its depth**),
-  >`MAX_WATER_LEVEL` (6) drains to AIR. Sideways spread is `level+1`, capped at
-  6 and unconditional — water reaching a ledge edge **pours over it** like the
-  big game (an elevated source fans out; accepted as MC-like). Reach is
-  strictly bounded: the shallowest cell always
-  needs a deeper one. Cutting a chain makes levels **climb** (each flow cell
-  `notify`s its neighbours when its own level changes, incl. shallowing) until
-  they fall past the cap and dry, cell by cell. `world.set` deletes the level
-  entry; improving an existing flow cell's depth needs `world.touchAt` (same id,
-  so `set` early-returns). **All water renders full-cell** — sources and flow
-  cells are the same translucent textured cube; the depth level is sim-only
-  (reach, drying), never a draw height, so floods read as solid water bodies
-  instead of floating ribbons. The general face pass culls water↔water faces
-  (`isWaterId(id) && isWaterId(n)`) so a pool reads as one body. Anything wet
-  is `blocks.isWaterId(id)` — physics, sand (displaced water rides up), blasts
-  (skip both ids), animals/collectibles all use it, never a bare `=== WATER`.
-  Terrain writes cells directly (no hook), so a fresh sea starts still. **Tests:** terrain ponds and the sea are eternal
+  travelling water; its depth lives in `world.waterLevel` (flat index → level),
+  saved as **version 4** `waterLevels` (server merges it like the other maps).
+  The sim is a dirty set driven by the same `World.onCellChanged` hook as sand.
+  **Two rules are the whole model, and both came from the user (Nov 2026):**
+  (1) water spreads sideways only into a cell with **something under it**
+  (`supported`: solid or settled water) — it never leans out into thin air;
+  (2) where it runs out of ground it **falls straight down** — a cell with no
+  footing, or one a drop put in mid-air (`pouring` set, cleared when a cell
+  comes to rest on ground), feeds only the column below it and NEVER spreads
+  sideways. Letting mid-air cells spread was the old bug: one spring at the top
+  of a hill backed the whole slope up and drew it as a diagonal stack of blue
+  plates. `MAX_WATER_LEVEL` (24) is a runaway bound, not a reach the player
+  sees; sideways spread costs +1 per cell and falling keeps the depth, so what
+  stops a flood is terrain. A cell is held up only by a **strictly deeper**
+  side neighbour or by water falling in from above, so a cut-off flood cannot
+  prop itself up: the shallow end fails first and `drain` cascades the news
+  (≤`CASCADE_CELLS`=4 per step), which is the dry line walking back up the
+  channel. `world.set` deletes the level entry; improving an existing flow
+  cell's depth needs `world.touchAt` (same id, so `set` early-returns). Anything
+  wet is `blocks.isWaterId(id)` — physics, sand (displaced water rides up),
+  blasts (skip both ids), animals/collectibles all use it, never a bare
+  `=== WATER`. Terrain writes cells directly (no hook), so a fresh sea starts
+  still. **Tests:** terrain ponds and the sea are eternal
   *flowing* sources on this branch — any e2e course near spawn must ring its
   site with a full-height stone caisson and scrub every wet cell inside, since
   falling water keeps its depth and one wet cell left above a wall re-rains
   on the course forever (the sand and water-flow tests do exactly this, and
-  their dry-waits dump wet-cell maps on failure for the next CI sleuth).
+  their dry-waits dump wet-cell maps on failure for the next CI sleuth). The
+  slope test asserts the invariant the eye checks: every wet cell has ground or
+  water under it, or is a falling cell with water above it.
 - Fish (`core/fish.ts`, `Game.fish`) live in every column of water: five
   kinds, **minnow + sunfish school** (a `School` anchor wanders through valid
   water and the flock follows via anchor-seek + slowly circling offsets +
@@ -326,12 +330,24 @@ event. Renaming a storage key orphans the family's existing saves.
   the tip, the legs inside a sane band, and the head top at least 0.25 below its
   standing height. `scripts/crouch-shots.ts` shoots the profile + the in-play
   three-quarter view for eyeballing it.
-- Water draws at its depth: `water.ts waterSurfaceHeight(world,x,y,z)` (source
-  0.92, flow `0.92 − level·0.12` floor 0.22, falling water full) feeds the
-  mesher's dedicated **water channel** (`ChunkGeometry.water`,
+- Water draws at its depth (`water.ts waterSurfaceHeight(world,x,y,z)`): submerged
+  cell (water above) or a falling cell → **1** (a full cell — this is what stops
+  a deep body drawing as a stack of thin plates); the brim of a body of water
+  (water under it) → `SOURCE_SURFACE` 0.92; a one-cell **sheet** on the ground →
+  `0.92 − level·SURFACE_STEP(0.06)`, floor `MIN_WATER_SURFACE` 0.22. So a soak
+  lies flat and thin, a pool stands to its brim, and a waterfall is a solid
+  ribbon. The mesher's **water channel** (`ChunkGeometry.water`,
   `materials.water`, tiling `textures.waterTexture`, drifting via
-  `chunks.tickWater(dt)` — Game calls it every frame). Physics still treats
-  every wet cell as a full cell. `__lbw.waterSurfaceAt` is the test lens.
+  `chunks.tickWater(dt)` — Game calls it every frame) draws each cell as a box
+  to `addWaterCube`'s **corner-averaged** height (`waterCornerHeights`: the wet
+  cells meeting at each corner, same y only — blending with a lower column's
+  absolute height flips the quad inside out). Two traps that made water look
+  like a chessboard of coasters: per-cell UVs (one whole wave tile per cell —
+  `waterFaceUvs` samples in WORLD units instead) and `materials.water`
+  `depthWrite: false`, which blended every surface of every cell in a body into
+  every other one. Physics still treats every wet cell as a full cell.
+  `__lbw.waterSurfaceAt` is the test lens; `scripts/water-slope-shot.ts` shoots
+  a spring pouring down a staircase for eyeballing it.
 - Sky & weather: `core/weather.ts` `WeatherClock` (game time, public
   `weatherNow('rain'|'snow'|'off')` on Game; `__lbw.weatherNow`) decides what
   falls; `render/sky.ts` draws it (sun+moon orbit pivot, stars, cloud puffs,
