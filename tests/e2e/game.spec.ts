@@ -1433,9 +1433,12 @@ test('water flows: a dug channel floods from the source, shallows with reach, fa
   await page.waitForSelector('.palette-grid');
   const paletteIcons = await page.evaluate(() => {
     const cells = [...document.querySelectorAll('.palette-cell')];
+    // keyed off the cell the app marks as a tool, not off the emoji codepoint:
+    // the bucket glyph (U+1FAA3) is newer than most of the palette's art, and
+    // a hard-coded escape is one typo away from a lie
     return {
-      bucket: cells.some((c) => c.textContent?.includes('\u{1FA83}')),
-      water: cells.some((c) => c.textContent?.includes('\u{1F4A7}')),
+      bucket: cells.some((c) => c.dataset.tool === '1' && c.textContent?.includes('Bucket')),
+      water: cells.some((c) => c.textContent?.includes('Water')),
       toolMarked: cells.some((c) => c.classList.contains('tool')),
     };
   });
