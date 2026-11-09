@@ -1,7 +1,7 @@
 import './ui/styles.css';
 import {
   AIR, BUCKET, CHEST, CHEST_OPEN, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, DYNAMITE, FLOWER_RED, FLOWER_YELLOW,
-  GRASS, isBucket, LEAVES, PLANKS, ROCK, SAND, SAPLING, SCORCH, SLAB, STAIRS, STONE, TALLGRASS, WATER, WATER_FLOW, WOOD,
+  GLASS, GRASS, isBucket, LEAVES, PLANKS, ROCK, SAND, SAPLING, SCORCH, SLAB, STAIRS, STONE, TALLGRASS, WATER, WATER_FLOW, WOOD,
 } from './core/blocks';
 import { WORLD_SX, WORLD_SY, WORLD_SZ, CHUNK } from './core/world';
 import { buildChunkGeometry } from './core/mesher';
@@ -38,7 +38,7 @@ async function boot(): Promise<void> {
     addVirtualPad: () => game.addVirtualPad('xbox'),
     dims: { sx: WORLD_SX, sy: WORLD_SY, sz: WORLD_SZ, chunk: CHUNK },
     ids: {
-      AIR, GRASS, STONE, SAND, ROCK, WATER, WATER_FLOW, WOOD, PLANKS, LEAVES,
+      AIR, GRASS, STONE, SAND, ROCK, WATER, WATER_FLOW, WOOD, PLANKS, LEAVES, GLASS,
       FLOWER_RED, FLOWER_YELLOW, TALLGRASS, DYNAMITE, SCORCH, BUCKET,
       SAPLING, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, SLAB, STAIRS, CHEST, CHEST_OPEN,
     },

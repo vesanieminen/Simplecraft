@@ -107,6 +107,9 @@ export class World {
 
   set(x: number, y: number, z: number, id: BlockId, recordMod = true): void {
     if (!this.inBounds(x, y, z)) return;
+    // A non-id (a `undefined` sneaking through an `as any` in a test) used to
+    // write AIR: the cell quietly emptied and the caller never heard a word.
+    if (!Number.isInteger(id)) return;
     const i = idx(x, y, z);
     if (this.data[i] === id) return;
     this.data[i] = id;

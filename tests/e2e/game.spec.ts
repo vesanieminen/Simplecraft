@@ -1366,6 +1366,11 @@ test('water flows: a dug channel floods from the source, shallows with reach, fa
   const surfaceAt = (x: number, y: number) =>
     page.evaluate((c: { x: number; y: number; z: number }) => (window as any).__lbw.waterSurfaceAt(c.x, c.y, c.z),
       { x, y, z: fz });
+  // wet cells now draw in a channel of their own (tiling, drifting water art),
+  // not with the painted-glass art they rode in on before
+  expect(await page.evaluate(() => (window as any).__lbw.game.scene.children
+    .filter((o: any) => o.isMesh && o.material === (window as any).__lbw.game.chunks.materials.water).length),
+    'the water channel is live').toBeGreaterThan(0);
   expect(await surfaceAt(fx + 2, gy), 'spring surface').toBeCloseTo(0.92, 2);
   const s2 = await surfaceAt(fx + 4, gy);
   expect(s2, 'depth-2 surface shallows').toBeGreaterThan(0.55);
@@ -1432,7 +1437,7 @@ test('water flows: a dug channel floods from the source, shallows with reach, fa
   await tap(page, 'palette');
   await page.waitForSelector('.palette-grid');
   const paletteIcons = await page.evaluate(() => {
-    const cells = [...document.querySelectorAll('.palette-cell')];
+    const cells = [...document.querySelectorAll<HTMLElement>('.palette-cell')];
     // keyed off the cell the app marks as a tool, not off the emoji codepoint:
     // the bucket glyph (U+1FAA3) is newer than most of the palette's art, and
     // a hard-coded escape is one typo away from a lie
@@ -2199,9 +2204,13 @@ test('every block is painted from the atlas, not flat-tinted', async ({ page }) 
   expect(art.paletteSizes.every((s) => s >= 3)).toBe(true); // no cell is one flat fill
   expect(new Set(art.sigs).size).toBe(art.cells);
 
-  // and the game really uses the artwork: painted blocks (opaque and see-through)
+  // and the game really uses the artwork: painted blocks, both the opaque ones
+  // and the see-through ones. Water used to be what proved the translucent
+  // channel was live (it drew with the glass art), but it has a channel of its
+  // own now, so the glass has to speak for itself — which means waiting for the
+  // chunk rebuild, since remeshing is budgeted a few chunks per frame.
   await joinWithPad(page);
-  const channels = await page.evaluate(() => {
+  const site = await page.evaluate(() => {
     const game = (window as any).__lbw.game;
     const ids = (window as any).__lbw.ids;
     const e = game.players[0].entity;
@@ -2209,17 +2218,35 @@ test('every block is painted from the atlas, not flat-tinted', async ({ page }) 
     const y = game.world.surfaceY(x, z) + 1;
     game.world.set(x, y, z, ids.STONE);
     game.world.set(x + 1, y, z, ids.GLASS);
+    // read straight back, and hand the coordinates forward: the kid drifts, so
+    // recomputing "three blocks to my right" after a wait misses the glass
+    return { x: x + 1, y, z, idAfter: game.world.get(x + 1, y, z), glass: ids.GLASS };
+  });
+  expect(site.idAfter, `the glass stands where it was placed — ${JSON.stringify(site)}`).toBe(site.glass);
+  await frames(page, 30);
+  const channels = await page.evaluate((at: { x: number; y: number; z: number }) => {
+    const game = (window as any).__lbw.game;
+    const S = game.world;
+    const geo = (window as any).__lbw.chunkGeometry(S, Math.floor(at.x / 16), Math.floor(at.z / 16));
+    const count = (mat: any) =>
+      game.scene.children.filter((o: any) => o.isMesh && o.material === mat).length;
+    const quads = (g: any) => (g ? g.attributes.position.count / 24 : -1);
     return {
-      painted: game.scene.children.filter((o: any) => o.isMesh && o.material === game.chunks.materials.textured).length,
-      seeThrough: game.scene.children.filter(
-        (o: any) => o.isMesh && o.material === game.chunks.materials.texturedTranslucent).length,
+      probe: {
+        ...at, id: S.get(at.x, at.y, at.z),
+        texTQuads: quads(geo?.texturedTranslucent),
+        texQuads: quads(geo?.textured),
+        transpQuads: quads(geo?.translucent),
+      },
+      painted: count(game.chunks.materials.textured),
+      seeThrough: count(game.chunks.materials.texturedTranslucent),
       uved: game.scene.children
         .filter((o: any) => o.isMesh && o.material === game.chunks.materials.textured)
         .every((o: any) => !!o.geometry.attributes.uv),
     };
-  });
+  }, site);
   expect(channels.painted).toBeGreaterThan(0);
-  expect(channels.seeThrough).toBeGreaterThan(0); // glass and water carry art too
+  expect(channels.seeThrough, `glass carries atlas art — probe ${JSON.stringify(channels.probe)}`).toBeGreaterThan(0);
   expect(channels.uved).toBe(true);
 });
 
