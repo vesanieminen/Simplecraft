@@ -6,7 +6,8 @@
 
 import * as THREE from 'three';
 import {
-  ATLAS_CELL_COUNT, ATLAS_DOOR, ATLAS_PLANKS, BlockId, blockDef, isCrossBlock, isDoorBlock,
+  ATLAS_CHEST_INSIDE, ATLAS_CHEST_LID, ATLAS_CHEST_OPEN_TOP, ATLAS_CELL_COUNT, ATLAS_DOOR, ATLAS_PLANKS, BlockId, blockDef,
+  CHEST_INSET, CHEST_OPEN, chestOpenBoxes, isChestBlock, isCrossBlock, isDoorBlock,
   isDoorClosedBlock, isFullCellBlock, isOpaqueBlock, isStairsBlock, isTranslucentBlock, isWaterId,
   PLANT_ATLAS_CELLS, SAND, StairFacing, stairBoxes, VoxelBox,
 } from './blocks';
@@ -22,6 +23,9 @@ function hashByte(x: number, y: number, z: number): number {
 
 const AO_LEVELS = [0.55, 0.74, 0.88, 1.0];
 const FACE_SHADE = [0.78, 0.78, 1.0, 0.55, 0.86, 0.86]; // +x -x +y -y +z -z
+/** how much darker the inside of an opened chest is than its outside: the
+ *  treasure down there is in shadow, which is what reads as depth */
+const CHEST_INSIDE_SHADE = 0.62;
 
 interface FaceSpec {
   dir: [number, number, number];
@@ -210,6 +214,16 @@ export function buildChunkGeometry(
           const box = doorPanelBox(world, x, y, z)!;
           addTexturedSubBox(tex, world, [x, y, z], box, def.sideAtlasCell ?? ATLAS_DOOR,
             { cullFlush: true });
+          continue;
+        }
+        if (isChestBlock(id)) {
+          // A chest is a box that only ever opens at the TOP. Shut, that is all
+          // there is to it: the squat box with its lid painted on. Opened, the
+          // box does not change at all — lifting a lid does not change what a
+          // chest looks like from the side — but the lid steps up to the back
+          // of the cell and the top of the box becomes an opening you can look
+          // down the inside of, to the treasure lying at the bottom.
+          addChestShape(tex, world, x, y, z, id);
           continue;
         }
 
@@ -478,6 +492,143 @@ function addStairShape(
   // the upper part keeps its `away` face: that is the riser of the step
   addTexturedSubBox(g, world, [x, y, z], [tx0, mid, tz0, tx1, tall[4], tz1], sideCell,
     { cullFlush: true, skip: faceSkip(FACE_NY) });
+}
+
+/**
+ * A treasure chest, shut or open.
+ *
+ * Shut, it is the squat box it has always been: 0.85 of the cell, its own side
+ * art, its lid painted across the top.
+ *
+ * Open, it is the same box — the sides, the height, the footprint, all
+ * unchanged, because lifting a lid changes none of them — with the top face
+ * taken off and what is really in there drawn instead: four walls seen from
+ * the INSIDE, the treasure lying at the bottom of them, and a wooden rim where
+ * the lid used to sit. Only the top changes; a chest still looks closed from
+ * every side.
+ */
+function addChestShape(
+  g: GeomBuilder, world: World, x: number, y: number, z: number, id: BlockId,
+): void {
+  const def = blockDef(id);
+  const side = def.sideAtlasCell ?? ATLAS_CHEST_LID;
+  const bottom = def.bottomAtlasCell ?? side;
+  const cell: [number, number, number] = [x, y, z];
+  const { body, inner } = chestOpenBoxes(x, y, z);
+
+  if (id !== CHEST_OPEN) {
+    addTexturedSubBox(g, world, cell, body, side, { cullFlush: true, capCell: ATLAS_CHEST_LID, bottomCell: bottom });
+    return;
+  }
+
+  // the box, minus its top: FACE_PY is drawn in four rim strips below so the
+  // opening can sit in the middle of it
+  addTexturedSubBox(g, world, cell, body, side,
+    { cullFlush: true, bottomCell: bottom, skip: faceSkip(FACE_PY) });
+
+  // The open top — and the lid — are only worth drawing if something can look
+  // in, and the only thing that can is a camera through the cell above.
+  if (!isFullCellBlock(world.get(x, y + 1, z))) {
+    const vary = 1 + (hashByte(x, y, z) - 0.5) * 0.07;
+    // the rim: the top of the chest's walls, planks where the lid lay
+    const t = CHEST_INSET;
+    const ry = body[4];
+    const top = (x0: number, x1: number, z0: number, z1: number): void => {
+      const pts: [number, number, number][] = [
+        [x0, ry, z1], [x1, ry, z1], [x1, ry, z0], [x0, ry, z0],
+      ];
+      const shade = FACE_SHADE[FACE_PY] * vary;
+      const tint: [number, number, number][] = pts.map(() => [shade, shade, shade]);
+      // sampled in the cell's own art space, so a thin strip shows a thin
+      // slice of the planks rather than the whole 32-px tile stretched over it
+      const uv = atlasUvs(ATLAS_PLANKS, x0 - x, x1 - x, 1 - (z1 - z), 1 - (z0 - z));
+      g.quad(pts[0], pts[1], pts[2], pts[3], [0, 1, 0], tint, uv);
+    };
+    top(x, x + 1, z, z + t);
+    top(x, x + 1, z + 1 - t, z + 1);
+    top(x, x + t, z + t, z + 1 - t);
+    top(x + 1 - t, x + 1, z + t, z + 1 - t);
+    // the inside of the walls, and the treasure at the bottom of them
+    for (const fi of [FACE_PX, FACE_NX, FACE_PZ, FACE_NZ]) addInnerFace(g, inner, fi, ATLAS_CHEST_INSIDE, CHEST_INSIDE_SHADE);
+    addInnerFace(g, inner, FACE_PY, ATLAS_CHEST_OPEN_TOP, 0.9);
+
+    // The lid, up from the rim the way a lid actually comes off: hinged at the
+    // far edge and leaning back a little, like a book opened too far. It rises
+    // into the cell above the chest, so it stays out of the opening from every
+    // side you approach from — and if there is a block behind and above for it
+    // to lean into, it just does not get drawn.
+    if (!isFullCellBlock(world.get(x, y + 1, z - 1))) {
+      addLidPlate(g, x, body[4], z, vary);
+    }
+  }
+}
+
+/** where the open lid hinges along the far edge of the rim, and where its
+ *  raised tip ends up: just short of a full block above the chest, leaning
+ *  back into the cell behind that */
+const LID_HINGE = 0.12;
+const LID_RISE = 1.02;
+const LID_LEAN = 0.4;
+
+/**
+ * The open chest's lid: one flat plate, hinged on the rim and tilted back,
+ * painted with the lid's own art on the face the player sees and with the
+ * chest's dark inside art on the face that shades the opening. Two quads —
+ * the plate is thin enough that its edges are not worth drawing.
+ */
+function addLidPlate(
+  g: GeomBuilder, x: number, hingeY: number, z: number, vary: number,
+): void {
+  const hz = z + LID_HINGE;
+  const ey = hingeY + LID_RISE;
+  const ez = hz - LID_LEAN;
+  // outward normal of the painted face: perpendicular to the plate, leaning
+  // up and toward the player (the +z side of the chest)
+  const ny = hz - ez;
+  const nz = ey - hingeY;
+  const nl = Math.hypot(ny, nz);
+  const a: [number, number, number] = [x, hingeY, hz];
+  const b: [number, number, number] = [x + 1, hingeY, hz];
+  const c: [number, number, number] = [x + 1, ey, ez];
+  const d: [number, number, number] = [x, ey, ez];
+  const shade = (s: number): [number, number, number][] =>
+    [0, 1, 2, 3].map(() => [s, s, s]) as [number, number, number][];
+  g.quad(a, b, c, d, [0, ny / nl, nz / nl], shade(0.95 * vary), atlasUvs(ATLAS_CHEST_LID, 0, 1, 0, 1));
+  const dim = 0.95 * vary * CHEST_INSIDE_SHADE;
+  g.quad(d, c, b, a, [0, -ny / nl, -nz / nl], shade(dim), atlasUvs(ATLAS_CHEST_INSIDE, 0, 1, 0, 1));
+}
+
+/**
+ * One face of the INSIDE of a box: the face `fi` would draw on the outside,
+ * moved to the far side of the box and turned to face inwards. That is what
+ * makes an opened chest something you can look down into rather than a hole
+ * you can see straight through.
+ */
+function addInnerFace(
+  g: GeomBuilder, box: VoxelBox, fi: number, cell: number, dim: number,
+): void {
+  const [x0, y0, z0, x1, y1, z1] = box;
+  const f = FACES[fi];
+  const pts = f.corners.map(([ax, ay, az]) => [
+    f.dir[0] > 0 ? x0 : f.dir[0] < 0 ? x1 : (ax ? x1 : x0),
+    f.dir[1] > 0 ? y0 : f.dir[1] < 0 ? y1 : (ay ? y1 : y0),
+    f.dir[2] > 0 ? z0 : f.dir[2] < 0 ? z1 : (az ? z1 : z0),
+  ] as [number, number, number]);
+  const shade = FACE_SHADE[fi] * dim;
+  const tint: [number, number, number][] = pts.map(() => [shade, shade, shade]);
+  g.quad(pts[0], pts[1], pts[2], pts[3], f.dir, tint, faceUvs(fi, cell, cell, cell));
+}
+
+/**
+ * UVs inside one atlas cell, given as a rectangle in the cell's OWN 0..1 art
+ * space. Sampling a slice is what keeps a thin quad (a chest's rim) showing a
+ * thin slice of the art instead of the whole tile squeezed into it.
+ */
+function atlasUvs(cell: number, u0: number, u1: number, v0: number, v1: number): [number, number][] {
+  const pad = 0.5 / 32; // same half-pixel inset as faceUvs
+  const eu = (v: number): number => (cell + pad + v * (1 - 2 * pad)) / ATLAS_CELLS;
+  const ev = (v: number): number => pad + v * (1 - 2 * pad);
+  return [[eu(u0), ev(v0)], [eu(u1), ev(v0)], [eu(u1), ev(v1)], [eu(u0), ev(v1)]];
 }
 
 /**

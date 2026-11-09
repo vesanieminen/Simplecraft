@@ -1,6 +1,7 @@
 import './ui/styles.css';
 import {
-  AIR, BUCKET, CHEST, CHEST_OPEN, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, DYNAMITE, FLOWER_RED, FLOWER_YELLOW,
+  AIR, ATLAS_CHEST_BOTTOM, ATLAS_CHEST_INSIDE, ATLAS_CHEST_LID, ATLAS_CHEST_OPEN_TOP, ATLAS_CHEST_SIDE, ATLAS_CELL_COUNT,
+  BUCKET, CHEST, CHEST_OPEN, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, DYNAMITE, FLOWER_RED, FLOWER_YELLOW,
   GLASS, GRASS, isBucket, LEAVES, PLANKS, ROCK, SAND, SAPLING, SCORCH, SLAB, STAIRS, STONE, TALLGRASS, WATER, WATER_FLOW, WOOD,
 } from './core/blocks';
 import { WORLD_SX, WORLD_SY, WORLD_SZ, CHUNK } from './core/world';
@@ -24,6 +25,8 @@ async function boot(): Promise<void> {
       /** the mesher on demand: what one chunk of the current world would look like */
       chunkGeometry: typeof buildChunkGeometry;
       isTool: (id: number) => boolean;
+      /** the block atlas, so a test can tell which artwork a face really used */
+      atlas: { cells: number; side: number; lid: number; bottom: number; inside: number; treasure: number };
       waterSurfaceAt: (x: number, y: number, z: number) => number;
       weatherNow: (kind: string) => number;
       setDayMode: (mode: string) => void;
@@ -43,6 +46,14 @@ async function boot(): Promise<void> {
       SAPLING, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, SLAB, STAIRS, CHEST, CHEST_OPEN,
     },
     chunkGeometry: buildChunkGeometry,
+    /**
+     * The block atlas, in cells: a test that wants to know which artwork a face
+     * really used decodes it from the face's UVs (u × cells → the cell).
+     */
+    atlas: {
+      cells: ATLAS_CELL_COUNT, side: ATLAS_CHEST_SIDE, lid: ATLAS_CHEST_LID,
+      bottom: ATLAS_CHEST_BOTTOM, inside: ATLAS_CHEST_INSIDE, treasure: ATLAS_CHEST_OPEN_TOP,
+    },
     /** is this block id one of the palette's tools (the 🪣)? */
     isTool: (id: number) => isBucket(id),
     /** how tall water draws in a cell: 1 full, or the height of a shallow flow */

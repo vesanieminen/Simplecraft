@@ -90,9 +90,43 @@ export const ATLAS_CHEST_SIDE = 23;
 export const ATLAS_CHEST_LID = 24;
 /** the chest's underside: dark boards and iron braces */
 export const ATLAS_CHEST_BOTTOM = 25;
-/** the same chest with its lid up: dark inside, gold spilling out */
-export const ATLAS_CHEST_OPEN_SIDE = 26;
+/** the INSIDE of the chest's walls, seen down into an opened chest */
+export const ATLAS_CHEST_INSIDE = 26;
+/** the treasure sitting at the bottom of an opened chest */
 export const ATLAS_CHEST_OPEN_TOP = 27;
+
+/**
+ * How a treasure chest is built. It is not a cube, and only its TOP ever
+ * opens: shut, it is a 0.85 box with the lid painted on top. Opened, the box
+ * is the SAME box — a chest's sides do not change when you lift the lid — but
+ * its top face is gone, and in its place the mesher draws an opening you can
+ * look down into: the inside of the walls, the treasure at the bottom of them,
+ * and a wooden rim where the lid lay. The lid itself is pure render — see
+ * mesher.ts addLidPlate — because a lid is the only thing about a chest that
+ * ever leaves its own cell.
+ */
+export const CHEST_HEIGHT = 0.85;
+/** how far below the rim the treasure lies (the chest's inside depth) */
+export const CHEST_DEPTH = 0.3;
+/** how thick the chest's walls look from above, in cells */
+export const CHEST_INSET = 0.16;
+
+/**
+ * The boxes of an OPEN treasure chest in the cell at (x, y, z). The body is
+ * the shut chest's box (same footprint, same height — what a kid stands on
+ * does not change when a lid comes off); `inner` is the hollow inside it,
+ * whose floor is where the treasure lies. The mesher draws both.
+ */
+export function chestOpenBoxes(x: number, y: number, z: number): {
+  body: VoxelBox; inner: VoxelBox;
+} {
+  const rim = y + CHEST_HEIGHT;
+  const floorY = rim - CHEST_DEPTH;
+  return {
+    body: [x, y, z, x + 1, rim, z + 1],
+    inner: [x + CHEST_INSET, floorY, z + CHEST_INSET, x + 1 - CHEST_INSET, rim, z + 1 - CHEST_INSET],
+  };
+}
 
 /**
  * Cells of the *plant* atlas (cross blocks). Keep in step with PLANT_CELLS
@@ -279,18 +313,23 @@ const DEFS: BlockDef[] = [
     // A squat treasure chest (0.85 of a cell tall, painted with a brass lock).
     // A dozen or so are hidden in every world; the pet button lifts the lid and
     // out comes a random treasure (see core/treasure.ts). Opened ones stay open.
+    // Only the TOP of a chest opens, so the shut chest is the one that owns the
+    // artwork: the opened one keeps these very side and bottom cells.
     id: CHEST, name: 'Treasure Chest', icon: '📦', color: rgb(178, 122, 70),
     sideAtlasCell: ATLAS_CHEST_SIDE, capAtlasCell: ATLAS_CHEST_LID,
     bottomAtlasCell: ATLAS_CHEST_BOTTOM,
-    solid: true, opaque: true, solidHeight: 0.85,
+    solid: true, opaque: true, solidHeight: CHEST_HEIGHT,
   },
   {
     // lid up, treasure gone: it keeps looking opened forever, so nobody
-    // shakes the same chest twice
+    // shakes the same chest twice. It is the same box from outside (the same
+    // side art, the same height, so what you stand on does not change) — the
+    // difference is on top: an opening you can see down into, and the lid
+    // standing up at the back (see mesher.ts addOpenChestShape).
     id: CHEST_OPEN, name: 'Chest (open)', icon: '📦', color: rgb(151, 104, 60),
-    sideAtlasCell: ATLAS_CHEST_OPEN_SIDE, capAtlasCell: ATLAS_CHEST_OPEN_TOP,
+    sideAtlasCell: ATLAS_CHEST_SIDE, capAtlasCell: ATLAS_CHEST_OPEN_TOP,
     bottomAtlasCell: ATLAS_CHEST_BOTTOM,
-    solid: true, opaque: true, solidHeight: 0.85,
+    solid: true, opaque: true, solidHeight: CHEST_HEIGHT,
   },
   {
     // The one palette item that is a tool instead of a brick: scoop a spring

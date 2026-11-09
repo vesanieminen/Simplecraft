@@ -15,8 +15,8 @@
 
 import * as THREE from 'three';
 import {
-  ATLAS_BOUNCY, ATLAS_BRICKS, ATLAS_CELL_COUNT, ATLAS_CHEST_BOTTOM, ATLAS_CHEST_LID,
-  ATLAS_CHEST_OPEN_SIDE, ATLAS_CHEST_OPEN_TOP, ATLAS_CHEST_SIDE, ATLAS_DIRT, ATLAS_DOOR, ATLAS_DOOR_TOP, ATLAS_DYNAMITE_CAP,
+  ATLAS_BOUNCY, ATLAS_BRICKS, ATLAS_CELL_COUNT, ATLAS_CHEST_BOTTOM, ATLAS_CHEST_INSIDE, ATLAS_CHEST_LID,
+  ATLAS_CHEST_OPEN_TOP, ATLAS_CHEST_SIDE, ATLAS_DIRT, ATLAS_DOOR, ATLAS_DOOR_TOP, ATLAS_DYNAMITE_CAP,
   ATLAS_DYNAMITE_SIDE, ATLAS_GLASS, ATLAS_GLOW, ATLAS_GRASS_SIDE, ATLAS_GRASS_TOP,
   ATLAS_LEAVES, ATLAS_LOG_END, ATLAS_LOG_SIDE, ATLAS_MUSIC, ATLAS_PLANKS, ATLAS_ROCK,
   ATLAS_SAND, ATLAS_SCORCH, ATLAS_SPARKLE, ATLAS_STONE, ATLAS_WATER, ATLAS_WEAVE,
@@ -523,19 +523,19 @@ function drawChestBottom(ctx: CanvasRenderingContext2D, ox: number): void {
   outline(ctx, ox, '#33241a');
 }
 
-/** the chest with the lid up: the lid standing along the top, gold spilling out */
-function drawChestOpenSide(ctx: CanvasRenderingContext2D, ox: number): void {
-  chestBoards(ctx, ox, '#a97b45', '#7a4d22', 83);
-  rect(ctx, ox, 0, 0, S, 7, '#d9a766'); // the lid swung up
-  rect(ctx, ox, 0, 7, S, 1, '#7a4d22');
-  rect(ctx, ox, 0, 8, S, 2, '#f2c14e'); // its brass edge
-  // the dark inside, lit by what is in it
-  rect(ctx, ox, 2, 11, 28, 12, '#33241a');
-  rect(ctx, ox, 2, 11, 28, 1, '#5c4230');
-  goldPile(ctx, ox, -6);
-  ctx.fillStyle = '#fff6ac';
-  for (const [x, y] of [[6, 12], [25, 14]] as const) ctx.fillRect(ox + x, y, 1, 3);
-  outline(ctx, ox, '#6e4520');
+/** the inside of the chest's walls, seen when you look down into an opened chest */
+function drawChestInside(ctx: CanvasRenderingContext2D, ox: number): void {
+  // the inside of a box is darker and smoother than its outside: plain boards,
+  // a shadow at the bottom where the treasure lies, and the brass hinge band
+  // along the top edge where the lid used to sit
+  chestBoards(ctx, ox, '#7d5433', '#5c3d24', 89);
+  rect(ctx, ox, 0, 0, S, 3, '#a8763f');
+  rect(ctx, ox, 0, 3, S, 1, '#4c331d');
+  rect(ctx, ox, 4, 1, 4, 1, '#f2c14e'); // the lid's hinge
+  rect(ctx, ox, 24, 1, 4, 1, '#f2c14e');
+  rect(ctx, ox, 0, 26, S, 6, '#3d2a1a'); // the dark foot of the inside
+  for (const [x, y] of [[3, 27], [12, 29], [22, 27], [28, 30]] as const) rect(ctx, ox, x, y, 2, 1, '#2b1f16');
+  outline(ctx, ox, '#3d2a1a');
 }
 
 /** the same chest seen from above: dark rim, a heaped-up pile of gold and gems */
@@ -705,7 +705,7 @@ const BLOCK_ART: Record<number, CellArt> = {
   [ATLAS_CHEST_SIDE]: drawChestSide,
   [ATLAS_CHEST_LID]: drawChestLid,
   [ATLAS_CHEST_BOTTOM]: drawChestBottom,
-  [ATLAS_CHEST_OPEN_SIDE]: drawChestOpenSide,
+  [ATLAS_CHEST_INSIDE]: drawChestInside,
   [ATLAS_CHEST_OPEN_TOP]: drawChestOpenTop,
 };
 
