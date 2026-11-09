@@ -6,10 +6,11 @@
 
 import * as THREE from 'three';
 import {
-  ATLAS_CHEST_INSIDE, ATLAS_CHEST_LID, ATLAS_CHEST_OPEN_TOP, ATLAS_CELL_COUNT, ATLAS_DOOR, ATLAS_PLANKS, BlockId, blockDef,
+  ATLAS_CHEST_INSIDE, ATLAS_CHEST_LID, ATLAS_CHEST_OPEN_TOP, ATLAS_CELL_COUNT, ATLAS_DOOR, ATLAS_LADDER, ATLAS_PLANKS,
+  BlockId, blockDef,
   CHEST_INSET, CHEST_OPEN, chestOpenBoxes, isChestBlock, isCrossBlock, isDoorBlock,
-  isDoorClosedBlock, isFullCellBlock, isOpaqueBlock, isStairsBlock, isTranslucentBlock, isWaterId,
-  PLANT_ATLAS_CELLS, SAND, StairFacing, stairBoxes, VoxelBox,
+  isDoorClosedBlock, isFullCellBlock, isLadderBlock, isOpaqueBlock, isStairsBlock, isTranslucentBlock, isWaterId,
+  LadderFacing, ladderBoxes, PLANT_ATLAS_CELLS, SAND, StairFacing, stairBoxes, VoxelBox,
 } from './blocks';
 import { CHUNK, idx as worldIdx, WORLD_SY, World } from './world';
 import { waterSurfaceHeight } from './water';
@@ -224,6 +225,15 @@ export function buildChunkGeometry(
           // of the cell and the top of the box becomes an opening you can look
           // down the inside of, to the treasure lying at the bottom.
           addChestShape(tex, world, x, y, z, id);
+          continue;
+        }
+        if (isLadderBlock(id)) {
+          // A ladder is a thin plank panel nailed to one wall of its cell
+          // (ladderBoxes picks the wall from world.ladderFacing). The face
+          // buried in that wall is culled flush; the climb side shows the rungs.
+          const facing = (world.ladderFacing.get(worldIdx(x, y, z)) ?? 0) as LadderFacing;
+          addTexturedSubBox(tex, world, [x, y, z], ladderBoxes(x, y, z, facing), def.sideAtlasCell ?? ATLAS_LADDER,
+            { cullFlush: true });
           continue;
         }
 

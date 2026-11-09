@@ -1,8 +1,8 @@
 import './ui/styles.css';
 import {
-  AIR, ATLAS_CHEST_BOTTOM, ATLAS_CHEST_INSIDE, ATLAS_CHEST_LID, ATLAS_CHEST_OPEN_TOP, ATLAS_CHEST_SIDE, ATLAS_CELL_COUNT,
+  AIR, ATLAS_CHEST_BOTTOM, ATLAS_CHEST_INSIDE, ATLAS_CHEST_LID, ATLAS_CHEST_OPEN_TOP, ATLAS_CHEST_SIDE, ATLAS_CELL_COUNT, ATLAS_LADDER,
   BUCKET, CHEST, CHEST_OPEN, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, DYNAMITE, FLOWER_RED, FLOWER_YELLOW,
-  GLASS, GRASS, isBucket, LEAVES, PLANKS, ROCK, SAND, SAPLING, SCORCH, SLAB, STAIRS, STONE, TALLGRASS, WATER, WATER_FLOW, WOOD,
+  GLASS, GRASS, isBucket, LADDER, LEAVES, PLANKS, ROCK, SAND, SAPLING, SCORCH, SLAB, STAIRS, STONE, TALLGRASS, WATER, WATER_FLOW, WOOD,
 } from './core/blocks';
 import { WORLD_SX, WORLD_SY, WORLD_SZ, CHUNK } from './core/world';
 import { buildChunkGeometry } from './core/mesher';
@@ -26,7 +26,7 @@ async function boot(): Promise<void> {
       chunkGeometry: typeof buildChunkGeometry;
       isTool: (id: number) => boolean;
       /** the block atlas, so a test can tell which artwork a face really used */
-      atlas: { cells: number; side: number; lid: number; bottom: number; inside: number; treasure: number };
+      atlas: { cells: number; side: number; lid: number; bottom: number; inside: number; treasure: number; ladder: number };
       waterSurfaceAt: (x: number, y: number, z: number) => number;
       weatherNow: (kind: string) => number;
       setDayMode: (mode: string) => void;
@@ -43,7 +43,7 @@ async function boot(): Promise<void> {
     ids: {
       AIR, GRASS, STONE, SAND, ROCK, WATER, WATER_FLOW, WOOD, PLANKS, LEAVES, GLASS,
       FLOWER_RED, FLOWER_YELLOW, TALLGRASS, DYNAMITE, SCORCH, BUCKET,
-      SAPLING, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, SLAB, STAIRS, CHEST, CHEST_OPEN,
+      SAPLING, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, SLAB, STAIRS, CHEST, CHEST_OPEN, LADDER,
     },
     chunkGeometry: buildChunkGeometry,
     /**
@@ -52,7 +52,7 @@ async function boot(): Promise<void> {
      */
     atlas: {
       cells: ATLAS_CELL_COUNT, side: ATLAS_CHEST_SIDE, lid: ATLAS_CHEST_LID,
-      bottom: ATLAS_CHEST_BOTTOM, inside: ATLAS_CHEST_INSIDE, treasure: ATLAS_CHEST_OPEN_TOP,
+      bottom: ATLAS_CHEST_BOTTOM, inside: ATLAS_CHEST_INSIDE, treasure: ATLAS_CHEST_OPEN_TOP, ladder: ATLAS_LADDER,
     },
     /** is this block id one of the palette's tools (the 🪣)? */
     isTool: (id: number) => isBucket(id),

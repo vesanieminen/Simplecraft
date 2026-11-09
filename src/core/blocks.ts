@@ -52,13 +52,21 @@ export const WATER_FLOW: BlockId = 38; // travelling water: spreads, shallows an
  * the voxel grid, so nothing about the world's storage changes.
  */
 export const BUCKET: BlockId = 39;
+/**
+ * The climbing ladder (core/physics.ts onLadder, players/playerEntity.ts):
+ * NOT solid — you walk into it, not onto it — and it never fills its cell:
+ * a thin panel stands flush against the wall behind it, which way it points
+ * living in world.ladderFacing (see LadderFacing below). Hold jump to climb
+ * up, hold the sneak/dive button to climb down, hold nothing to cling.
+ */
+export const LADDER: BlockId = 40;
 
 /**
  * Cells of the procedural *block* texture atlas (see render/textures.ts).
  * One 32x32 cell per block face style, laid out in a single row; the mesher
  * divides u by ATLAS_CELL_COUNT, so keep it in step with BLOCK_CELLS there.
  */
-export const ATLAS_CELL_COUNT = 28;
+export const ATLAS_CELL_COUNT = 29;
 export const ATLAS_DYNAMITE_SIDE = 0;
 export const ATLAS_DYNAMITE_CAP = 1;
 export const ATLAS_GRASS_TOP = 2;
@@ -94,6 +102,8 @@ export const ATLAS_CHEST_BOTTOM = 25;
 export const ATLAS_CHEST_INSIDE = 26;
 /** the treasure sitting at the bottom of an opened chest */
 export const ATLAS_CHEST_OPEN_TOP = 27;
+/** a climbing ladder: two upright rails and the rungs between them */
+export const ATLAS_LADDER = 28;
 
 /**
  * How a treasure chest is built. It is not a cube, and only its TOP ever
@@ -332,6 +342,14 @@ const DEFS: BlockDef[] = [
     solid: true, opaque: true, solidHeight: CHEST_HEIGHT,
   },
   {
+    // A climbing ladder: not solid (you walk into it, not onto it), a thin
+    // panel against the wall you aimed at. Hold jump to climb, hold sneak to
+    // slide down (see playerEntity's climbing branch).
+    id: LADDER, name: 'Ladder', icon: '🧗', color: rgb(210, 168, 110),
+    sideAtlasCell: ATLAS_LADDER,
+    solid: false, opaque: false,
+  },
+  {
     // The one palette item that is a tool instead of a brick: scoop a spring
     // with it, pour the spring out somewhere else (core/bucket.ts). The
     // player carries it, so it never lands in the voxel grid.
@@ -394,7 +412,7 @@ export type SoundFamily = 'wood' | 'stone' | 'soft' | 'glass' | 'plant';
 
 const SOUND_FAMILIES = new Map<BlockId, SoundFamily>([
   [WOOD, 'wood'], [PLANKS, 'wood'], [SLAB, 'wood'], [STAIRS, 'wood'], [CHEST, 'wood'], [CHEST_OPEN, 'wood'],
-  [MUSIC, 'wood'], [DYNAMITE, 'wood'],
+  [MUSIC, 'wood'], [DYNAMITE, 'wood'], [LADDER, 'wood'],
   [STONE, 'stone'], [BRICKS, 'stone'], [ROCK, 'stone'],
   [GRASS, 'soft'], [DIRT, 'soft'], [SAND, 'soft'], [SCORCH, 'soft'], [C_WHITE, 'soft'], [BOUNCY, 'soft'],
   [GLASS, 'glass'], [GLOW, 'glass'], [SPARKLE, 'glass'],
@@ -429,6 +447,10 @@ export function isChestBlock(id: BlockId): boolean {
 export function isBucket(id: BlockId): boolean {
   return id === BUCKET;
 }
+/** a climbing ladder — never solid, always leaning against a wall */
+export function isLadderBlock(id: BlockId): boolean {
+  return id === LADDER;
+}
 /** collidable height of a block id in its cell (0 for non-solids, 0.5 for a slab) */
 export function solidHeightOf(id: BlockId): number {
   if (id === AIR) return 0;
@@ -462,6 +484,30 @@ export function rotateStairFacing(facing: number): StairFacing {
 }
 
 /**
+ * Which way a ladder leans: the direction its CLIMBING side faces — away
+ * from the wall it is nailed to. 0 = climbs from +x (panel against the -x
+ * wall), 1 = -x, 2 = +z, 3 = -z. Stored in world.ladderFacing.
+ */
+export type LadderFacing = 0 | 1 | 2 | 3;
+
+/** how thick a ladder's plank panel is, in cells (thin — a real ladder is) */
+export const LADDER_DEPTH = 0.22;
+
+/**
+ * The ladder's plank panel inside the cell at (x, y, z): full height, full
+ * width, but only LADDER_DEPTH thick, standing against the wall the facing
+ * points away from. Physics passes through it; the mesher paints it.
+ */
+export function ladderBoxes(x: number, y: number, z: number, facing: LadderFacing): VoxelBox {
+  const f = facing >= 0 && facing <= 3 ? facing : 0;
+  const d = LADDER_DEPTH;
+  if (f === 0) return [x, y, z, x + d, y + 1, z + 1]; // climbed from +x: panel hugs the -x wall
+  if (f === 1) return [x + 1 - d, y, z, x + 1, y + 1, z + 1];
+  if (f === 2) return [x, y, z, x + 1, y + 1, z + d];
+  return [x, y, z + 1 - d, x + 1, y + 1, z + 1];
+}
+
+/**
  * Blocks offered in the child-friendly creative palette (in order). The bucket
  * stands where the water source used to: water is *poured* from a bucket now,
  * never set down straight from a menu, so kids have to walk a puddle home.
@@ -469,7 +515,7 @@ export function rotateStairFacing(facing: number): StairFacing {
  * `paletteFor`, which is the palette the game actually shows.
  */
 export const PALETTE: BlockId[] = [
-  GRASS, DIRT, STONE, SAND, WOOD, PLANKS, STAIRS, SLAB, DOOR, BRICKS, GLASS, LEAVES,
+  GRASS, DIRT, STONE, SAND, WOOD, PLANKS, STAIRS, SLAB, DOOR, LADDER, BRICKS, GLASS, LEAVES,
   BUCKET,
   SAPLING, FLOWER_RED, FLOWER_YELLOW, TALLGRASS,
   GLOW, BOUNCY, SPARKLE, MUSIC, DYNAMITE,

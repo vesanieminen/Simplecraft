@@ -454,6 +454,7 @@ export function animateAvatar(
   parts: AvatarParts, walkPhase: number, moving: boolean, airborne: boolean, dt: number,
   crouching = false,
   swimming = false,
+  climbing = false,
 ): void {
   const target = moving ? Math.sin(walkPhase) : Math.sin(walkPhase) * 0.15;
   let armA = airborne ? 1.1 : target * 0.85;
@@ -462,7 +463,7 @@ export function animateAvatar(
   // four limb targets: walking strides them in opposite pairs, swimming pulls
   // both arms together, and a sneak shuffles under a forward-tipped body
   let armL = armA, armR = -armA, legL = legA, legR = -legA;
-  const folded = crouching && !airborne && !swimming;
+  const folded = crouching && !airborne && !swimming && !climbing;
   // the whole-body channels the crouch owns (both are untouched otherwise):
   // `body` tips the kid forward over planted feet, and dips a hair per stride
   let bodyLean = 0, bodyDip = 0;
@@ -472,6 +473,15 @@ export function animateAvatar(
     legA = 0.15 + Math.sin(walkPhase * 2.6) * 0.55; // flutter kick
     armL = armR = armA;
     legL = legR = legA;
+  } else if (climbing) {
+    // Hand over hand: the arms reach up in opposite pairs (a limb swings
+    // FORWARD/up for a negative x rotation), and a knee lifts with the opposite
+    // arm. The body stays upright — you climb a ladder facing it.
+    const s = Math.sin(walkPhase);
+    armL = -2.3 + s * 0.7;
+    armR = -2.3 - s * 0.7;
+    legL = -0.15 - s * 0.5;
+    legR = -0.15 + s * 0.5;
   } else if (folded) {
     // How the big game sells a sneak, adapted to a rig with no knees: `body`
     // pivots at the feet, so tipping it forward plants the feet, lifts the
@@ -500,7 +510,7 @@ export function animateAvatar(
   // z-roll of the arms: flung out while falling, tucked in for the breaststroke,
   // braced a touch out to the sides when sneaking (same sign convention as the
   // fall) — enough to read as balance, not enough to look like a scarecrow
-  const elbowZ = airborne ? -0.5 : swimming ? 0.35 : folded ? -0.12 : 0;
+  const elbowZ = airborne ? -0.5 : swimming ? 0.35 : folded ? -0.12 : climbing ? 0.12 : 0;
   parts.leftArm.rotation.z = elbowZ;
   parts.rightArm.rotation.z = -elbowZ;
 
