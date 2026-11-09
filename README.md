@@ -262,9 +262,15 @@ that *happens*:
   adopts that spot, voice included.
 - **💎 A GIANT diamond** — twenty-five stars, and by far the rarest find.
 
-An opened chest **stays opened** (it is drawn with its lid up and its gold
-showing): press the button again and it tells you the treasure is already
-yours, so nobody shakes the same chest twice. Chests are also in the block
+An opened chest **stays opened**: press the button again and it tells you the
+treasure is already yours, so nobody shakes the same chest twice. And it looks
+opened the way a chest really does — **only the top opens**. The box keeps the
+exact same sides and height it had when it was shut (so it is still the same
+thing to stand on), while its top becomes an opening you can look down into:
+a plank rim, the inside of the walls, and the gold still lying at the bottom
+of them, with the lid hinged at the back and leaning up behind. Stack a block
+on the opening and the inside tucks away — nobody draws an interior that
+nothing can see. Chests are also in the block
 palette, so children can hide their own — and one chest per (world, seed) pair
 is a fair game of hide and seek.
 

@@ -297,6 +297,29 @@ event. Renaming a storage key orphans the family's existing saves.
   (Weather 6, Day & Night 7, Treasure Chests 8) sit **after** Waiting Players
   so row pins 0–5 hold; **Back is now index 9** — `selectRow(6)` would hit
   Weather. Chests still never appear in `FAVORITES`.
+- An opened chest opens **only at the top** (Nov 2026 user complaint: the old
+  one painted an open lid down its SIDES). `CHEST_OPEN` keeps CHEST's
+  `sideAtlasCell`/`bottomAtlasCell` and both use `CHEST_HEIGHT` — from the
+  side they are the same box; `chestOpenBoxes` (blocks.ts) is body + `inner`
+  (walls `CHEST_INSET` in, treasure at `CHEST_DEPTH` below the rim).
+  `mesher.addChestShape`: open body = `addTexturedSubBox` with
+  `skip: faceSkip(FACE_PY)`; then 4 rim strips (`atlasUvs` samples a SLICE of
+  a cell — a thin strip shows a thin slice of planks, never the whole tile
+  stretched), `addInnerFace` for the 4 walls seen from INSIDE + the treasure
+  quad, all skipped when `isFullCellBlock` sits above (never draw an interior
+  nobody can see). The LID is pure render, `addLidPlate`: two quads (art side
+  `ATLAS_CHEST_LID`, shaded side `ATLAS_CHEST_INSIDE`) hinged on the −z rim
+  and leaning back into the cell ABOVE — it's the only chest part that leaves
+  the cell, so skip it when `(x, y+1, z−1)` is full, and give up any test that
+  assumes chests never render outside their cell (the new chest test's z
+  window is −0.6..+1.6 for this reason). Atlas cell 26 is repurposed
+  `ATLAS_CHEST_OPEN_SIDE` → `ATLAS_CHEST_INSIDE` (`drawChestOpenSide` is
+  gone); `ATLAS_CELL_COUNT` stays 28. The sealed-cube quad test now asserts
+  `chest − openChest === 1` (the lid top is the only difference in there),
+  and `__lbw.atlas` exposes the chest cell ids so the geometry test can
+  decode a face's artwork from its UV (`cell = floor(u × cells)`).
+  `scripts/chest-shot.ts` parks a camera (hides the avatar) for still lifes
+  of shut/opened from three angles.
 - The bucket (`core/bucket.ts`, `BUCKET=39` where WATER sat in `PALETTE`):
   every kid carries one, `LocalPlayer.bucketFull` is **session-only**. Only a
   WATER source fills it; pouring sets a new WATER source at the aim's
