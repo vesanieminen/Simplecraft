@@ -4,14 +4,14 @@
  * one step shallower (core depth 0..24) and ONLY where there is ground under
  * the target cell. Travelling water (WATER_FLOW) shows how deep its supply is:
  * it shallows as it spreads, piles into pits, and — when its chain back to a
- * source is broken — dries up from the shallow end inward, in about a second.
- * That is also what pulling a spring out with a bucket looks like: the flood
- * runs home.
+ * source is broken — dries up from the shallow end inward. That is also what
+ * pulling a spring out with a bucket looks like: the flood runs home.
  *
- * Falling water plunges (see FALL_REACH), so digging a shaft under a puddle
- * empties it down the shaft in one step instead of creeping down it. Over a
- * ledge, water drops rather than leaning out: the hillside gets a waterfall,
- * not a shelf of blue slabs hanging in the air.
+ * Falling water plunges the whole way in one step, so digging a shaft under a
+ * puddle empties it down the shaft instead of creeping down it. Over a ledge,
+ * water drops rather than leaning out, and a cell left in mid-air feeds only
+ * the column under it (see `pouring`): the hillside gets a waterfall, not a
+ * shelf of blue slabs hanging in the air.
  *
  * The sim is event-driven through `World.onCellChanged`: only cells near a
  * change get re-evaluated, so the sea sits perfectly still until somebody
