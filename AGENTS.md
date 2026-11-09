@@ -130,6 +130,12 @@ event. Renaming a storage key orphans the family's existing saves.
   2D canvas in the page and counting offending pixels (see `blackPixels` in
   `tests/e2e/game.spec.ts`); `gl.readPixels` is useless there because the
   drawing buffer is already swapped.
+- Block ids a test reaches for must exist on `__lbw.ids` (`src/main.ts`) —
+  `ids.MISSING` handed back `undefined`, which `World.set` wrote as AIR, so a
+  test could "place" nothing and still pass off whatever geometry the scene
+  already held (`world.set` now refuses a non-integer id). When an assertion
+  depends on a block being drawn: place it, read the voxel back, and let a few
+  frames pass — chunk remeshing is budgeted a few chunks per frame.
 - Physical gamepad behaviour is verified manually (checklist in the README);
   virtual pads in tests exercise the same input abstraction, which is not a
   substitute for hardware QA.
@@ -139,8 +145,10 @@ event. Renaming a storage key orphans the family's existing saves.
   input abstraction, so they are a good regression net — but re-check the
   README's manual checklist with real pads after any input change (newly added
   Leave / Waiting-Players rows, the water-jump fix, the slab / real-stairs /
-  treasure-chest blocks and the new B/◯ **crouch toggle** still owe the couch
-  a turn).
+  treasure-chest blocks, and **this branch's whole set**: the **LT = pet · RT =
+  build · X = break** trigger remap, the 🪣 bucket on both triggers, the new
+  Weather / Day & Night / Treasure-Chests rows (Back is row 9 now) and the
+  crouch **pose**) still owe the couch a turn.
 - Partial blocks share one shape language: `BlockDef.solidHeight` is both the
   squat box the mesher paints (`mesher.addTexturedSubBox`) and the box
   `physics.solidBoxesOf` collides with (slab 0.5, treasure chest 0.85). Stairs
