@@ -73,10 +73,12 @@ const SURFACE_STEP = 0.06;
 export function waterSurfaceHeight(world: World, x: number, y: number, z: number): number {
   const id = world.get(x, y, z);
   if (!isWaterId(id)) return 0;
-  if (isWaterId(world.get(x, y + 1, z))) return 1; // submerged: it fills its cell, the surface is higher up
+  if (isWaterId(world.get(x, y + 1, z))) return 1; // submerged: the surface is higher up the column
   const below = world.get(x, y - 1, z);
   if (!isWaterId(below) && solidHeightOf(below) <= 0) return 1; // falling: a full column
   if (id === WATER) return SOURCE_SURFACE;
+  if (isWaterId(below)) return SOURCE_SURFACE; // the brim of a body of water, not a sheet
+  // a one-cell sheet lying on the ground: the reach it is at says how thin
   const level = world.flowLevelAt(x, y, z);
   return Math.max(MIN_WATER_SURFACE, SOURCE_SURFACE - level * SURFACE_STEP);
 }
@@ -84,6 +86,12 @@ export function waterSurfaceHeight(world: World, x: number, y: number, z: number
 export class WaterFlow {
   /** flat indices of water cells that need re-thinking on the next step */
   private dirty = new Set<number>();
+  /**
+   * Cells a drop left in mid-air. They are water, they may even have water
+   * under them, but they are falling and must not spread sideways (see
+   * `spread`). Cleared as soon as a cell comes to rest on solid ground.
+   */
+  private pouring = new Set<number>();
   /** how deep into a drain cascade this step currently is (see `drain`) */
   private cascade = 0;
   private acc = 0;
@@ -93,6 +101,7 @@ export class WaterFlow {
   /** forget everything (a new world is being built) */
   reset(): void {
     this.dirty.clear();
+    this.pouring.clear();
     this.acc = 0;
   }
 
@@ -169,6 +178,7 @@ export class WaterFlow {
 
   private drain(x: number, y: number, z: number): void {
     this.world.set(x, y, z, AIR);
+    this.pouring.delete(idx(x, y, z));
     this.notify(x, y, z);
     // Whatever was upstream just lost the only thing holding it up, so let it
     // know in the SAME step: that is the wave that runs back up a cut channel
@@ -250,36 +260,47 @@ export class WaterFlow {
    * way to the next flat, and runs from there.
    */
   private spread(x: number, y: number, z: number, level: number): void {
-    if (!this.supported(x, y, z)) {
-      // Falling water goes down and nowhere else, and it falls the whole way in
-      // one step: dig a shaft under a pond and the cells above it empty into
-      // the shaft instead of creeping down it one block at a time.
-      let fy = y;
-      while (fy > 1) {
-        if (!this.setFlow(x, fy - 1, z, level)) break;
-        fy--;
-      }
+    const i = idx(x, y, z);
+    if (this.standsOnGround(x, y, z)) this.pouring.delete(i); // settled: it may spread again
+    // Falling water goes down and nowhere else, and it falls the whole way in
+    // one step. That is the 90° the old model got wrong: because a drop's own
+    // cells were free to spread sideways from mid-air, one spring at the top of
+    // a hill backed the whole slope up into a shallow lake and left blue plates
+    // hanging over the steps. A cell in mid-air — or one a drop put there —
+    // only ever feeds the column below it, so the water lands, and only then
+    // starts running again from where it landed.
+    if (!this.supported(x, y, z) || this.pouring.has(i)) {
+      this.fall(x, y, z, level);
       return;
     }
     if (level >= MAX_WATER_LEVEL) return; // the safety bound, not a ring the player sees
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
       const tx = x + dx, tz = z + dz;
       if (this.supported(tx, y, tz)) this.setFlow(tx, y, tz, level + 1);
-      else this.pour(tx, y, tz, level + 1); // out of ground: over the edge, straight down
+      else this.fall(tx, y, tz, level + 1); // out of ground: over the edge, straight down
     }
   }
 
   /**
-   * The drop: fill a column from `y` down to wherever it finally finds ground,
+   * A drop: fill a column from `y` down to wherever it finally finds ground,
    * one falling cell per block so the waterfall draws as one continuous ribbon
-   * instead of a dotted line, then let the landing cell spread from there.
+   * instead of a dotted line. Cells left in mid-air are marked as falling (see
+   * `spread`); the one that lands is not, so that is where a stream starts to
+   * spread out again.
    */
-  private pour(x: number, y: number, z: number, level: number): void {
+  private fall(x: number, y: number, z: number, level: number): void {
     let fy = y;
-    while (fy > 1 && !this.supported(x, fy, z)) {
-      if (!this.setFlow(x, fy, z, level)) return; // blocked, or already at least this deep
+    while (fy > 1) {
+      if (!this.setFlow(x, fy, z, level)) break; // a wall, or a deeper source
+      const j = idx(x, fy, z);
+      if (this.standsOnGround(x, fy, z)) this.pouring.delete(j);
+      else this.pouring.add(j);
       fy--;
     }
-    if (fy > 1) this.setFlow(x, fy, z, level); // land on the first cell with a footing
+  }
+
+  /** solid ground directly under this cell — water's idea of a footing */
+  private standsOnGround(x: number, y: number, z: number): boolean {
+    return solidHeightOf(this.world.get(x, y - 1, z)) > 0;
   }
 }

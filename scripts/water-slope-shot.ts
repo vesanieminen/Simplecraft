@@ -33,21 +33,22 @@ await page.evaluate(() => {
   const { AIR, WATER, STONE, GRASS } = (window as any).__lbw.ids;
   const p = game.players[0];
   const cx = Math.round(p.entity.pos.x), cz = Math.round(p.entity.pos.z);
-  const base = Math.floor(p.entity.pos.y);
-  for (let x = cx - 14; x <= cx + 22; x++) {
-    for (let z = cz - 8; z <= cz + 8; z++) {
-      const top = x <= cx ? base : Math.max(base - 5, base - Math.floor((x - cx) / 3));
-      for (let y = 1; y < base + 12; y++) S.set(x, y, z, y <= top ? (y === top ? GRASS : STONE) : AIR);
+  const G = S.surfaceY(cx, cz); // one fixed ground level, so the stairs are stairs
+  for (let x = cx - 10; x <= cx + 18; x++) {
+    for (let z = cz - 2; z <= cz + 7; z++) {
+      const top = x <= cx ? G : Math.max(G - 6, G - Math.floor((x - cx) / 3));
+      const basin = x >= cx + 15;
+      for (let y = 1; y <= G + 8; y++) {
+        if (basin && y > G - 6 && y <= top) S.set(x, y, z, AIR); // the hole
+        else if (basin && y === G - 6) S.set(x, y, z, STONE); // its floor
+        else S.set(x, y, z, y <= top ? (y === top ? GRASS : STONE) : AIR);
+      }
     }
   }
-  // the basin at the foot, walled so the flood has somewhere to collect
-  for (let x = cx + 16; x <= cx + 22; x++) for (let z = cz - 8; z <= cz + 8; z++) {
-    for (let y = base - 8; y <= base - 3; y++) S.set(x, y, z, AIR);
-    for (let z2 = cz - 8; z2 <= cz + 8; z2++) S.set(x, base - 9, z2, STONE);
-  }
-  // and a spring up top
-  S.set(cx - 2, base + 1, cz, WATER);
-  p.entity.pos.set(cx - 6.5, base + 1.05, cz);
+  // a spring up top, and the kid parked on the plateau to watch it
+  S.set(cx - 2, G + 1, cz, WATER);
+  p.entity.pos.set(cx - 6.5, G + 1.05, cz);
+  p.entity.vel.set(0, 0, 0);
   p.firstPerson = false;
   p.cameraDist = 6;
   p.entity.yaw = Math.PI / 2;
@@ -58,15 +59,18 @@ await page.evaluate(() => {
     orig(...args);
     if (lp.ghost) lp.ghost.visible = false;
     if (lp.outline) lp.outline.visible = false;
+    // a low side view along the stairs: this is where the old model showed off
+    // its floating blue plates, so it is the view worth shooting
     const e = lp.entity;
-    lp.camera.position.set(e.pos.x - 2, e.pos.y + 6.5, e.pos.z + 16);
-    lp.camera.lookAt(e.pos.x + 10, e.pos.y - 1.5, e.pos.z);
+    lp.camera.position.set(e.pos.x + 2, e.pos.y + 2.2, e.pos.z + 13);
+    lp.camera.lookAt(e.pos.x + 12, e.pos.y - 2.5, e.pos.z);
   };
   void orig;
 });
 
-// let the sim run a few game seconds, then report where the water actually is
-await page.waitForTimeout(4000);
+// let the sim run: terrain carving dirties a lot of cells, and the flow budget
+// works through them a few hundred at a time
+await page.waitForTimeout(16000);
 console.log(await page.evaluate(() => {
   const w = (window as any).__lbw.game.world;
   const { WATER, WATER_FLOW } = (window as any).__lbw.ids;
@@ -78,7 +82,13 @@ console.log(await page.evaluate(() => {
     let s = '';
     for (let x = cx - 12; x <= cx + 22; x++) {
       const id = w.get(x, y, cz);
-      s += id === WATER ? 'S' : id === WATER_FLOW ? String(w.waterLevel.get((x * sz + cz) * sy + y) ?? 9 % 10) : '.';
+      if (id === WATER) { s += 'S'; continue; }
+      if (id === WATER_FLOW) {
+        const l = w.waterLevel.get((x * sz + cz) * sy + y) ?? 9;
+        s += l < 10 ? String(l) : String.fromCharCode(97 + (l - 10)); // a=10 … o=24
+        continue;
+      }
+      s += w.get(x, y, cz) === 0 ? '.' : '#';
     }
     if (/[S\d]/.test(s)) rows.push(`y${String(y).padStart(2)} ${s}`);
   }

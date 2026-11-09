@@ -45,11 +45,19 @@ export class ChunkMeshManager {
     /**
      * Water: its own tiling sheet, drifting all the time (see tickWater) so a
      * lake shimmers and a flood reads as moving water.
+     *
+     * `depthWrite` is ON, deliberately. With it off (the reflexive setting for
+     * a transparent material) every surface of every cell in a body of water
+     * blended into every other one — the top of each cell, the top of the cell
+     * under it, all four sides — and a sheet a few cells deep drew as a stack of
+     * floating glass plates instead of one body. Writing depth leaves the top
+     * surface the only thing you see, which is how blocky water is supposed to
+     * read.
      */
     water: new THREE.MeshLambertMaterial({
       vertexColors: true,
       map: waterTexture(),
-      transparent: true, opacity: 0.78, depthWrite: false,
+      transparent: true, opacity: 0.78, depthWrite: true,
     }),
   };
 

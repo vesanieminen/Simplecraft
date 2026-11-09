@@ -1481,6 +1481,103 @@ test('water flows: a dug channel floods from the source, shallows with reach, fa
   }, { fx, fz, gy, grass: ids.GRASS });
   await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); });
 });
+
+test('water on a slope runs DOWN it: no blue plates hanging in the air, no six-cell ring', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  const site = await clearRunway(page);
+  const { fx, fz, gy } = site;
+
+  // a staircase cut down through the meadow, two cells per step, inside a
+  // full-height stone caisson with a sealed floor (see the flow test: on this
+  // branch every pond flows, so a course only trusts water it poured itself)
+  const x0 = fx + 2, x1 = fx + 14;
+  await page.evaluate((arg: {
+    x0: number; x1: number; z0: number; z1: number; gy: number;
+    air: number; stone: number; water: number;
+  }) => {
+    const S = (window as any).__lbw.game.world;
+    const SY: number = (window as any).__lbw.dims.sy;
+    for (let x = arg.x0 - 2; x <= arg.x1 + 2; x++) {
+      for (let z = arg.z0 - 2; z <= arg.z1 + 2; z++) {
+        const ring = x === arg.x0 - 2 || x === arg.x1 + 2 || z === arg.z0 - 2 || z === arg.z1 + 2;
+        for (let y = 1; y < SY; y++) if (ring) S.set(x, y, z, arg.stone);
+      }
+    }
+    for (let x = arg.x0 - 1; x <= arg.x1 + 1; x++) {
+      for (let z = arg.z0 - 1; z <= arg.z1 + 1; z++) {
+        const top = arg.gy - Math.floor((x - arg.x0) / 2); // the staircase
+        for (let y = 1; y < SY; y++) S.set(x, y, z, y <= top ? arg.stone : arg.air);
+      }
+    }
+    S.set(arg.x0, arg.gy + 1, arg.z0, arg.water); // a spring at the top step
+  }, { x0, x1, z0: fz, z1: fz, gy, air: ids.AIR, stone: ids.STONE, water: ids.WATER });
+
+  // the flood has to reach the bottom step, twelve cells downstream and six
+  // blocks below the spring — three times past the reach cap the old model drew
+  await page.waitForFunction((arg: { x: number; y: number; z: number; flow: number }) =>
+    (window as any).__lbw.game.world.get(arg.x, arg.y, arg.z) === arg.flow,
+  { x: x1, y: gy - 6 + 1, z: fz, flow: ids.WATER_FLOW }, { timeout: 30000 });
+
+  // and every wet cell must either be standing on something or be on its way
+  // down: that is the whole complaint. The old sim let water spread sideways
+  // from mid-air, so a hillside flood drew as a diagonal stack of blue plates
+  // with nothing under them.
+  const audit = await page.evaluate((arg: {
+    x0: number; x1: number; z0: number; z1: number; y0: number; y1: number;
+  }) => {
+    const w = (window as any).__lbw.game.world;
+    const { AIR, WATER, WATER_FLOW } = (window as any).__lbw.ids;
+    const wet = (x: number, y: number, z: number) => {
+      const id = w.get(x, y, z);
+      return id === WATER || id === WATER_FLOW;
+    };
+    const out = { wetCells: 0, hanging: [] as string[], falling: 0 };
+    for (let x = arg.x0; x <= arg.x1; x++) for (let z = arg.z0; z <= arg.z1; z++) {
+      for (let y = arg.y1; y >= arg.y0; y--) {
+        if (!wet(x, y, z)) continue;
+        out.wetCells++;
+        const below = w.get(x, y - 1, z);
+        if (below !== AIR && !wet(x, y - 1, z)) continue; // solid footing
+        if (wet(x, y - 1, z)) continue; // standing on settled water
+        if (wet(x, y + 1, z)) { out.falling++; continue; } // a waterfall cell: falling
+        out.hanging.push(`${x},${y},${z}`);
+      }
+    }
+    return out;
+  }, { x0: x0 - 1, x1: x1 + 1, z0: fz - 1, z1: fz + 1, y0: gy - 8, y1: gy + 3 });
+
+  expect(audit.wetCells, 'the staircase got wet').toBeGreaterThan(12);
+  expect(audit.hanging, `water hanging in the air at ${audit.hanging.join(' ')}`).toEqual([]);
+
+  // scoop the spring and the whole slope dries: no cell on the hill can hold
+  // water up once the chain back to the water is cut
+  await page.evaluate((arg: { x: number; y: number; z: number; air: number }) => {
+    (window as any).__lbw.game.world.set(arg.x, arg.y, arg.z, arg.air);
+  }, { x: x0, y: gy + 1, z: fz, air: ids.AIR });
+  await page.waitForFunction((arg: { x0: number; x1: number; z: number; y0: number; y1: number; water: number; flow: number }) => {
+    const w = (window as any).__lbw.game.world;
+    for (let x = arg.x0; x <= arg.x1; x++) {
+      for (let y = arg.y0; y <= arg.y1; y++) {
+        const id = w.get(x, y, arg.z);
+        if (id === arg.water || id === arg.flow) return false;
+      }
+    }
+    return true;
+  }, { x0, x1, z: fz, y0: gy - 7, y1: gy + 2, water: ids.WATER, flow: ids.WATER_FLOW }, { timeout: 30000 });
+
+  // tidy up so later tests still find clean grass near spawn
+  await page.evaluate((arg: { x0: number; x1: number; z: number; gy: number; grass: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let x = arg.x0 - 2; x <= arg.x1 + 2; x++) {
+      for (let z = arg.z - 2; z <= arg.z + 2; z++) S.set(x, arg.gy, z, arg.grass);
+    }
+  }, { x0, x1, z: fz, gy, grass: ids.GRASS });
+  await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); });
+});
 /** opens Grown-Up Settings, switches Freeze, and closes the menu again */
 async function setFreeze(page: Page, on: boolean): Promise<void> {
   await tap(page, 'menu');
