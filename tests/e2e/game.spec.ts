@@ -2642,6 +2642,22 @@ test('a ladder: walk into it, hold jump to climb up, sneak to climb down, get on
   expect(afterDown).toBeLessThan(fromY - 1.5); // slid down more than a block and a half
   expect(afterDown).toBeGreaterThanOrEqual(site.G + 0.99); // and the meadow catches them
 
+  // and the kid LOOKS like they're climbing: upright body, arms reaching up
+  // over the head (the e2e measures the drawn matrices, not screenshots)
+  const pose = await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    const a = e.avatar;
+    return {
+      climbing: e.climbingNow,
+      armL: a.leftArm.rotation.x, armR: a.rightArm.rotation.x,
+      groupScaleY: a.group.scale.y, bodyScaleY: a.body.scale.y,
+    };
+  });
+  expect(pose.climbing).toBe(true); // still holding the rungs at the foot of the ladder
+  expect(Math.min(pose.armL, pose.armR), 'an arm reaches up').toBeLessThan(-1.6);
+  expect(pose.groupScaleY, 'a climb is a pose, never a squash').toBeCloseTo(1, 2);
+  expect(pose.bodyScaleY).toBeCloseTo(1, 2);
+
   // the save carries the ladder AND which wall it leans on (version 5)
   const saved = await page.evaluate(async (s: { x: number; z: number; G: number }) => {
     const game = (window as any).__lbw.game;

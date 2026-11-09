@@ -149,6 +149,37 @@ event. Renaming a storage key orphans the family's existing saves.
   build · X = break** trigger remap, the 🪣 bucket on both triggers, the new
   Weather / Day & Night / Treasure-Chests rows (Back is row 9 now) and the
   crouch **pose**) still owe the couch a turn.
+- Ladders (`LADDER=40`, atlas cell `ATLAS_LADDER=28`→count 29, `drawLadder`):
+  **not solid, not opaque** (you walk INTO the cell — never write a test that
+  expects to stand on one), wood sound family, palette right after DOOR, icon
+  🧗 (🪜 stays with STAIRS). A 0.22-thin panel (`blocks.LADDER_DEPTH`,
+  `ladderBoxes`) flush against the wall its CLIMB SIDE faces away from; the
+  direction lives in `world.ladderFacing` (LadderFacing 0..3), saved as
+  **version 5** (server validates 0..3 and merges like the other maps).
+  `setLadderFacing` must `touchAt` (same id, so `world.set` early-returns).
+  The mesher draws it via `addTexturedSubBox(..., { cullFlush: true })` — the
+  face buried in the wall is culled only when that neighbour is a full cell.
+  **Climbing** is a branch in `playerEntity.step` BEFORE swimming (a ladder
+  over a pond beats the water — pond tests live near spawn): `physics.onLadder`
+  (feet cell or head cell is a ladder → gravity off, cling); hold jump →
+  `CLIMB_V` up but **only while the FEET cell is a ladder** (that's what
+  stops you rising past the top rung); hold `swimDown` (same dive/crouch
+  buttons) → down; rung hand-over-hand footfalls every `STROKE_SECONDS` on
+  the LADDER id. Tap-crouch is force-cleared while climbing. **Mantel**:
+  climbing + jump, any SOLID neighbour whose `topY - pos.y <= 1.05` and
+  `canStandAt` → teleport onto it — the wall's own cells block mid-climb
+  mantels because canStandAt collides the whole body, so the top is cleared
+  first (that's the whole trick — "get on the wall" with no extra button).
+  **Placement needs a wall**: facing from aim (`game.ladderFacingFromAim`,
+  wall→cell direction, yaw fallback when aiming at a floor), refuse with red
+  particles unless the cell BEHIND (opposite the climb side) is solid or a
+  ladder, or the cell below is a ladder; pet button spins it (`rotateLadder`,
+  reuses `rotateStairFacing`). `ladderFacing.delete` on replace/remove/blast
+  (the server merge keeps deleted keys as harmless orphans — blocks decide).
+  `entity.climbingNow` is the e2e lens; `__lbw.atlas.ladder` decodes the
+  painted art off mesh UVs. The e2e restores its near-spawn wall **byte for
+  byte + saveNow** — `world.set` records mods literally, so restoring to AIR
+  saves a hole in the meadow for every later test.
 - Partial blocks share one shape language: `BlockDef.solidHeight` is both the
   squat box the mesher paints (`mesher.addTexturedSubBox`) and the box
   `physics.solidBoxesOf` collides with (slab 0.5, treasure chest 0.85). Stairs
