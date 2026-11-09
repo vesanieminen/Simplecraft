@@ -3,11 +3,11 @@
  *
  * Empty and aimed at water: it comes back full. The kid scoops the *spring*
  * (a WATER source) out of the world, and every cell that spring was feeding
- * loses its chain, so the flood runs home — shallowest cell first, working
- * back to where the bucket went in (see core/water.ts). Nothing special is
- * needed to make that order happen: the flow sim already dries the shallow
- * end of a cut-off flood first, which is exactly the reverse of how the water
- * arrived.
+ * loses its chain back to water, so the flood runs home (see core/water.ts):
+ * a travelling cell can only stand on a deeper neighbour, so with the spring
+ * gone the shallow puddles at the end of the reach are the first to fail, and
+ * the whole cut-off flood is dry within a second — the same way the big game
+ * lets a removed source empty the channel it was feeding.
  *
  * Full and aimed at a clear cell: it pours that spring back out, and the water
  * sets off spreading down and out again from where it landed.

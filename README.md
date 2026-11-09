@@ -354,11 +354,11 @@ exactly one bucket, full or empty (the name under the crosshair says which).
 - **Full, look at a gap, press build** — a new eternal spring appears right
   there, and the water sets off spreading exactly like the sea does. Moats,
   waterfalls and indoor ponds are one bucket away.
-- **Scoop the spring back out and the flood runs home**: every cell that
-  spring was feeding loses its chain and dries up — starting from the
-  shallowest, farthest cell and working backwards toward the bucket. The
-  water vanishes in the reverse of the order it arrived, because that is
-  simply how "the shallow end dries first" works.
+- **Scoop the spring back out and the flood runs home**: travelling water can
+  only stand on a deeper neighbour, so once its spring is gone the shallow
+  puddles at the end of the reach are the first to fail and the whole cut-off
+  flood is dry inside a second — the same trick the big game plays when you
+  remove a source.
 - The bucket's full/empty state is session-only, like the fish satchel:
   going home empties it.
 

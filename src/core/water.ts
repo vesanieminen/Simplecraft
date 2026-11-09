@@ -3,9 +3,10 @@
  * water into the air around it — straight down at the same depth, sideways
  * one step shallower (core depth 0..6). Travelling water (WATER_FLOW) shows
  * how deep its supply is: it shallows as it spreads, piles into pits, and —
- * when its chain back to a source is broken — dries up cell by cell, starting
- * at the shallow end and working back towards the spring. That is also what
- * pulling a spring out with a bucket looks like: the flood runs home.
+ * when its chain back to a source is broken — dries up cell by cell: the
+ * shallow puddles at the end of the reach are the first to fail, and the
+ * whole cut-off flood is gone within a second. That is also what pulling a
+ * spring out with a bucket looks like: the flood runs home.
  *
  * Falling water plunges (see FALL_REACH), so digging a shaft under a puddle
  * empties it down the shaft in one step instead of creeping down it.

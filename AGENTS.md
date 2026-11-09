@@ -289,8 +289,11 @@ event. Renaming a storage key orphans the family's existing saves.
   every kid carries one, `LocalPlayer.bucketFull` is **session-only**. Only a
   WATER source fills it; pouring sets a new WATER source at the aim's
   `px/py/pz`. Digging with a bucket scoops; WATER_FLOW still breaks normally.
-  The reverse-order drain is the flow sim's own shallowest-first drying — no
-  extra code. e2e: 'the water bucket scoops a spring…' drives it through
+  The drain-back is the flow sim's own cut-off drying (levels climb until they
+  pass the reach cap) — no extra code, and the whole channel is dry within a
+  second. Don't claim a per-cell reverse wave in docs or tests: the levels
+  re-equilibrate across the pool first, so the dry-out order is ±1 step and
+  not assertable. e2e: 'the water bucket scoops a spring…' drives it through
   `__lbw.bucketAt(playerIdx, aim)` with exact RayHits.
 - Interaction is **LT / L2** (`BUTTON_MAP` 6→interact, 7→place, 2→remove;
   keyboard E/R-Click/L-Click unchanged). `GAMEPAD_BUTTON_MAP` is exported and
