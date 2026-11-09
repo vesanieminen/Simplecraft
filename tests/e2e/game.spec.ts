@@ -1493,8 +1493,18 @@ test('water on a slope runs DOWN it: no blue plates hanging in the air, no six-c
 
   // a staircase cut down through the meadow, two cells per step, inside a
   // full-height stone caisson with a sealed floor (see the flow test: on this
-  // branch every pond flows, so a course only trusts water it poured itself)
+  // branch every pond flows, so a course only trusts water it poured itself).
+  // The site is snapshotted first and put back exactly at the end — this course
+  // digs DOWN and walls itself in, and a walled pit by spawn strands the next
+  // test's kid where it cannot walk.
   const x0 = fx + 2, x1 = fx + 14;
+  const box = { x0: x0 - 2, x1: x1 + 2, z0: fz - 2, z1: fz + 2, y0: gy - 14, y1: gy + 14 };
+  const before = await page.evaluate((b: typeof box) => {
+    const S = (window as any).__lbw.game.world;
+    const out: number[] = [];
+    for (let x = b.x0; x <= b.x1; x++) for (let y = b.y0; y <= b.y1; y++) for (let z = b.z0; z <= b.z1; z++) out.push(S.get(x, y, z));
+    return out;
+  }, box);
   await page.evaluate((arg: {
     x0: number; x1: number; z0: number; z1: number; gy: number;
     air: number; stone: number; water: number;
@@ -1569,13 +1579,17 @@ test('water on a slope runs DOWN it: no blue plates hanging in the air, no six-c
     return true;
   }, { x0, x1, z: fz, y0: gy - 7, y1: gy + 2, water: ids.WATER, flow: ids.WATER_FLOW }, { timeout: 30000 });
 
-  // tidy up so later tests still find clean grass near spawn
-  await page.evaluate((arg: { x0: number; x1: number; z: number; gy: number; grass: number }) => {
+  // Put the meadow back exactly as it was, whole site box and in the same order
+  // it was captured. This course digs DOWN and walls itself in with a
+  // full-height caisson, so anything less than a restore leaves a walled pit
+  // beside spawn — and the next test's kid can't walk out of it, which is how
+  // 'grown-up menu: freeze' came back timing out on CI.
+  await page.evaluate((arg: { b: typeof box; cells: number[] }) => {
     const S = (window as any).__lbw.game.world;
-    for (let x = arg.x0 - 2; x <= arg.x1 + 2; x++) {
-      for (let z = arg.z - 2; z <= arg.z + 2; z++) S.set(x, arg.gy, z, arg.grass);
-    }
-  }, { x0, x1, z: fz, gy, grass: ids.GRASS });
+    const { b } = arg;
+    let i = 0;
+    for (let x = b.x0; x <= b.x1; x++) for (let y = b.y0; y <= b.y1; y++) for (let z = b.z0; z <= b.z1; z++) S.set(x, y, z, arg.cells[i++]);
+  }, { b: box, cells: before });
   await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); });
 });
 /** opens Grown-Up Settings, switches Freeze, and closes the menu again */
