@@ -116,8 +116,8 @@ event. Renaming a storage key orphans the family's existing saves.
   toggle-up is refused under a low ceiling, and `step` undoes any horizontal
   move that would leave the feet unsupported while crouched on the ground —
   kids never walk off ledges. Camera/aim eye height comes from
-  `entity.headHeight`; the avatar squats via `group.scale.y` in
-  `animateAvatar`. Flight force-clears crouch.
+  `entity.headHeight`; the look of it is a pose, never a scale (see below).
+  Flight force-clears crouch.
 - Sky/camera invariant: the sky dome (radius `SKY_RADIUS`) is parented to a group
   centred on the **middle** of the world — the coordinate origin is a map
   *corner*, so centring the dome there puts its far side past the far plane and
@@ -307,13 +307,25 @@ event. Renaming a storage key orphans the family's existing saves.
   keyboard E/R-Click/L-Click unchanged). `GAMEPAD_BUTTON_MAP` is exported and
   mirrored on `__lbw.padMap` — the 'the triggers are the hands' test pins it.
   Keyboard contract (R-Click builds, L-Click breaks, E interacts) still holds.
-- Crouch is a **pose, not a squash** (`players/avatar.ts`): `parts.chest` is a
-  hip pivot at `CROUCH_HIP=0.5` holding torso/head/arms/upper costume; the
-  fold is `CROUCH_SINK`+`CROUCH_FOLD` (+knee bend `CROUCH_KNEE`), lerped by
-  `parts.crouchT`. The avatar group's scale stays **1** (the old scale.y pose
-  squashed juice-box kids and every costume with them). Lowered head height
-  already flows from `headHeight`; the crouch e2e asserts scale===1, hipY,
-  lean and knee while crouched.
+- Crouch is a **pose, not a squash** (`players/avatar.ts`), and the rig has no
+  knees — so the pose is three angles, worked out against the pivot geometry:
+  `parts.body` (which pivots at the FEET) tips forward `CROUCH_LEAN`, which is
+  the only thing that can lower the hips; `CROUCH_LEGS` swings the legs further
+  forward *inside* the tipped body so the feet plant themselves in front; and
+  `parts.chest` (the hip pivot at `CROUCH_HIP=0.5`) hangs the torso forward over
+  them by `CROUCH_FOLD`. Everything is lerped by `parts.crouchT`. Traps learned
+  the hard way: rotating a leg about the hip **cannot** lower the hip (the old
+  `CROUCH_KNEE=-1.25` just flung the feet up — a handstand); tipping the body
+  and the legs by the same angle is only a leaning plank; and a limb pointing
+  DOWN swings BACKWARD for a positive `rotation.x`, so "arms hang" under a
+  forward-tipped torso means a positive arm angle. Scale stays **1** everywhere
+  (the original pose scaled `group.scale.y` and squashed juice-box kids and
+  every costume with them). `body.rotation`/`body.position` belong to the
+  crouch; `group.rotation` belongs to the swim lean. The crouch e2e measures the
+  drawn matrices: scale 1 on group and body, `body.rotation.x`, the hunch past
+  the tip, the legs inside a sane band, and the head top at least 0.25 below its
+  standing height. `scripts/crouch-shots.ts` shoots the profile + the in-play
+  three-quarter view for eyeballing it.
 - Water draws at its depth: `water.ts waterSurfaceHeight(world,x,y,z)` (source
   0.92, flow `0.92 − level·0.12` floor 0.22, falling water full) feeds the
   mesher's dedicated **water channel** (`ChunkGeometry.water`,

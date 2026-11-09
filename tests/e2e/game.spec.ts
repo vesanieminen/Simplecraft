@@ -1000,28 +1000,41 @@ test('crouch: the red button sneaks — slow shuffle, ledge protection, crawling
     return { x: p.pos.x, y: p.pos.y, z: p.pos.z, crouch: p.crouching, grounded: p.grounded, sp: Math.hypot(p.vel.x, p.vel.z) };
   });
 
+  // the head-top, standing: the yardstick the crouch has to beat
+  const standingHead = await page.evaluate(() => {
+    const a = (window as any).__lbw.game.players[0].entity.avatar;
+    return a.chest.matrixWorld.elements[7] + 1.05; // the head top sits 1.05 above the hip pivot
+  });
+
   // tap B (the Back button): crouch on — and the shuffle is slow
   await tap(page, 'back');
   await page.waitForFunction('window.__lbw.game.players[0].entity.crouching === true', null, { timeout: 8000 });
   await frames(page, 30); // the fold eases in over a quarter second
 
-  // the pose itself: the kid FOLDS — hips sink, torso leans, knees bend — and
-  // the body is never squashed. (The old crouch scaled the whole model down;
-  // a squashed juice-box kid read as a bug, and costumes rode the shrink too.)
+  // the pose itself, measured in the WORLD (the matrix the renderer just drew
+  // with), because the point of the crouch is what it does to the silhouette:
+  // the kid tips forward over their feet, the head comes down, and nothing is
+  // scaled — the old squash made every juice-box kid 40 % shorter, and the
+  // first rebuild of this pose flung the feet into the air instead
   const pose = await page.evaluate(() => {
-    // the entity's `avatar` IS the parts object (the group lives on it)
-    const parts = (window as any).__lbw.game.players[0].entity.avatar;
+    const a = (window as any).__lbw.game.players[0].entity.avatar;
+    const worldY = (o: any) => o.matrixWorld.elements[7];
     return {
-      scale: parts.group.scale.y, crouchT: parts.crouchT,
-      hipY: parts.chest.position.y, lean: parts.chest.rotation.x,
-      knee: parts.rightLeg.rotation.x,
+      scale: a.group.scale.y, bodyScale: a.body.scale.y,
+      crouchT: a.crouchT, lean: a.body.rotation.x, fold: a.chest.rotation.x,
+      hipY: worldY(a.chest), headY: worldY(a.chest) + 1.05 * Math.cos(a.body.rotation.x + a.chest.rotation.x),
+      legL: a.leftLeg.rotation.x, legR: a.rightLeg.rotation.x,
     };
   });
   expect(pose.scale, 'the avatar is never squashed').toBeCloseTo(1, 3);
+  expect(pose.bodyScale, 'nor is any part of it').toBeCloseTo(1, 3);
   expect(pose.crouchT, 'fully crouched').toBeGreaterThan(0.9);
-  expect(pose.hipY, 'hips dropped from their standing 0.5').toBeLessThan(0.25);
-  expect(pose.lean, 'torso folded forward').toBeGreaterThan(0.9);
-  expect(pose.knee, 'knees bent under').toBeLessThan(-0.5);
+  expect(pose.lean, 'tipped forward over the feet').toBeGreaterThan(0.35);
+  expect(pose.fold, 'hunched past the hips').toBeGreaterThan(pose.lean * 0.6);
+  // legs bent under the kid, not flung up behind (the old −1.25 handstand)
+  expect(pose.legL, 'legs stay bent under').toBeLessThan(-0.4);
+  expect(pose.legL, 'legs stay bent under').toBeGreaterThan(-1.4);
+  expect(pose.headY, 'the head comes down a hand-span or more').toBeLessThan(standingHead - 0.25);
 
   await page.evaluate(() => (window as any).__testPad.setMove(0, -1));
   await waitForMove(page, { x: fx + 0.5, z: fz + 0.5 }, 1.0);

@@ -191,13 +191,14 @@ function getShirtTexture(): THREE.CanvasTexture {
 
 export interface AvatarParts {
   group: THREE.Group;
+  /** idle apart from the crouch, which tips it forward about the feet
+   *  (`group.rotation` belongs to the swim lean, so the sneak lives here) */
   body: THREE.Group;
   /**
    * The upper body on its own pivot at hip height: torso, head, face, arms and
-   * everything resting on them. Bending this is what a crouch looks like — the
-   * kid folds at the hips instead of being squashed like a juice box. It stays
-   * at rest height (CROUCH_HIP = 0.5) standing, and sinks + pitches forward
-   * when they sneak.
+   * everything resting on them. In a crouch this sinks a little and folds a
+   * little past the pelvis, while `body` tips the whole kid forward — the kid
+   * sneaks instead of being squashed like a juice box.
    */
   chest: THREE.Group;
   leftArm: THREE.Object3D;
@@ -214,9 +215,31 @@ export interface AvatarParts {
 
 /** hip height: the `chest` pivot sits here, so upper-body art keeps its usual y */
 export const CROUCH_HIP = 0.5;
-/** how far the hips drop, and how far the torso folds forward, in a full crouch */
-export const CROUCH_SINK = 0.34;
-export const CROUCH_FOLD = 1.0;
+/**
+ * The sneak, worked out for a rig with no knees. Three separate angles, because
+ * a body and its legs tipped by the same amount is only a leaning plank:
+ * `CROUCH_LEAN` tips the whole body about the FEET (the one thing that lowers
+ * the hips), `CROUCH_LEGS` swings the legs further forward inside it so the
+ * feet plant themselves out in front and the silhouette bends into a Z, and
+ * `CROUCH_FOLD` hangs the torso forward over those thighs so the head drops
+ * half a block. Arms and stride signs follow from the same rule: a limb
+ * pointing DOWN swings BACKWARD for a positive x rotation, so "hanging down"
+ * under a torso this far forward means swinging back by what it tipped.
+ */
+export const CROUCH_LEAN = 0.45;
+/** the hunch: the torso hangs forward over the thighs */
+export const CROUCH_FOLD = 0.45;
+/** legs, inside the tipped body: negative swings the feet forward under the kid */
+export const CROUCH_LEGS = -0.9;
+/** what the hip pivot sinks inside the tipped body, on top of the drop the tip gives */
+export const CROUCH_SINK = 0.06;
+/** arms hang near vertical in the world, reaching a hair past it */
+export const CROUCH_REACH = 0.15;
+/** the sneak's shuffle: short opposite strides from the bent-leg stance */
+export const CROUCH_STRIDE = 0.22;
+export const CROUCH_SWING = 0.24;
+/** the creep's weight: the body dips a hair on each stride's bottom */
+export const CROUCH_BOB = 0.03;
 
 /** small box helper for costume bits; parented so it rides the body/arm motion */
 function costumeBox(
@@ -427,9 +450,6 @@ export function createAvatar(colorHex: string, model: ModelId = 'kid'): AvatarPa
   return { group, body, chest, leftArm, rightArm, leftLeg, rightLeg, tail, ring, shadow, crouchT: 0 };
 }
 
-/** how far the knees fold under while sneaking (feet trail back: a crawl) */
-const CROUCH_KNEE = -1.25;
-
 export function animateAvatar(
   parts: AvatarParts, walkPhase: number, moving: boolean, airborne: boolean, dt: number,
   crouching = false,
@@ -440,9 +460,12 @@ export function animateAvatar(
   let legA = airborne ? -0.5 : target * 0.9;
 
   // four limb targets: walking strides them in opposite pairs, swimming pulls
-  // both arms together, and a sneak crawls them in hands-and-knees alternation
+  // both arms together, and a sneak shuffles under a forward-tipped body
   let armL = armA, armR = -armA, legL = legA, legR = -legA;
   const folded = crouching && !airborne && !swimming;
+  // the whole-body channels the crouch owns (both are untouched otherwise):
+  // `body` tips the kid forward over planted feet, and dips a hair per stride
+  let bodyLean = 0, bodyDip = 0;
   if (swimming) {
     const s = Math.sin(walkPhase * 1.3);
     armA = -0.9 - s * 0.7; // reach forward, pull back under
@@ -450,16 +473,23 @@ export function animateAvatar(
     armL = armR = armA;
     legL = legR = legA;
   } else if (folded) {
-    // a proper sneak, not a squashed model: the torso folds over the thighs and
-    // the hips sink (the `chest` pivot below) while hands and knees work
-    const fold = CROUCH_FOLD * parts.crouchT;
-    const s = moving ? Math.sin(walkPhase * 1.7) : 0;
-    legL = CROUCH_KNEE + s * 0.34;
-    legR = CROUCH_KNEE - s * 0.34;
-    // the arms live inside the folding torso, so reaching the ground means
-    // undoing the fold — that is why the target is negative by the fold angle
-    armL = -fold - 0.2 + s * 0.42;
-    armR = -fold - 0.2 - s * 0.42;
+    // How the big game sells a sneak, adapted to a rig with no knees: `body`
+    // pivots at the feet, so tipping it forward plants the feet, lifts the
+    // thighs in front of the kid and drops the hips with them. The torso
+    // un-folds off the thighs so the face still reads, and the arms hang —
+    // which, under a torso tipped this far, means swinging BACK: a limb
+    // pointing down swings backward for a positive x rotation. (The old pose
+    // got this backwards and swung the legs up while the torso nose-dived 57°,
+    // which is how a crouch ended up looking like a handstand.)
+    const k = parts.crouchT;
+    const s = moving ? Math.sin(walkPhase) : Math.sin(walkPhase) * 0.15;
+    legL = CROUCH_LEGS + s * CROUCH_STRIDE;
+    legR = CROUCH_LEGS - s * CROUCH_STRIDE;
+    const hang = -((CROUCH_LEAN + CROUCH_FOLD) * k - CROUCH_REACH);
+    armL = hang - s * CROUCH_SWING;
+    armR = hang + s * CROUCH_SWING;
+    bodyLean = CROUCH_LEAN * k;
+    bodyDip = -CROUCH_BOB * k * (moving ? (1 - Math.cos(walkPhase * 2)) * 0.5 : 0.5);
   }
 
   const lerpK = 1 - Math.exp(-14 * dt);
@@ -468,17 +498,21 @@ export function animateAvatar(
   parts.leftLeg.rotation.x += (legL - parts.leftLeg.rotation.x) * lerpK;
   parts.rightLeg.rotation.x += (legR - parts.rightLeg.rotation.x) * lerpK;
   // z-roll of the arms: flung out while falling, tucked in for the breaststroke,
-  // braced out to the sides when sneaking (same sign convention as the fall)
-  const elbowZ = airborne ? -0.5 : swimming ? 0.35 : folded ? -0.3 : 0;
+  // braced a touch out to the sides when sneaking (same sign convention as the
+  // fall) — enough to read as balance, not enough to look like a scarecrow
+  const elbowZ = airborne ? -0.5 : swimming ? 0.35 : folded ? -0.12 : 0;
   parts.leftArm.rotation.z = elbowZ;
   parts.rightArm.rotation.z = -elbowZ;
 
-  // The crouch itself: hips drop and the upper body pitches forward about the
-  // hip pivot. Nothing is scaled, so the head stays a head and the name ring
-  // under the kid stays round.
+  // The crouch itself, and all of it pose: the kid tips forward over their
+  // feet, the hips sink and the torso folds a little past the pelvis. Nothing
+  // is scaled, so the head stays a head and the name ring under the kid stays
+  // round.
   const crouchTo = folded ? 1 : 0;
-  parts.crouchT += (crouchTo - parts.crouchT) * (1 - Math.exp(-11 * dt));
+  parts.crouchT += (crouchTo - parts.crouchT) * (1 - Math.exp(-9 * dt));
   const k = parts.crouchT;
+  parts.body.rotation.x = bodyLean;
+  parts.body.position.y = bodyDip;
   parts.chest.position.y = CROUCH_HIP - CROUCH_SINK * k;
   parts.chest.rotation.x = CROUCH_FOLD * k;
 
