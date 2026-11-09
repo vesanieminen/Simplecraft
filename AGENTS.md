@@ -83,7 +83,12 @@ event. Renaming a storage key orphans the family's existing saves.
   chain reactions. Fuses run on **game** time, which is roughly half wall
   clock in headless Chromium — never `waitForTimeout` for an explosion, poll
   `game.dynamite.blastCount`. Blasts never touch `y <= 0`, `unbreakable`
-  blocks or water, and `SCORCH` is deliberately not in the palette.
+  blocks or water, and `SCORCH` is deliberately not in the palette. A **lit
+  fuse rides the save and keeps burning in every later boot** of a shared
+  world — the persistence e2e leaves one alight on purpose, so it now defuses
+  (`world.set(AIR)`; the manager extinguishes the rig when the voxel is gone)
+  before it ends, or the next terrain-sensitive course near spawn gets its
+  wall carved mid-test (that is how the ladder e2e failed on its CI debut).
 - Swimming (`players/playerEntity.ts`): buoyancy is a *levelled float*, not a
   speed cap — `physics.submergedFraction` samples four heights up the body and
   the vertical target is `(frac - SWIM_TRIM) * 2.2`, so deep under drifts you

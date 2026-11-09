@@ -2297,6 +2297,16 @@ test('a stick you left lying around is still there after a reload, fuse and all'
   expect(after.block).toBe(ids.DYNAMITE);
   expect(after.lit).toBe(true);   // and it starts burning again
   expect(after.active).toBeGreaterThan(0);
+
+  // ...and now put the live stick OUT. Its fuse runs on GAME time and rides
+  // the save, so every later boot in this shared world keeps it burning —
+  // and the first later course built near spawn (the ladder's) gets its wall
+  // carved out from under it mid-test. Defusing = set the cell to AIR: the
+  // manager notices the missing voxel and extinguishes the rig next tick.
+  await page.evaluate((c: Cell) => {
+    (window as any).__lbw.game.world.set(c.x, c.y, c.z, 0);
+  }, cell);
+  await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); });
 });
 
 // -------------------------------------------------------------------- artwork
