@@ -2429,8 +2429,106 @@ test('a partial block keeps its neighbours faces, so nothing around it is see-th
   for (const name of ['chest', 'openChest', 'slab', 'stairs'] as const) {
     expect(quads[name] - quads.allCubes, `${name} swallowed a neighbour face`).toBeGreaterThanOrEqual(6);
   }
-  // and the two chests are the same shape, so they cost the same faces
-  expect(quads.openChest).toBe(quads.chest);
+  // and sealed inside planks, an opened chest is a shut chest minus its lid:
+  // only the top ever opens, and down in there that face is the only change
+  expect(quads.chest - quads.openChest).toBe(1);
+});
+
+/**
+ * What "a chest only opens at the top" has to mean in the geometry, face by
+ * face: an opened chest shows the SAME side artwork as a shut one, has no lid
+ * lying across its rim, and instead shows an opening — the inside of the
+ * walls, treasure lying strictly below the rim — with the lid raised off the
+ * box, leaning back over the cell behind. And cover the chest's top and the
+ * whole opening vanishes again: what cannot be looked into is not drawn.
+ */
+test('an opened chest is a shut chest with an opening on top, not opened sides', async ({ page }) => {
+  await boot(page);
+  const shape = await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    const S = game.world;
+    const ids = (window as any).__lbw.ids;
+    const atlas = (window as any).__lbw.atlas;
+    const chunk = (window as any).__lbw.dims.chunk;
+    const mid = Math.floor((window as any).__lbw.dims.sx / 2);
+    const cx = Math.floor(mid / chunk) * chunk + 2;
+    const cz = cx;
+    const y0 = S.surfaceY(cx, cz) + 4;
+    const clear = () => {
+      for (let dx = -1; dx <= 6; dx++)
+        for (let dz = -1; dz <= 2; dz++)
+          for (let dy = -1; dy <= 4; dy++) S.set(cx + dx, y0 + dy, cz + dz, 0, false);
+    };
+    clear();
+    S.set(cx, y0, cz, ids.CHEST, false);
+    S.set(cx + 4, y0, cz, ids.CHEST_OPEN, false);
+
+    /** every quad in one chest's column, decoded: atlas cell, normal, centroid */
+    const faces = (bx: number) => {
+      const geo = (window as any).__lbw.chunkGeometry(S, Math.floor(cx / chunk), Math.floor(cz / chunk));
+      const pos = geo.textured.getAttribute('position').array;
+      const nor = geo.textured.getAttribute('normal').array;
+      const uv = geo.textured.getAttribute('uv').array;
+      const out: { cell: number; ny: number; n: [number, number, number]; y: number; maxY: number }[] = [];
+      for (let t = 0; t < pos.length; t += 9) {
+        const mx = (pos[t] + pos[t + 3] + pos[t + 6]) / 3;
+        const mz = (pos[t + 2] + pos[t + 5] + pos[t + 8]) / 3;
+        // the z band is wider than the cell: the open lid leans back over the
+        // cell behind, and it is very much part of this chest's shape
+        if (mx < bx - 0.01 || mx > bx + 1.01 || mz < cz - 0.6 || mz > cz + 1.6) continue;
+        const my = (pos[t + 1] + pos[t + 4] + pos[t + 7]) / 3;
+        out.push({
+          cell: Math.floor(uv[t * 2 / 3] * atlas.cells),
+          n: [nor[t] + nor[t + 3] + nor[t + 6], nor[t + 1] + nor[t + 4] + nor[t + 7], nor[t + 2] + nor[t + 5] + nor[t + 8]].map((v) => v / 3) as [number, number, number],
+          ny: (nor[t + 1] + nor[t + 4] + nor[t + 7]) / 3,
+          y: my - y0,
+          maxY: Math.max(pos[t + 1], pos[t + 4], pos[t + 7]) - y0,
+        });
+      }
+      // two triangles per quad
+      const quads = (pred: (f: typeof out[number]) => boolean): number => out.filter(pred).length / 2;
+      const side = (f: typeof out[number]): boolean => Math.abs(f.ny) < 0.01;
+      return {
+        sides: quads((f) => f.cell === atlas.side && side(f)),
+        flatLid: quads((f) => f.cell === atlas.lid && f.ny > 0.9),
+        tiltedLid: quads((f) => f.cell === atlas.lid && f.ny > 0.2 && f.ny < 0.9),
+        inside: quads((f) => f.cell === atlas.inside && side(f)),
+        treasure: quads((f) => f.cell === atlas.treasure),
+        treasureY: Math.max(0, ...out.filter((f) => f.cell === atlas.treasure).map((f) => f.y)),
+        lidMaxY: Math.max(0, ...out.filter((f) => f.cell === atlas.lid).map((f) => f.maxY)),
+      };
+    };
+    const shut = faces(cx);
+    const open = faces(cx + 4);
+    clear();
+    S.set(cx, y0, cz, ids.CHEST, false);
+    S.set(cx + 4, y0, cz, ids.CHEST_OPEN, false);
+    S.set(cx + 4, y0 + 1, cz, ids.PLANKS, false); // a plank over the opening
+    const covered = faces(cx + 4);
+    return { shut, open, covered };
+  });
+  // from the side there is no such thing as an opened chest: four sides, the
+  // very same artwork the shut chest wears
+  expect(shape.open.sides).toBe(4);
+  expect(shape.shut.sides).toBe(4);
+  // the shut chest's lid lies flat across the top; an opened chest has taken
+  // that face off entirely, and the lid now stands tilted above the cell
+  expect(shape.shut.flatLid).toBe(1);
+  expect(shape.open.flatLid).toBe(0);
+  expect(shape.open.tiltedLid).toBe(1);
+  expect(shape.open.lidMaxY).toBeGreaterThan(1); // it rises into the cell above
+  // what the opening shows: the inside of four walls, and treasure strictly
+  // below the rim (0.85) — you look DOWN into a chest, never through its side
+  expect(shape.open.inside).toBe(4);
+  expect(shape.open.treasure).toBe(1);
+  expect(shape.open.treasureY).toBeLessThan(0.85);
+  expect(shape.shut.inside).toBe(0);
+  expect(shape.shut.treasure).toBe(0);
+  // and a block over the top hides it all again — the sides still read shut
+  expect(shape.covered.tiltedLid).toBe(0);
+  expect(shape.covered.inside).toBe(0);
+  expect(shape.covered.treasure).toBe(0);
+  expect(shape.covered.sides).toBe(4);
 });
 
 test('the kids are dressed: knitted jumpers, denim legs, a faced head', async ({ page }) => {
