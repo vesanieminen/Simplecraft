@@ -1352,10 +1352,10 @@ test('water flows: a dug channel floods from the source, shallows with reach, fa
     S.set(arg.fx + 2, arg.gy, arg.fz, arg.water);
   }, { fx, fz, gy, air: ids.AIR, water: ids.WATER, flow: ids.WATER_FLOW, stone: ids.STONE });
 
-  // water creeps: wait until it has covered its full six-cell reach
+  // water creeps: wait until the flood has covered the whole dug channel
   await page.waitForFunction((arg: { x6: number; gy: number; fz: number; flow: number }) =>
     (window as any).__lbw.game.world.get(arg.x6, arg.gy, arg.fz) === arg.flow,
-  { x6: fx + 8, gy, fz, flow: ids.WATER_FLOW }, { timeout: 20000 });
+  { x6: fx + 10, gy, fz, flow: ids.WATER_FLOW }, { timeout: 20000 });
 
   const cellAt = (x: number, y: number) => page.evaluate((c: { x: number; y: number; z: number }) => {
     const w = (window as any).__lbw.game.world;
@@ -1366,13 +1366,18 @@ test('water flows: a dug channel floods from the source, shallows with reach, fa
     };
   }, { x, y, z: fz });
 
-  // the source stands eternal and full; the channel shallows one step per cell
+  // the source stands eternal and full; the channel shallows one step per cell,
+  // and it keeps going: what stops a flood is running out of ground, not a tidy
+  // ring six cells from the spring (that cap was the old model's biggest tell)
   expect((await cellAt(fx + 2, gy)).id).toBe(ids.WATER);
-  for (let k = 1; k <= 6; k++) {
+  for (let k = 1; k <= 8; k++) {
     const c = await cellAt(fx + 2 + k, gy);
     expect(c.id, `cell +${k}`).toBe(ids.WATER_FLOW);
     expect(c.lvl, `depth +${k}`).toBe(k);
   }
+  // and the bank past the end of the dig stays dry: ground is the limit
+  const past = await cellAt(fx + 11, gy);
+  expect([ids.WATER, ids.WATER_FLOW], 'nothing wet past the end of the dig').not.toContain(past.id);
 
   // and the water DRAWS at its depth: a spring fills its cell (less the shine),
   // a shallow flow only half-fills it — no more floating ribbons of full cubes
@@ -1385,16 +1390,17 @@ test('water flows: a dug channel floods from the source, shallows with reach, fa
     .filter((o: any) => o.isMesh && o.material === (window as any).__lbw.game.chunks.materials.water).length),
     'the water channel is live').toBeGreaterThan(0);
   expect(await surfaceAt(fx + 2, gy), 'spring surface').toBeCloseTo(0.92, 2);
+  // The sheet falls away gently — about a finger's width per cell, so a soak
+  // reads as one damp surface rather than a staircase of tiles.
   const s2 = await surfaceAt(fx + 4, gy);
-  expect(s2, 'depth-2 surface shallows').toBeGreaterThan(0.55);
-  expect(s2, 'depth-2 surface shallows').toBeLessThan(0.8);
+  expect(s2, 'depth-2 surface shallows').toBeGreaterThan(0.7);
+  expect(s2, 'depth-2 surface shallows').toBeLessThan(0.9);
   const s5 = await surfaceAt(fx + 7, gy);
-  expect(s5, 'depth-5 surface is a ripple').toBeGreaterThanOrEqual(0.22);
-  expect(s5, 'depth-5 surface is a ripple').toBeLessThan(0.45);
-  expect(await surfaceAt(fx + 9, gy), 'dry cell draws nothing').toBe(0);
-  // and the supply runs out: nothing wet past six cells
-  expect((await cellAt(fx + 9, gy)).id).toBe(ids.AIR);
-  expect((await cellAt(fx + 10, gy)).id).toBe(ids.AIR);
+  expect(s5, 'depth-5 surface is thinner still').toBeGreaterThan(0.5);
+  expect(s5, 'depth-5 surface is thinner still').toBeLessThan(s2);
+  expect(await surfaceAt(fx + 10, gy), 'far end of the channel').toBeGreaterThanOrEqual(0.22);
+  // a dry cell draws nothing at all
+  expect(await surfaceAt(fx + 12, gy), 'dry cell draws nothing').toBe(0);
 
   // falling water keeps its depth: cut a shaft and the plunge is as deep as the channel above it
   await page.evaluate((arg: { x: number; gy: number; fz: number; air: number }) => {

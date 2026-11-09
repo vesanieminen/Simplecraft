@@ -295,18 +295,50 @@ function waterFaceUvs(fi: number): [number, number][] {
 }
 
 /**
+ * The height of the water sheet at the four horizontal corners of a cell,
+ * averaged with the wet cells that share each corner (same level only).
+ *
+ * One height per cell is what made a sheet read as a stack of tiles: every cell
+ * drew its own flat plate, so water running down a slope or thinning out of a
+ * pond looked like a staircase of coasters. Averaging the four cells around each
+ * corner turns that into one continuous surface. Only wet neighbours at the same
+ * level count — a lower cell's absolute height can be below our own floor, and
+ * blending with that flips the quad inside out (a black hole in the water).
+ */
+function waterCornerHeights(
+  world: World, x: number, y: number, z: number, h: number,
+): [number, number, number, number] {
+  const out: [number, number, number, number] = [h, h, h, h];
+  for (let i = 0; i < 4; i++) {
+    // index is (x-side) | (z-side << 1): 0 = the cell's own -x/-z corner
+    const ax = i & 1;
+    const az = i >> 1;
+    let sum = h, n = 1;
+    for (const [dx, dz] of [[-ax, -az], [1 - ax, -az], [-ax, 1 - az], [1 - ax, 1 - az]] as const) {
+      if (dx === 0 && dz === 0) continue;
+      if (!isWaterId(world.get(x + dx, y, z + dz))) continue;
+      sum += waterSurfaceHeight(world, x + dx, y, z + dz);
+      n++;
+    }
+    out[i] = sum / n;
+  }
+  return out;
+}
+
+/**
  * One water cell: a box from the cell floor up to the surface its depth says
  * it stands at. Faces are only drawn where something can actually see them —
  * a solid neighbour, water at least as deep, or the water directly above and
- * below hides them.
+ * below hides them. The top edge of every face rides the corner-averaged
+ * sheet, so neighbouring cells meet at the same height instead of butting two
+ * flat plates together.
  */
 function addWaterCube(
   g: GeomBuilder, world: World, x: number, y: number, z: number, id: BlockId,
 ): void {
   const h = waterSurfaceHeight(world, x, y, z);
-  const top = y + h;
+  const ch = waterCornerHeights(world, x, y, z, h);
   const base = blockDef(id).color;
-  const vary = 1 + (hashByte(x, y, z) - 0.5) * 0.07;
   for (let fi = 0; fi < 6; fi++) {
     const f = FACES[fi];
     const nx = x + f.dir[0], ny = y + f.dir[1], nz = z + f.dir[2];
@@ -319,12 +351,12 @@ function addWaterCube(
     } else if (isWaterId(n)) {
       continue; // the water above or below swallows that face
     }
-    const shade = FACE_SHADE[fi] * vary;
+    const shade = FACE_SHADE[fi];
     const tint: [number, number, number][] = f.corners.map(() => [
       base[0] * shade, base[1] * shade, base[2] * shade,
     ]);
     const pts = f.corners.map(([ax, ay, az]) => [
-      ax ? x + 1 : x, ay ? top : y, az ? z + 1 : z,
+      ax ? x + 1 : x, ay ? y + ch[(ax ? 1 : 0) | (az ? 2 : 0)] : y, az ? z + 1 : z,
     ] as [number, number, number]);
     g.quad(pts[0], pts[1], pts[2], pts[3], f.dir, tint, waterFaceUvs(fi));
   }

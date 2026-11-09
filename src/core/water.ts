@@ -1,24 +1,27 @@
 /**
  * Water flows like the big game: a source (WATER) is eternal and pushes
  * water into the air around it — straight down at the same depth, sideways
- * one step shallower (core depth 0..6). Travelling water (WATER_FLOW) shows
- * how deep its supply is: it shallows as it spreads, piles into pits, and —
- * when its chain back to a source is broken — dries up cell by cell: the
- * shallow puddles at the end of the reach are the first to fail, and the
- * whole cut-off flood is gone within a second. That is also what pulling a
- * spring out with a bucket looks like: the flood runs home.
+ * one step shallower (core depth 0..24) and ONLY where there is ground under
+ * the target cell. Travelling water (WATER_FLOW) shows how deep its supply is:
+ * it shallows as it spreads, piles into pits, and — when its chain back to a
+ * source is broken — dries up from the shallow end inward, in about a second.
+ * That is also what pulling a spring out with a bucket looks like: the flood
+ * runs home.
  *
  * Falling water plunges (see FALL_REACH), so digging a shaft under a puddle
- * empties it down the shaft in one step instead of creeping down it.
+ * empties it down the shaft in one step instead of creeping down it. Over a
+ * ledge, water drops rather than leaning out: the hillside gets a waterfall,
+ * not a shelf of blue slabs hanging in the air.
  *
  * The sim is event-driven through `World.onCellChanged`: only cells near a
  * change get re-evaluated, so the sea sits perfectly still until somebody
  * digs into it. Each step re-reads every dirty cell's depth from the best
- * supply it can see (a neighbour one step deeper, or water falling in from
- * above) and wakes its neighbours when that depth changes — so cutting a
- * chain makes levels climb until they fall past the reach limit and drain.
- * A group of flow cells can never agree to support each other forever: the
- * shallowest one always needs someone deeper.
+ * supply it can see — a neighbour strictly deeper than itself, or water
+ * falling in from above — and wakes its neighbours when that depth changes.
+ * Because "strictly deeper" is the only thing that holds a cell up, a group of
+ * flow cells can never agree to support each other: the moment the chain to a
+ * source goes, the shallowest cell fails and the failure walks back down the
+ * channel towards where the water came from.
  *
  * `waterSurfaceHeight` turns a cell's depth into the height the mesher draws,
  * so a shallow flood lies flat and a source stands nearly full.
@@ -35,20 +38,30 @@ function unidx(i: number): [number, number, number] {
   return [x, rest - z * WORLD_SY, z];
 }
 
-/** max horizontal reach of a source, in cells (Minecraft's water is 7) */
-export const MAX_WATER_LEVEL = 6;
+/**
+ * How deep a flow cell can get before it gives up, in depth steps. This is a
+ * safety bound, not the reach the player sees: what actually stops water is
+ * running out of ground to stand on (see `supported`), and a cut-off flood
+ * collapses from the shallow end long before this. It stays generous (24) so a
+ * stream running off a hill never visibly stops at a tidy ring the way the old
+ * six-cell limit did.
+ */
+export const MAX_WATER_LEVEL = 24;
 /** game seconds between flow steps — water visibly creeps, ~5 cells a second */
 const STEP_SECONDS = 0.2;
-/** re-evaluations per step, so draining a flood never spikes a frame */
+/** re-evaluations per round, so draining a flood never spikes a frame */
 const STEP_BUDGET = 240;
+/** how many cells deep one step may propagate a drain (see `drain`) */
+const CASCADE_CELLS = 4;
 /** how deep a source's surface sits below the top of its cell (the big game
  *  draws water a hair under the block line, and that is what makes a shoreline
  *  read as water rather than as a blue cube) */
 export const SOURCE_SURFACE = 0.92;
 /** a puddle at the end of a source's reach is never drawn thinner than this */
 export const MIN_WATER_SURFACE = 0.22;
-/** how far one step lets falling water plunge, in cells */
-const FALL_REACH = 24;
+/** how fast the surface falls away with depth, per level. Deliberately gentle:
+ *  a five-cell soak should read as a damp sheet, not as a staircase of tiles. */
+const SURFACE_STEP = 0.06;
 
 /**
  * How high the water in a cell is drawn, 0..1 of the cell. This is the shape
@@ -60,16 +73,19 @@ const FALL_REACH = 24;
 export function waterSurfaceHeight(world: World, x: number, y: number, z: number): number {
   const id = world.get(x, y, z);
   if (!isWaterId(id)) return 0;
+  if (isWaterId(world.get(x, y + 1, z))) return 1; // submerged: it fills its cell, the surface is higher up
   const below = world.get(x, y - 1, z);
   if (!isWaterId(below) && solidHeightOf(below) <= 0) return 1; // falling: a full column
   if (id === WATER) return SOURCE_SURFACE;
   const level = world.flowLevelAt(x, y, z);
-  return Math.max(MIN_WATER_SURFACE, SOURCE_SURFACE - level * 0.12);
+  return Math.max(MIN_WATER_SURFACE, SOURCE_SURFACE - level * SURFACE_STEP);
 }
 
 export class WaterFlow {
   /** flat indices of water cells that need re-thinking on the next step */
   private dirty = new Set<number>();
+  /** how deep into a drain cascade this step currently is (see `drain`) */
+  private cascade = 0;
   private acc = 0;
 
   constructor(private world: World) {}
@@ -111,8 +127,13 @@ export class WaterFlow {
     }
   }
 
+  /**
+   * One flow step: whatever the changes dirtied, plus the cascade each drained
+   * cell started (see `drain`).
+   */
   private step(): void {
     if (this.dirty.size === 0) return;
+    this.cascade = 0;
     const batch: number[] = [];
     for (const i of this.dirty) {
       batch.push(i);
@@ -149,6 +170,19 @@ export class WaterFlow {
   private drain(x: number, y: number, z: number): void {
     this.world.set(x, y, z, AIR);
     this.notify(x, y, z);
+    // Whatever was upstream just lost the only thing holding it up, so let it
+    // know in the SAME step: that is the wave that runs back up a cut channel
+    // when a kid scoops the spring out, instead of a queue of cells each
+    // waiting their turn. It is capped at CASCADE_CELLS deep per step so the
+    // dry line visibly travels rather than teleporting.
+    if (this.cascade >= CASCADE_CELLS) return;
+    this.cascade++;
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+      const nx = x + dx, nz = z + dz;
+      if (this.world.get(nx, y, nz) === WATER_FLOW) this.evaluate(idx(nx, y, nz));
+    }
+    if (this.world.get(x, y + 1, z) === WATER_FLOW) this.evaluate(idx(x, y + 1, z));
+    this.cascade--;
   }
 
   private evaluate(i: number): void {
@@ -160,19 +194,24 @@ export class WaterFlow {
     }
     if (id !== WATER_FLOW) return;
 
-    // best supply: a neighbour one step deeper, or water falling in from above
+    // Best supply: a horizontally adjacent cell that is DEEPER than us (only a
+    // strictly deeper neighbour can hold water up — that is what stops a pond
+    // from propping itself up when its spring goes away, and what makes a
+    // cut-off flood collapse from the shallow end inward), or water falling in
+    // from above, which keeps its depth.
+    const cur = this.world.waterLevel.get(i) ?? MAX_WATER_LEVEL;
     let best = MAX_WATER_LEVEL + 1;
     const above = this.levelAt(x, y + 1, z);
     if (above >= 0) best = Math.min(best, above); // falling water keeps its depth
     for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
       const l = this.levelAt(x + dx, y, z + dz);
-      if (l >= 0) best = Math.min(best, l + 1);
+      if (l >= 0 && l < cur) best = Math.min(best, l + 1);
     }
     if (best > MAX_WATER_LEVEL) {
-      this.drain(x, y, z); // no chain back to any source: it dries up
+      this.drain(x, y, z); // nothing deeper beside or above it: it dries up
       return;
     }
-    if (best !== (this.world.waterLevel.get(i) ?? MAX_WATER_LEVEL)) {
+    if (best !== cur) {
       this.world.waterLevel.set(i, best);
       this.world.touchAt(x, z); // shape changed (same id): remesh + autosave
       // a shallower cell here means every neighbour's supply got worse too —
@@ -182,22 +221,65 @@ export class WaterFlow {
     this.spread(x, y, z, best);
   }
 
+  /**
+   * Something to stand on: water only spreads sideways into a cell with ground
+   * (or settled water) under it. Over an edge it does not lean out — it drops
+   * straight down instead, which is what a waterfall is, and it is the whole
+   * reason a hillside flood stopped drawing as a stack of blue slabs hanging
+   * in the air. Water below counts as a footing: that is how a pit fills level
+   * by level instead of only ever in the one column under the spring. Holding a
+   * cell UP is a different question, and `evaluate` answers it the strict way.
+   */
+  private supported(x: number, y: number, z: number): boolean {
+    const below = this.world.get(x, y - 1, z);
+    return isWaterId(below) || solidHeightOf(below) > 0;
+  }
+
+  /**
+   * Where water goes from a cell `level` deep. Two rules, and they are the
+   * whole shape language:
+   *
+ *   1. a cell with something under it spreads SIDEWAYS, one step shallower,
+   *      and only into neighbours that have something under them too;
+   *   2. a cell with nothing under it does not lean — it falls STRAIGHT DOWN.
+   *
+   * That is the 90° the old version got wrong. It let a sheet spread into thin
+   * air beside every step of a hillside and hang there, so a flood on a slope
+   * drew as a diagonal stack of blue plates. Now a hillside gets a waterfall:
+   * the water runs along each flat until it runs out of ground, drops the whole
+   * way to the next flat, and runs from there.
+   */
   private spread(x: number, y: number, z: number, level: number): void {
-    // Water falls first, and it falls the whole way down: a cliff or a freshly
-    // dug shaft fills in one step instead of creeping down it a cell at a time,
-    // the way water drops in the big game.
+    if (!this.supported(x, y, z)) {
+      // Falling water goes down and nowhere else, and it falls the whole way in
+      // one step: dig a shaft under a pond and the cells above it empty into
+      // the shaft instead of creeping down it one block at a time.
+      let fy = y;
+      while (fy > 1) {
+        if (!this.setFlow(x, fy - 1, z, level)) break;
+        fy--;
+      }
+      return;
+    }
+    if (level >= MAX_WATER_LEVEL) return; // the safety bound, not a ring the player sees
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+      const tx = x + dx, tz = z + dz;
+      if (this.supported(tx, y, tz)) this.setFlow(tx, y, tz, level + 1);
+      else this.pour(tx, y, tz, level + 1); // out of ground: over the edge, straight down
+    }
+  }
+
+  /**
+   * The drop: fill a column from `y` down to wherever it finally finds ground,
+   * one falling cell per block so the waterfall draws as one continuous ribbon
+   * instead of a dotted line, then let the landing cell spread from there.
+   */
+  private pour(x: number, y: number, z: number, level: number): void {
     let fy = y;
-    for (let n = 0; n < FALL_REACH && fy > 1; n++) {
-      if (!this.setFlow(x, fy - 1, z, level)) break;
+    while (fy > 1 && !this.supported(x, fy, z)) {
+      if (!this.setFlow(x, fy, z, level)) return; // blocked, or already at least this deep
       fy--;
     }
-    if (level < MAX_WATER_LEVEL) {
-      // side spread regardless of what is under the target — water reaching
-      // the edge of a ledge pours over it, like the big game
-      this.setFlow(x + 1, y, z, level + 1);
-      this.setFlow(x - 1, y, z, level + 1);
-      this.setFlow(x, y, z + 1, level + 1);
-      this.setFlow(x, y, z - 1, level + 1);
-    }
+    if (fy > 1) this.setFlow(x, fy, z, level); // land on the first cell with a footing
   }
 }
