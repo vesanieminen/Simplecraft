@@ -45,6 +45,11 @@ export interface WorldSaveData {
    * floods are steered by breaking the *flowing* cells or filling them in.
    */
   waterLevels?: Record<string, number>;
+  /**
+   * Which wall each ladder is nailed to: flat index -> the direction its
+   * climbing side faces (see core/blocks.ts LadderFacing). Added in version 5.
+   */
+  ladderFacing?: Record<string, number>;
   /** wall-clock ms of the last write, for the "My Worlds" last-played list */
   savedAt?: number;
 }
@@ -71,6 +76,8 @@ export class World {
   readonly doorFacing = new Map<number, number>();
   /** flat index -> which half of a stair cell is the tall part (see StairFacing) */
   readonly stairFacing = new Map<number, number>();
+  /** flat index -> which wall a ladder is nailed to (see LadderFacing) */
+  readonly ladderFacing = new Map<number, number>();
   /** flat index -> flow depth of a WATER_FLOW cell (0 deep … 6 nearly puddle) */
   readonly waterLevel = new Map<number, number>();
   /** bumped on every change so listeners (autosave) can debounce */
@@ -91,6 +98,7 @@ export class World {
     this.collectedStars.clear();
     this.doorFacing.clear();
     this.stairFacing.clear();
+    this.ladderFacing.clear();
     this.waterLevel.clear();
     this.revision++;
   }
@@ -180,6 +188,22 @@ export class World {
     this.touchAt(x, z);
   }
 
+  /** which wall a ladder cell is nailed to (0 for any cell that is not a ladder) */
+  getLadderFacing(x: number, y: number, z: number): number {
+    return this.ladderFacing.get(idx(x, y, z)) ?? 0;
+  }
+
+  /**
+   * Turn a ladder to face a new way. Its block id does not change, so this is
+   * the only way the mesher and the autosave hear about the spin.
+   */
+  setLadderFacing(x: number, y: number, z: number, facing: number): void {
+    const i = idx(x, y, z);
+    if (this.ladderFacing.get(i) === facing) return;
+    this.ladderFacing.set(i, facing);
+    this.touchAt(x, z);
+  }
+
   isSolid(x: number, y: number, z: number): boolean {
     return isSolidBlock(this.get(Math.floor(x), Math.floor(y), Math.floor(z)));
   }
@@ -228,6 +252,14 @@ export class World {
         }
       }
     }
+    if (save.ladderFacing) {
+      for (const [k, v] of Object.entries(save.ladderFacing)) {
+        const i = Number(k);
+        if (Number.isInteger(i) && i >= 0 && i < this.data.length && v >= 0 && v <= 3) {
+          this.ladderFacing.set(i, v);
+        }
+      }
+    }
     this.markAllDirty();
   }
 
@@ -240,8 +272,10 @@ export class World {
     for (const [i, v] of this.stairFacing) stairFacing[String(i)] = v;
     const waterLevels: Record<string, number> = {};
     for (const [i, v] of this.waterLevel) waterLevels[String(i)] = v;
+    const ladderFacing: Record<string, number> = {};
+    for (const [i, v] of this.ladderFacing) ladderFacing[String(i)] = v;
     return {
-      version: 4,
+      version: 5,
       seed: this.seed,
       theme: this.theme,
       mods,
@@ -249,6 +283,7 @@ export class World {
       doorFacing,
       stairFacing,
       waterLevels,
+      ladderFacing,
     };
   }
 }

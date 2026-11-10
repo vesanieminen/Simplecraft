@@ -1417,7 +1417,7 @@ test('water flows: a dug channel floods from the source, shallows with reach, fa
     const { sz, sy } = (window as any).__lbw.dims;
     return { version: save.version, at: String((arg.x3 * sz + arg.fz) * sy + arg.gy), levels: save.waterLevels ?? {} };
   }, { x3: fx + 3, fz, gy });
-  expect(saved.version).toBe(4);
+  expect(saved.version).toBe(5);
   expect(saved.levels[saved.at]).toBe(1);
 
   // break the chain at the source: levels climb, then the whole flood drains away
@@ -2297,6 +2297,16 @@ test('a stick you left lying around is still there after a reload, fuse and all'
   expect(after.block).toBe(ids.DYNAMITE);
   expect(after.lit).toBe(true);   // and it starts burning again
   expect(after.active).toBeGreaterThan(0);
+
+  // ...and now put the live stick OUT. Its fuse runs on GAME time and rides
+  // the save, so every later boot in this shared world keeps it burning —
+  // and the first later course built near spawn (the ladder's) gets its wall
+  // carved out from under it mid-test. Defusing = set the cell to AIR: the
+  // manager notices the missing voxel and extinguishes the rig next tick.
+  await page.evaluate((c: Cell) => {
+    (window as any).__lbw.game.world.set(c.x, c.y, c.z, 0);
+  }, cell);
+  await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); });
 });
 
 // -------------------------------------------------------------------- artwork
@@ -2529,6 +2539,178 @@ test('an opened chest is a shut chest with an opening on top, not opened sides',
   expect(shape.covered.inside).toBe(0);
   expect(shape.covered.treasure).toBe(0);
   expect(shape.covered.sides).toBe(4);
+});
+
+/**
+ * A ladder is a wall you climb, not a wall you bump into. It is never solid
+ * (you walk into its cell), it is painted from the ladder atlas cell, and once
+ * you are in that cell gravity lets go: hold jump to climb up, hold the
+ * sneak/dive button to slide down, and at the top rung a step onto the ledge.
+ */
+test('a ladder: walk into it, hold jump to climb up, sneak to climb down, get on the wall', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page);
+
+  // Build a three-block stone wall with a ladder nailed to its near face,
+  // snapshotting the six cells first so the end of the test can hand the
+  // meadow back to the tests that come after.
+  const site = await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    const S = game.world;
+    const ids = (window as any).__lbw.ids;
+    const atlas = (window as any).__lbw.atlas;
+    const e = game.players[0].entity;
+    const x = Math.round(e.pos.x), z = Math.round(e.pos.z);
+    const G = S.surfaceY(x, z); // the kid stands at feet y = G + 1 on the meadow
+    const orig: number[] = [];
+    for (let k = 1; k <= 3; k++) {
+      orig.push(S.get(x, G + k, z + 1), S.get(x, G + k, z));
+      S.set(x, G + k, z + 1, ids.STONE); // the wall
+      S.set(x, G + k, z, ids.LADDER); // the ladder we climb
+      S.setLadderFacing(x, G + k, z, 3); // climbed from -z, panel against the +z wall
+    }
+    e.pos.set(x + 0.5, G + 1, z + 0.5);
+    e.vel.set(0, 0, 0);
+    e.yaw = 0; // stick forward walks +z, straight into the ladder
+
+    // is it painted from the ladder's atlas cell? decode the mesh UVs.
+    const chunk = (window as any).__lbw.dims.chunk;
+    const geo = (window as any).__lbw.chunkGeometry(S, Math.floor(x / chunk), Math.floor(z / chunk));
+    let ladderFaces = 0;
+    if (geo.textured) {
+      const pos = geo.textured.getAttribute('position').array;
+      const uv = geo.textured.getAttribute('uv').array;
+      for (let t = 0; t < pos.length; t += 9) {
+        const cx = (pos[t] + pos[t + 3] + pos[t + 6]) / 3;
+        const cz = (pos[t + 2] + pos[t + 5] + pos[t + 8]) / 3;
+        if (Math.floor(cx) !== x || Math.floor(cz) !== z) continue; // the ladder column
+        if (Math.floor(uv[(t / 3) * 2] * atlas.cells) === atlas.ladder) ladderFaces++;
+      }
+    }
+    return {
+      x, z, G, wallTopY: G + 4, orig, ladder: ids.LADDER, stone: ids.STONE,
+      passable: !S.isSolid(x, G + 1, z), // the cell the kid walks into is not solid
+      facing: S.getLadderFacing(x, G + 1, z),
+      ladderFaces,
+    };
+  });
+  expect(site.passable, 'a ladder is not solid — you walk into it').toBe(true);
+  expect(site.facing).toBe(3);
+  expect(site.ladderFaces).toBeGreaterThan(0); // and it is painted from the ladder art
+
+  // walk into it: hold forward and the kid walks straight into the ladder's
+  // cell and stops against the wall behind it, never on top of a rung
+  await page.evaluate((s: { x: number; z: number; G: number }) => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    e.pos.set(s.x + 0.5, s.G + 1, s.z - 2.5);
+    e.vel.set(0, 0, 0);
+    (window as any).__testPad.setMove(0, -1);
+  }, site);
+  await page.waitForFunction(
+    (s: { z: number }) => (window as any).__lbw.game.players[0].entity.pos.z > s.z + 0.3,
+    site, { timeout: 10000 },
+  );
+  await page.evaluate((s: { x: number; z: number; G: number }) => {
+    (window as any).__testPad.setMove(0, 0);
+    const e = (window as any).__lbw.game.players[0].entity;
+    e.pos.set(s.x + 0.5, s.G + 1, s.z + 0.5); // stand on the bottom rung
+    e.vel.set(0, 0, 0);
+  }, site);
+
+  // hold jump: gravity lets go and the kid climbs, and at the top the last
+  // rung is a step over onto the wall
+  await page.evaluate(() => (window as any).__testPad.set('jump', true));
+  const up = await page.waitForFunction(
+    (s: { wallTopY: number; z: number }) => {
+      const e = (window as any).__lbw.game.players[0].entity;
+      if (!(e.grounded && e.pos.y >= s.wallTopY - 0.05 && e.pos.z > s.z + 0.5)) return false;
+      return { y: e.pos.y, z: e.pos.z };
+    },
+    site, { timeout: 15000 },
+  ).then((h) => h.jsonValue() as Promise<{ y: number; z: number }>);
+  await page.evaluate(() => (window as any).__testPad.set('jump', false));
+  expect(up.y).toBeGreaterThanOrEqual(site.wallTopY - 0.05);
+  expect(up.z).toBeGreaterThan(site.z + 0.5); // swung over onto the wall, not still on the ladder
+
+  // sneak (the same dive button) descends: back to the top rung and hold it,
+  // and the kid slides down the ladder to its foot instead of falling
+  const fromY = await page.evaluate((s: { x: number; z: number; G: number }) => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    e.pos.set(s.x + 0.5, s.G + 3, s.z + 0.5);
+    e.vel.set(0, 0, 0);
+    return e.pos.y;
+  }, site);
+  await page.evaluate(() => (window as any).__testPad.set('crouch', true));
+  const afterDown = await page.waitForFunction(
+    (from: number) => {
+      const e = (window as any).__lbw.game.players[0].entity;
+      return e.pos.y < from - 1.5 ? e.pos.y : false;
+    },
+    fromY, { timeout: 15000 },
+  ).then((h) => h.jsonValue() as Promise<number>);
+  await page.evaluate(() => (window as any).__testPad.set('crouch', false));
+  expect(afterDown).toBeLessThan(fromY - 1.5); // slid down more than a block and a half
+  expect(afterDown).toBeGreaterThanOrEqual(site.G + 0.99); // and the meadow catches them
+
+  // and the kid LOOKS like they're climbing: upright body, arms reaching up
+  // over the head (the e2e measures the drawn matrices, not screenshots)
+  const pose = await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    const a = e.avatar;
+    return {
+      climbing: e.climbingNow,
+      armL: a.leftArm.rotation.x, armR: a.rightArm.rotation.x,
+      groupScaleY: a.group.scale.y, bodyScaleY: a.body.scale.y,
+    };
+  });
+  expect(pose.climbing).toBe(true); // still holding the rungs at the foot of the ladder
+  expect(Math.min(pose.armL, pose.armR), 'an arm reaches up').toBeLessThan(-1.6);
+  expect(pose.groupScaleY, 'a climb is a pose, never a squash').toBeCloseTo(1, 2);
+  expect(pose.bodyScaleY).toBeCloseTo(1, 2);
+
+  // the save carries the ladder AND which wall it leans on (version 5)
+  const saved = await page.evaluate(async (s: { x: number; z: number; G: number }) => {
+    const game = (window as any).__lbw.game;
+    await game.saveNow();
+    const save = game.world.toSave();
+    const { sz, sy } = (window as any).__lbw.dims;
+    return {
+      version: save.version,
+      facing: (save.ladderFacing ?? {})[String((s.x * sz + s.z) * sy + s.G + 2)] ?? -1,
+    };
+  }, site);
+  expect(saved.version).toBe(5);
+  expect(saved.facing, 'a ladder remembers its wall').toBe(3);
+
+  // and a reload brings the ladder back, nailed to the same wall
+  await page.reload();
+  await page.waitForFunction('window.__lbw !== undefined');
+  const restored = await page.evaluate((s: { x: number; z: number; G: number }) => {
+    const S = (window as any).__lbw.game.world;
+    return {
+      block: S.get(s.x, s.G + 2, s.z),
+      facing: S.getLadderFacing(s.x, s.G + 2, s.z),
+      wall: S.get(s.x, s.G + 3, s.z + 1),
+    };
+  }, site);
+  expect(restored.block).toBe(site.ladder);
+  expect(restored.facing).toBe(3);
+  expect(restored.wall).toBe(site.stone);
+
+  // hand the meadow back: every cell we touched, byte for byte, and save
+  await page.evaluate(async (s: { x: number; z: number; G: number; orig: number[] }) => {
+    const game = (window as any).__lbw.game;
+    const S = game.world;
+    const { sz, sy } = (window as any).__lbw.dims;
+    for (let k = 0; k < 3; k++) {
+      const y = s.G + 1 + k;
+      S.set(s.x, y, s.z + 1, s.orig[k * 2]); // the wall cell
+      S.set(s.x, y, s.z, s.orig[k * 2 + 1]); // the ladder cell
+      S.ladderFacing.delete((s.x * sz + s.z) * sy + y);
+      S.touchAt(s.x, s.z);
+    }
+    await game.saveNow();
+  }, site);
 });
 
 test('the kids are dressed: knitted jumpers, denim legs, a faced head', async ({ page }) => {
@@ -2773,7 +2955,7 @@ test('doors: two blocks high and half a block deep — build, pat open, walk thr
       swingTop: save.doorFacing?.[at(1)],
     };
   }, door2);
-  expect(saved.version).toBe(4);
+  expect(saved.version).toBe(5);
   expect(saved.bottom).toBe(ids.DOOR);
   expect(saved.top).toBe(ids.DOOR_TOP);
   expect(saved.swingBottom === 0 || saved.swingBottom === 1).toBe(true);
@@ -3046,7 +3228,7 @@ test('stairs: a real step — it points away from the builder, walking one climb
       })),
     };
   }, { run: [0, 1, 2, 3].map((k) => ({ x: step.x + k, y: step.y + k, z: step.z })) });
-  expect(after.version).toBe(4);
+  expect(after.version).toBe(5);
   for (const s of after.run) {
     expect(s.block).toBe(ids.STAIRS);
     expect([0, STAIR_TURN[0]]).toContain(s.facing);

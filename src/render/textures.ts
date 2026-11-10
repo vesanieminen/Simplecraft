@@ -16,7 +16,7 @@
 import * as THREE from 'three';
 import {
   ATLAS_BOUNCY, ATLAS_BRICKS, ATLAS_CELL_COUNT, ATLAS_CHEST_BOTTOM, ATLAS_CHEST_INSIDE, ATLAS_CHEST_LID,
-  ATLAS_CHEST_OPEN_TOP, ATLAS_CHEST_SIDE, ATLAS_DIRT, ATLAS_DOOR, ATLAS_DOOR_TOP, ATLAS_DYNAMITE_CAP,
+  ATLAS_CHEST_OPEN_TOP, ATLAS_CHEST_SIDE, ATLAS_DIRT, ATLAS_DOOR, ATLAS_DOOR_TOP, ATLAS_DYNAMITE_CAP, ATLAS_LADDER,
   ATLAS_DYNAMITE_SIDE, ATLAS_GLASS, ATLAS_GLOW, ATLAS_GRASS_SIDE, ATLAS_GRASS_TOP,
   ATLAS_LEAVES, ATLAS_LOG_END, ATLAS_LOG_SIDE, ATLAS_MUSIC, ATLAS_PLANKS, ATLAS_ROCK,
   ATLAS_SAND, ATLAS_SCORCH, ATLAS_SPARKLE, ATLAS_STONE, ATLAS_WATER, ATLAS_WEAVE,
@@ -523,6 +523,26 @@ function drawChestBottom(ctx: CanvasRenderingContext2D, ox: number): void {
   outline(ctx, ox, '#33241a');
 }
 
+/**
+ * The climbing ladder. Two upright rails and bright rungs on a dark recessed
+ * back — seen from a kid's camera a side face loses about half its light to
+ * FACE_SHADE, so the wood is painted pale and the gaps deep.
+ */
+function drawLadder(ctx: CanvasRenderingContext2D, ox: number): void {
+  rect(ctx, ox, 0, 0, S, S, '#5a3d22'); // the shadowed wall behind the ladder
+  for (const y of [3, 9, 15, 21, 27]) rect(ctx, ox, 0, y, S, 2, '#493119'); // plank gaps
+  for (const x of [5, 23]) { // the two rails, with a lit edge on each
+    rect(ctx, ox, x, 0, 4, S, '#c89257');
+    rect(ctx, ox, x, 0, 1, S, '#e6b478');
+  }
+  for (const y of [2, 11, 20, 29]) { // rungs: bright in the middle so they pop
+    rect(ctx, ox, 5, y, 22, 3, '#e0b070');
+    rect(ctx, ox, 5, y, 22, 1, '#f7d9a4');
+    rect(ctx, ox, 5, y + 2, 22, 1, '#a8713a');
+  }
+  outline(ctx, ox, '#493119');
+}
+
 /** the inside of the chest's walls, seen when you look down into an opened chest */
 function drawChestInside(ctx: CanvasRenderingContext2D, ox: number): void {
   // the inside of a box is darker and smoother than its outside: plain boards,
@@ -707,6 +727,7 @@ const BLOCK_ART: Record<number, CellArt> = {
   [ATLAS_CHEST_BOTTOM]: drawChestBottom,
   [ATLAS_CHEST_INSIDE]: drawChestInside,
   [ATLAS_CHEST_OPEN_TOP]: drawChestOpenTop,
+  [ATLAS_LADDER]: drawLadder,
 };
 
 let cachedBlock: THREE.CanvasTexture | null = null;

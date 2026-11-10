@@ -25,7 +25,8 @@ Creative mode, built for a 5-year-old and a parent on one couch.
 - **🎒 A fish satchel** — every catch waits in the kid's pouch (see the 🐟
   chip on the HUD) until they press **D-pad ▾** / **I** and eat it right in
   the world, for a tasty boost.
-- **Doors you can open, proper stairs, treasure chests hidden in every world,
+- **Doors you can open, proper stairs, 🧗 ladders you can climb, treasure
+  chests hidden in every world,
   slabs, saplings that grow into trees** — and planks that finally look like
   planks.
 - Glowing stars to collect, bouncy blocks, musical blocks, and a world
@@ -196,7 +197,7 @@ things that aren't solid. Water sources and bedrock stay indestructible
 never get in the way when you place a block (the two aim at slightly
 different things so both just work).
 
-## Doors, slabs, stairs and saplings 🚪
+## Doors, slabs, stairs, ladders and saplings 🚪
 
 New in the palette (Y / △), right next to the planks they're built from:
 
@@ -227,6 +228,19 @@ New in the palette (Y / △), right next to the planks they're built from:
   because a step has a front. If it landed the wrong way round, aim at it and press
   **X / ☐ / E**: it spins a quarter turn on the spot. Each step remembers which
   way it points, across saves and restarts.
+- **🧗 Ladder** — lean a ladder on a wall and **hold jump to climb it**. It is
+  not a solid block: you walk *into* it, not onto it, and the moment you are
+  in its cell gravity simply lets go. Hold jump for a steady hand-over-hand
+  climb, hold the sneak/dive button (**Ctrl** / **B** / **◯** / **D-pad ▾** —
+  the same button you use to dive in water) to slide back down, and hold
+  nothing to cling to the rungs. Climb to the top rung and keep holding jump:
+  the last bit is automatic — the kid swings over onto whatever the ladder
+  leans against, so a ladder up a cliff becomes *getting on the wall*.
+  Ladders need a wall: you can only place one against a solid block (or on
+  top of another ladder), and it nails itself to the face you were aiming at,
+  exactly like a stair points against a wall. Placed the wrong way round? Aim
+  at it and press **X / ☐ / E**: it spins a quarter turn. Which wall it leans
+  on survives saves and restarts.
 - **🌳 Sapling** — plant one on clear ground, run off to build something,
   and about half a minute later it grows into a full tree — trunk, leaves
   and all, with a little sparkle and a toast. Saplings you leave behind

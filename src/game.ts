@@ -9,8 +9,8 @@ import { AudioKit } from './core/audio';
 import { AnimalWorld, ANIMAL_KINDS } from './core/animals';
 import {
   blockDef, CHEST, CHEST_OPEN, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, isBucket, isChestBlock,
-  isDoorBlock, isDoorTopBlock, isExplosiveBlock, isSolidBlock, isStairsBlock, isWaterId, paletteFor,
-  ROCK, rotateStairFacing, SAPLING, soundFamilyOf, StairFacing, STAIRS, WATER,
+  isDoorBlock, isDoorTopBlock, isExplosiveBlock, isLadderBlock, isSolidBlock, isStairsBlock, isWaterId, paletteFor,
+  LadderFacing, LADDER, ROCK, rotateStairFacing, SAPLING, soundFamilyOf, StairFacing, STAIRS, WATER,
 } from './core/blocks';
 import { pourableAt, useBucket } from './core/bucket';
 import { WeatherClock, WeatherKind, WeatherMode } from './core/weather';
@@ -863,6 +863,31 @@ export class Game {
     return Math.abs(dx) >= Math.abs(dz) ? (dx > 0 ? 0 : 1) : (dz > 0 ? 2 : 3);
   }
 
+  /**
+   * Which way a new ladder's climbing side faces: away from the wall the kid
+   * aimed at (the empty cell is between them and the wall, so the wall→cell
+   * direction is the climb side). Aimed straight at a floor/ceiling, it faces
+   * the way they are looking.
+   */
+  private ladderFacingFromAim(lp: LocalPlayer, hit: RayHit): LadderFacing {
+    const dx = hit.px - hit.x, dz = hit.pz - hit.z;
+    if (dx !== 0 || dz !== 0) {
+      return Math.abs(dx) >= Math.abs(dz) ? (dx > 0 ? 0 : 1) : (dz > 0 ? 2 : 3);
+    }
+    const yaw = lp.entity.yaw; // forward is (sin yaw, cos yaw), as in playerEntity
+    return Math.abs(Math.sin(yaw)) >= Math.abs(Math.cos(yaw))
+      ? (Math.sin(yaw) > 0 ? 0 : 1)
+      : (Math.cos(yaw) > 0 ? 2 : 3);
+  }
+
+  /** the pet button aimed at a ladder: spin it a quarter turn on the spot */
+  private rotateLadder(hit: RayHit): void {
+    const was = this.world.getLadderFacing(hit.x, hit.y, hit.z);
+    this.world.setLadderFacing(hit.x, hit.y, hit.z, rotateStairFacing(was));
+    this.audio.place();
+    this.particles.burst(hit.x + 0.5, hit.y + 0.6, hit.z + 0.5, 0xf2c98c, 5, 0.5);
+  }
+
   /** the pet button aimed at a step: spin it a quarter turn on the spot */
   private rotateStairs(hit: RayHit): void {
     const was = this.world.getStairFacing(hit.x, hit.y, hit.z);
@@ -1076,6 +1101,21 @@ export class Game {
         const facing = door ? this.doorFacingFromAim(lp, hit) : 0;
         const stairs = id === STAIRS;
         const stairFacing = stairs ? this.stairFacingFromAim(lp, hit) : 0;
+        // A ladder is nailed to a wall, not hung in the air: the wall it leans
+        // on (opposite the climbing side) has to be a solid block, or another
+        // ladder — the one below it is how you build a ladder up a cliff face.
+        const ladder = id === LADDER;
+        const ladderFacing = ladder ? this.ladderFacingFromAim(lp, hit) : 0;
+        if (ladder) {
+          const wall: [number, number] = ladderFacing === 0 ? [-1, 0] : ladderFacing === 1 ? [1, 0]
+            : ladderFacing === 2 ? [0, -1] : [0, 1];
+          const behind = this.world.get(px + wall[0], py, pz + wall[1]);
+          const below = this.world.get(px, py - 1, pz);
+          if (!isSolidBlock(behind) && !isLadderBlock(behind) && !isLadderBlock(below)) {
+            this.particles.burst(px + 0.5, py + 0.5, pz + 0.5, 0xff5d5d, 4, 0.4);
+            return false;
+          }
+        }
         for (const [cx, cy, cz, cid] of toSet) {
           this.world.set(cx, cy, cz, cid);
           const i = worldIdx(cx, cy, cz);
@@ -1083,6 +1123,8 @@ export class Game {
           // a stair remembers which way it points; anything built over one forgets it
           if (stairs) this.world.stairFacing.set(i, stairFacing);
           else this.world.stairFacing.delete(i);
+          if (ladder) this.world.ladderFacing.set(i, ladderFacing);
+          else this.world.ladderFacing.delete(i);
           if (blockDef(cid).sparkle) this.sparkleBlocks.add(i);
         }
         this.audio.place(soundFamilyOf(id));
@@ -1134,6 +1176,7 @@ export class Game {
           const i = worldIdx(hit.x, y, hit.z);
           this.world.doorFacing.delete(i);
           this.world.stairFacing.delete(i);
+          this.world.ladderFacing.delete(i);
           this.sparkleBlocks.delete(i);
           this.saplings.delete(i);
           const c = blockDef(b).color;
@@ -1174,6 +1217,10 @@ export class Game {
         }
         if (aim && isStairsBlock(aim.block) && aim.dist <= 4.5) {
           this.rotateStairs(aim);
+          return;
+        }
+        if (aim && isLadderBlock(aim.block) && aim.dist <= 4.5) {
+          this.rotateLadder(aim);
           return;
         }
         // Aimed at the water: the pet button casts a fishing line (the
@@ -1245,6 +1292,7 @@ export class Game {
       this.saplings.delete(i);
       this.world.doorFacing.delete(i);
       this.world.stairFacing.delete(i);
+      this.world.ladderFacing.delete(i);
       // a blast that ate the bottom half of a door would leave the upper half
       // hanging in the air, so bring it down too
       const [x, y, z] = unidx(i);
@@ -1738,6 +1786,7 @@ export class Game {
     '⭐ Find a glowing star!',
     '🗝️ Find a treasure chest!',
     '🪜 Build a staircase!',
+    '🧗 Lean a ladder on a wall and hold jump to climb it!',
     '🎣 Aim at the water and press the pet button to fish!',
     '🍬 Land on a bouncy block!',
     '🎵 Step on a music block!',
