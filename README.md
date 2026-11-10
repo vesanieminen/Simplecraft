@@ -20,7 +20,7 @@ Creative mode, built for a 5-year-old and a parent on one couch.
   pigs, horses, cats and foxes — each with a voice of its own.
 - **Five kinds of fish** live in the lakes and the sea — minnows and sunfish
   travel in moving schools, and the golden fish is a rare glittering sight.
-- **🎣 Fishing** — aim at the water, press the pet button, and when the
+- **🎣 Fishing** — aim at the water, press the left trigger (LT / L2), and when the
   bobber dives, press again for a fish (see *Fishing* below).
 - **🎒 A fish satchel** — every catch waits in the kid's pouch (see the 🐟
   chip on the HUD) until they press **D-pad ▾** / **I** and eat it right in
@@ -52,7 +52,7 @@ keyboard) to open the world chooser:
 ## Fishing 🎣
 
 Any lake, pond or flooded sandpit will do: stand on the shore, **aim at the
-water** and press the pet button (**X / ☐**, or **E** on the keyboard) — your
+water** and press the left trigger (**LT / L2**, or **E** on the keyboard) — your
 kid swings a little rod and a bobber arcs out and plops onto the surface. A
 moment later something bites: the bobber dives and plops, so press the pet
 button *again*. Too early and the hook comes up empty; too late and the fish
@@ -157,9 +157,9 @@ milestone; see Roadmap. Today, each computer gets the same saved world.)
 | Left stick | Walk / swim / fly sideways |
 | Right stick | Look around / aim |
 | A / ✕ | Jump (hold while flying = up) |
-| LT / L2 | **Pet animals · open/close doors · open chests · cast & reel the fishing line · scoop or pour with the bucket** |
-| RT / R2 | **Place block** (with a bucket in hand: scoop the water you look at, or pour it out) |
-| X / ☐ | **Break block** (hold while flying = down) |
+| LT / L2 | **Build AND do the nice thing** — place the selected block (doors, ladders, chests, everything) *and* pet animals, open/close doors, open chests, cast & reel the fishing line, scoop or pour with the bucket. When the aim holds both a pet and a spot to build, the nice thing wins. Hold while flying = down |
+| RT / R2 | **Break block** |
+| X / ☐ | Also **Break block** (an extra alias for muscle memory) |
 | LB / L1 | Previous block · previous costume on the join card |
 | RB / R1 | Next block · next costume on the join card |
 | Y / △ | Open the block palette (before anyone joins: choose a world) |
@@ -177,12 +177,15 @@ want is four presses, not twenty.
 WASD move · arrow keys look · Space jump · Ctrl crouch · RMB place · LMB break ·
 Q/R cycle blocks · F palette · E pet animals / open doors · Esc menu · Enter confirm.
 
-*(The build/break buttons were swapped in November 2026 — kids build far
-more than they dig, so the comfy left trigger / right mouse button now
-builds. And in the same month the interaction moved to **LT / L2** (the
-pet-and-open button), because X was doing double duty as break *and*
-petting. Keyboard: **E** pets and opens, **R-Click** builds, **L-Click**
-breaks. The Grown-Ups cannot turn this back; muscle memory will follow.)*
+*(The trigger layout settled in November 2026, over two sittings: first the
+kids wanted the comfy left trigger to do the building (they build far more
+than they dig), then they wanted **everything** on it — "actions should
+happen with the L2/LT button: placing a block, petting an animal, doors,
+ladders". So **LT / L2 is both hands**: the nice thing (pet · open · pour ·
+reel · spin) if the aim holds one, otherwise the block. **RT / R2 breaks**,
+and **X / ☐** kept its break alias. Keyboard: **E** pets and opens,
+**R-Click** builds, **L-Click** breaks — unchanged all year. The Grown-Ups
+cannot turn this back; muscle memory will follow.)*
 
 ## Flowers you can actually pick
 
@@ -205,7 +208,7 @@ New in the palette (Y / △), right next to the planks they're built from:
   real door: two panels below, a tall panel with a little window above,
   hinges on one side and a brass knob at hand height. One press of the build
   trigger puts the whole thing in — no stacking blocks to size it. Press
-  **X / ☐ / E** while looking at any part of it and the whole door swings
+  **LT / L2 / E** while looking at any part of it and the whole door swings
   open with a wooden creak: closed it keeps the rain (and cows) out, open
   it's a thin standing panel you walk straight through. Break any half and
   the whole door comes down. It stands the way you placed it, and it
@@ -226,7 +229,7 @@ New in the palette (Y / △), right next to the planks they're built from:
   staircase, half a block per step: four steps is a door-step, eight is a wall.
   Walking into the back of a step is a real climb (jump, or spin it round),
   because a step has a front. If it landed the wrong way round, aim at it and press
-  **X / ☐ / E**: it spins a quarter turn on the spot. Each step remembers which
+  **LT / L2 / E**: it spins a quarter turn on the spot. Each step remembers which
   way it points, across saves and restarts.
 - **🧗 Ladder** — lean a ladder on a wall and **hold jump to climb it**. It is
   not a solid block: you walk *into* it, not onto it, and the moment you are
@@ -239,7 +242,7 @@ New in the palette (Y / △), right next to the planks they're built from:
   Ladders need a wall: you can only place one against a solid block (or on
   top of another ladder), and it nails itself to the face you were aiming at,
   exactly like a stair points against a wall. Placed the wrong way round? Aim
-  at it and press **X / ☐ / E**: it spins a quarter turn. Which wall it leans
+  at it and press **LT / L2 / E**: it spins a quarter turn. Which wall it leans
   on survives saves and restarts.
 - **🌳 Sapling** — plant one on clear ground, run off to build something,
   and about half a minute later it grows into a full tree — trunk, leaves
@@ -260,7 +263,7 @@ hides the same twelve treasures forever, and the hint ticker likes to nudge:
 
 A chest is a squat wooden box (0.85 of a block tall) painted with a brass lock,
 an iron-banded lid seen from above and dark boards underneath. Look at one and
-press **X / ☐ / E** — the same button that pets animals, swings doors and turns
+press **LT / L2 / E** — the same trigger that pets animals, swings doors and turns
 stairs — and the lid comes up: gold particles, a jingle, and a toast telling
 everybody on the couch what was inside. The treasure is rolled when the lid
 lifts, and there is no inventory in this game, so the treasure is something
@@ -292,7 +295,7 @@ is a fair game of hide and seek.
 
 The meadow used to have sheep, bunnies, chickens and cows. Now there are
 **eight kinds**, all box-built, all wandering, all harmless, all petable
-with **X / ☐** (they hop and say hello):
+with **LT / L2** (they hop and say hello):
 
 - **🐷 Pig** — pink, flat snout, curly tail; goes *oink oink*.
 - **🐴 Horse** — tall, brown, dark mane and tail, white blaze; a proper
@@ -395,10 +398,10 @@ obeys the same rules the big game uses:
 The water block in the palette became a **tool**: every kid always carries
 exactly one bucket, full or empty (the name under the crosshair says which).
 
-- **Empty, look at a spring, press build (RT / R2) or pet (LT / L2)** — the
+- **Empty, look at a spring, press the left trigger (LT / L2)** — the
   bucket comes back full. Only a *source* fills it: travelling water is too
   thin to carry, which is the whole water sim in one sentence.
-- **Full, look at a gap, press build** — a new eternal spring appears right
+- **Full, look at a gap, press the same trigger** — a new eternal spring appears right
   there, and the water sets off spreading exactly like the sea does. Moats,
   waterfalls and indoor ponds are one bucket away.
 - **Scoop the spring back out and the flood runs home**: travelling water can
@@ -562,8 +565,8 @@ allowed against a neighbour that really fills its cell, which is why the walls
 around a treasure chest (0.85 of a cell tall) keep their faces — a regression
 this round, counted quad by quad in one chunk.
 New this round: a **two-block-high, half-a-block-deep door** gets built with
-one press of the build trigger, stops a walking kid right at the panel (not
-half a block short of it), swings open under the pet button, lets them walk
+one press of LT, stops a walking kid right at the panel (not
+half a block short of it), swings open under the same trigger, lets them walk
 through, closes from the other side, comes down as a whole door when any half
 is broken, and reappears after a reload from the save with its swing;
 the **block palette** really walks its grid — left/right step cells, up/down
@@ -594,14 +597,14 @@ npm run typecheck
 **Xbox One** pad and a **PS5 DualSense** — both worked fine: joining, both
 sticks, building, palette, menus, split screen and waking a sleeping
 controller. The items below are what to re-check after any input change; the
-**swapped LT/RT build/break mapping**, the new **door / slab / stairs /
-sapling** blocks, the **treasure chests** (**X** opens a lid, and a boost
-badge appears on the HUD), the **first-person visibility fix**, the **Leave /
-Waiting
-Players** rows, and the new **My Worlds** saved-game list all still owe the
-couch a turn. Virtual pads in the automated tests drive
-the exact same input abstraction (dead zones, edge detection, button mapping
-all shared) — a good regression net, still not a substitute for hardware QA.
+**LT-builds-and-pets / RT-breaks trigger remap** (November 2026, round two),
+the **door / slab / stairs / sapling** blocks, the **treasure chests** (**LT**
+opens a lid, and a boost badge appears on the HUD), the **first-person
+visibility fix**, the **Leave / Waiting Players** rows, and the **My Worlds**
+saved-game list all still owe the couch a turn. Virtual pads in the automated
+tests drive the exact same input abstraction (dead zones, edge detection,
+button mapping all shared) — a good regression net, still not a substitute for
+hardware QA.
 
 1. Press **Y / △** on a pad at the welcome screen → the world chooser opens
    on that pad: D-pad moves, left/right switch world and seed, **✨ Surprise
@@ -610,30 +613,38 @@ all shared) — a good regression net, still not a substitute for hardware QA.
 2. Press A on each pad → two join cards appear. In a card: D-pad changes
    name/color, A joins, B cancels.
 3. Right stick looks around on both pads simultaneously.
-4. **LT places / RT breaks** (the November 2026 swap — check both pads
-   really follow the new mapping); LB/RB cycle; Y opens the palette;
-   D-pad + A picks a block while the other kid keeps running around.
+4. **LT builds AND pets / RT breaks** (the November 2026 remap — check both
+   pads really follow it): LT on free ground lays the selected block; LB/RB
+   cycle; Y opens the palette; D-pad + A picks a block while the other kid
+   keeps running around.
 5. Walk up to a flower and hold **RT** — it pops into particles (and the
    block behind it survives, so you can also dig the ground under it).
-   Walk up to a sheep and tap **X** — it hops and beeps.
-5b. Place a **door**: it should stand two blocks high out of one press, half
-   a block thick. Look at it (any half) and tap **X**: the whole door swings
-   open with a creak, walk through, tap X from the other side to close it.
-   Break the top half: the whole door comes down. Place a **slab**: you step up
-   onto the flat plate from any side, no jumping. Place **stairs**: they should
-   point *away* from you (riser against whatever you were aiming at); walk up
-   the tread side and you climb a whole block without jumping, walk into the
-   back and you stop at the riser; aim at one and tap **X** and it turns a
-   quarter turn. Find (or place) a **treasure chest** and tap **X**: the lid
+   **X** breaks too, same action. Walk up to a sheep and tap **LT** — it hops
+   and beeps *and no block goes down*, even with a brick selected (the nice
+   thing outranks the build). Then LT on free ground beside the sheep: block.
+   Hold **LT** with the trigger on a door: it opens the door once — it does
+   *not* also wall the doorway in.
+5b. Place a **door** with LT: it should stand two blocks high out of one
+   press, half a block thick. Look at it (any half) and tap **LT**: the whole
+   door swings open with a creak, walk through, tap LT from the other side to
+   close it. Break the top half with **RT**: the whole door comes down. Place
+   a **slab**: you step up onto the flat plate from any side, no jumping.
+   Place **stairs** with LT: they should point *away* from you (riser against
+   whatever you were aiming at); walk up the tread side and you climb a whole
+   block without jumping, walk into the back and you stop at the riser; aim
+   at one and tap **LT** and it turns a quarter turn (no block lands on it).
+   Find (or place) a **treasure chest** and tap **LT**: the lid
    comes up, a toast names the treasure, and a boost (if you drew Zoomy or
-   Boing boots) shows a badge on that player's HUD — tap X again and the chest
+   Boing boots) shows a badge on that player's HUD — tap LT again and the chest
    says it is empty. Plant a **sapling**, wait a moment:
    a tree. In the **block palette**, check the D-pad really goes up/down as
    well as left/right. Check all of this on the pad, not just in the
-   automated tests, and build/break a few times with the swapped triggers.
+   automated tests, and build/break a few times on both triggers.
 6. Walk into a lake and hold **A** — you kick up to the surface, then hop out
    onto the bank instead of paddling in circles (works from the Islands sea too).
-7. Start menu → Fly ON → A rises, X descends, gentle landing.
+7. Start menu → Fly ON → A rises, **LT** descends (held LT in flight is the
+   descent button only — it does not lay blocks down on the way), gentle
+   landing.
 8. Start → Grown-Ups: **Freeze Game** stops players *and* animals dead
    (menus still work), **Split Screen** cycles the layout, **Choose World**
    opens the picker, **Reset World** asks twice. Open **💾 My Worlds**: the
