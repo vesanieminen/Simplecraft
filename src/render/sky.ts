@@ -13,7 +13,7 @@
 import * as THREE from 'three';
 import { WORLD_SX, WORLD_SZ } from '../core/world';
 import { WeatherKind } from '../core/weather';
-import { SunState } from './shaders';
+import { patchStarTwinkle, ShaderKit, SunState } from './shaders';
 
 export const DAY_SECONDS = 12 * 60;
 /** the sun's elevation at a day-phase (0..1); > 0 means the sun is up */
@@ -45,6 +45,18 @@ function blobTexture(): THREE.CanvasTexture {
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.NoColorSpace; // sky colours here are plain linear values
   return t;
+}
+
+/** A soft additive halo sprite — the moon's silver aura and the sun's low
+ *  horizon glare. Sprites billboard themselves for free and ride wherever
+ *  their parent ball goes, so the orbit drags them around the sky. */
+function glowSprite(scale: number, color: number, opacity: number): THREE.Sprite {
+  const spr = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: blobTexture(), color, transparent: true, opacity,
+    blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+  }));
+  spr.scale.setScalar(scale);
+  return spr;
 }
 
 /** A slow cloud field: puffy textured quads that drift and fade with the sky. */
@@ -240,7 +252,7 @@ export interface SkyEnv {
   sunBallDir(): THREE.Vector3;
 }
 
-export function createSky(scene: THREE.Scene): SkyEnv {
+export function createSky(scene: THREE.Scene, kit: ShaderKit): SkyEnv {
   // The sky hangs around the middle of the world, not the coordinate origin: on a
   // 128-block map the origin is a CORNER, and a dome centred there reaches 450
   // blocks from a camera near spawn — past the far plane, which used to punch a
@@ -283,22 +295,34 @@ export function createSky(scene: THREE.Scene): SkyEnv {
   const moon = mkBall(7, 0xe6ecf8, 0xc7d8f2, 0.2);
   moon.position.set(0, -230, -120);
   orbit.add(sun, moon);
+  // the horizon glare: a wide warm wash around the low sun, and a silver
+  // aura around the moon. Both scale and breathe with the clock (update()),
+  // both are one sprite each — the cheapest "dramatic sky" money can buy.
+  const glare = glowSprite(40, 0xffc46a, 0);
+  sun.add(glare);
+  const moonHalo = glowSprite(44, 0xbcd2f0, 0.14);
+  moon.add(moonHalo);
 
-  // stars: a dome of points that fade in after dusk
+  // stars: a dome of points that fade in after dusk — and each one breathes
+  // on its own seed, patched through the kit so the sky is never a still photo
   const starN = 900;
   const starPos = new Float32Array(starN * 3);
+  const starSeed = new Float32Array(starN);
   for (let i = 0; i < starN; i++) {
     const v = new THREE.Vector3().randomDirection();
     if (v.y < 0.05) v.y = 0.05 + Math.random() * 0.9;
     v.normalize().multiplyScalar(SKY_RADIUS * 0.9);
     starPos.set([v.x, v.y, v.z], i * 3);
+    starSeed[i] = Math.random();
   }
   const starGeo = new THREE.BufferGeometry();
   starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+  starGeo.setAttribute('aStarSeed', new THREE.BufferAttribute(starSeed, 1));
   const starMat = new THREE.PointsMaterial({
     color: 0xffffff, size: 1.6, sizeAttenuation: false,
     transparent: true, opacity: 0, depthWrite: false, fog: false,
   });
+  patchStarTwinkle(starMat, kit);
   const stars = new THREE.Points(starGeo, starMat);
   stars.frustumCulled = false;
   stars.renderOrder = -2;
@@ -463,6 +487,17 @@ export function createSky(scene: THREE.Scene): SkyEnv {
       sunState.low = THREE.MathUtils.clamp((0.5 - sunWorldDir.y) / 0.3, 0, 1)
         * (1 - wet * 0.5) * (sunIsDown ? 0.2 : 1);
       sunState.tint.copy(dir.color);
+
+      // Horizon glare: a warm wash that swells around the sun as it dips
+      // toward the horizon — the bare ball used to read as a sticker. It
+      // breathes slightly and hides when the sky itself is hidden (marks).
+      const glareSwell = sunState.low * sunState.low;
+      glare.scale.setScalar(34 + 96 * sunState.low + Math.sin(kit.time * 0.7) * 3);
+      (glare.material as THREE.SpriteMaterial).opacity =
+        marks ? glareSwell * 0.5 * (1 - wet * 0.55) : 0;
+      // The moon keeps a silver aura that deepens with the night.
+      (moonHalo.material as THREE.SpriteMaterial).opacity =
+        marks ? 0.10 + darkness * 0.16 : 0;
 
       // The shadow light hovers over the followed spot (Game points it at the
       // players). It lags the walk with a lerp, and snaps to the map's texel

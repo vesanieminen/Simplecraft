@@ -465,6 +465,9 @@ export interface GrownUpActions {
   /** the sun's shadow map (on/off) — Grown-Ups escape hatch for older tablets */
   shadows: () => string;
   toggleShadows: () => void;
+  /** torchlight and every other point light in the world (on/off) */
+  lights: () => string;
+  toggleLights: () => void;
 }
 
 export class GrownUpsMenu extends Overlay {
@@ -526,6 +529,12 @@ export class GrownUpsMenu extends Overlay {
         label: 'Shadows',
         val: () => actions.shadows(),
         fn: () => { actions.toggleShadows(); },
+      },
+      {
+        icon: '🔥',
+        label: 'Lights',
+        val: () => actions.lights(),
+        fn: () => { actions.toggleLights(); },
       },
       { icon: '◀️', label: 'Back', fn: () => this.close() },
     ];

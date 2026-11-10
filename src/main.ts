@@ -2,7 +2,7 @@ import './ui/styles.css';
 import {
   AIR, ATLAS_CHEST_BOTTOM, ATLAS_CHEST_INSIDE, ATLAS_CHEST_LID, ATLAS_CHEST_OPEN_TOP, ATLAS_CHEST_SIDE, ATLAS_CELL_COUNT, ATLAS_LADDER,
   BUCKET, CHEST, CHEST_OPEN, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, DYNAMITE, FLOWER_RED, FLOWER_YELLOW,
-  GLASS, GRASS, isBucket, LADDER, LEAVES, PLANKS, ROCK, SAND, SAPLING, SCORCH, SLAB, STAIRS, STONE, TALLGRASS, WATER, WATER_FLOW, WOOD,
+  GLASS, GRASS, isBucket, LADDER, LEAVES, PLANKS, ROCK, SAND, SAPLING, SCORCH, SLAB, STAIRS, STONE, TALLGRASS, TORCH, WATER, WATER_FLOW, WOOD,
 } from './core/blocks';
 import { WORLD_SX, WORLD_SY, WORLD_SZ, CHUNK } from './core/world';
 import { buildChunkGeometry } from './core/mesher';
@@ -37,6 +37,13 @@ async function boot(): Promise<void> {
       dayPhase: () => number;
       bucketAt: (playerIdx: number, aim: Record<string, number>) => boolean;
       padMap: Record<string, unknown>;
+      /** the light keeper: what the shaders were told last frame */
+      lightsNow: () => {
+        count: number; max: number; flames: number; emitters: number;
+        lights: { x: number; y: number; z: number; r: number; kind: string }[];
+      };
+      /** the shader kit's shared animation clock (seconds, wrapped) */
+      shaderTime: () => number;
     };
   };
   // test/demo hook: virtual controllers drive the same input abstraction
@@ -47,7 +54,7 @@ async function boot(): Promise<void> {
     ids: {
       AIR, GRASS, STONE, SAND, ROCK, WATER, WATER_FLOW, WOOD, PLANKS, LEAVES, GLASS,
       FLOWER_RED, FLOWER_YELLOW, TALLGRASS, DYNAMITE, SCORCH, BUCKET,
-      SAPLING, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, SLAB, STAIRS, CHEST, CHEST_OPEN, LADDER,
+      SAPLING, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, SLAB, STAIRS, CHEST, CHEST_OPEN, LADDER, TORCH,
     },
     chunkGeometry: buildChunkGeometry,
     /**
@@ -91,6 +98,13 @@ async function boot(): Promise<void> {
       const g = (window as unknown as { __lbw: { game: Game } }).__lbw.game;
       return g.bucketForTest(g.players[playerIdx], aim as never);
     },
+    /** the point-light system: who the shaders were lighting last frame */
+    lightsNow: () => {
+      const g = (window as unknown as { __lbw: { game: Game } }).__lbw.game;
+      return { ...g.lights.debug(), emitters: g.lights.emitterCount };
+    },
+    /** the shared shader clock — flicker and foam breathe on this */
+    shaderTime: () => (window as unknown as { __lbw: { game: Game } }).__lbw.game.chunks.shaders.time,
   };
 }
 

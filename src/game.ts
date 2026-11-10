@@ -10,7 +10,7 @@ import { AnimalWorld, ANIMAL_KINDS } from './core/animals';
 import {
   blockDef, CHEST, CHEST_OPEN, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, isBucket, isChestBlock,
   isDoorBlock, isDoorTopBlock, isExplosiveBlock, isLadderBlock, isSolidBlock, isStairsBlock, isWaterId, paletteFor,
-  LadderFacing, LADDER, ROCK, rotateStairFacing, SAPLING, soundFamilyOf, StairFacing, STAIRS, WATER,
+  LadderFacing, LADDER, ROCK, rotateStairFacing, SAPLING, soundFamilyOf, StairFacing, STAIRS, TORCH, WATER,
 } from './core/blocks';
 import { pourableAt, useBucket } from './core/bucket';
 import { WeatherClock, WeatherKind, WeatherMode } from './core/weather';
@@ -36,6 +36,7 @@ import { LocalPlayer } from './players/localPlayer';
 import { PlayerEntity } from './players/playerEntity';
 import { AVATAR_COLORS, AVATAR_MODELS, modelDef, NICKNAMES } from './players/avatar';
 import { ChunkMeshManager } from './render/chunkMeshes';
+import { LightKeeper } from './render/lights';
 import { SandFalls } from './render/sandFalls';
 import { SunState } from './render/shaders';
 import { createSky, SHADOW_TEXEL, SKY_CLEAR, SKY_FAR, SkyEnv } from './render/sky';
@@ -80,6 +81,8 @@ export class Game {
   particles!: ParticleSystem;
   animals!: AnimalWorld;
   starField!: StarField;
+  /** torches, glow blocks, opened treasure and stars publish their light here */
+  lights!: LightKeeper;
   viewportMgr = new ViewportManager();
   ui = new UiManager();
 
@@ -118,6 +121,12 @@ export class Game {
    * pass at all and unshadowed materials — the older tablets' escape hatch.
    */
   shadowsEnabled = true;
+  /**
+   * The Grown-Ups "Lights" switch (default ON, persisted). Off = torches
+   * still stand and burn, but no light pools: the night goes back to being
+   * lit only by the moon. Cheap escape hatch for the oldest tablets.
+   */
+  lightsEnabled = true;
   /** Shadow filter quality, auto-set once at boot from the GPU: a real one
    *  gets soft PCF on a 2048² map, software GL crisp single-tap on 1024². */
   shadowQuality: 'soft' | 'fast' = 'soft';
@@ -207,10 +216,15 @@ export class Game {
     // whatever the sky does not cover should look like hazy sky, never the black
     // void behind the canvas (each split-screen pane is cleared to this)
     this.renderer.setClearColor(SKY_CLEAR, 1);
+    // ACES filmic: the whole look leans on it — torch pools roll off warm
+    // instead of clipping to white, the sun sets through film colours, and
+    // the night keeps its depth. Exposure is the master brightness.
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.25;
     this.scene = new THREE.Scene();
     this.chunks = new ChunkMeshManager(this.scene, this.world);
     this.chunks.rebuildAll();
-    this.skyEnv = createSky(this.scene);
+    this.skyEnv = createSky(this.scene, this.chunks.shaders);
     // the saved sky settings (if any) decide what the first frame looks like
     this.skyEnv.setDayMode(this.dayMode);
     if (this.weather.kind) this.skyEnv.setWeather(this.weather.kind, this.weather.intensity);
@@ -242,6 +256,10 @@ export class Game {
     this.fishing = new FishingManager(
       this.scene, this.world, this.particles, this.audio, (m, ms) => this.ui.toast(m, ms),
     );
+    // the night needs friends: torches, glow blocks and opened treasure feed
+    // the shader kit's light uniforms through this keeper (render/lights.ts)
+    this.lights = new LightKeeper(this.scene, this.world, this.chunks.shaders);
+    this.lights.restoreFromWorld(); // a restored save's torches are already lit
 
     // dynamite: sticks that came with the save get their fuses back
     this.dynamite = new DynamiteManager(
@@ -278,6 +296,7 @@ export class Game {
     this.world.onCellChanged = (x, y, z) => {
       this.sand.notify(x, y, z);
       this.water.notify(x, y, z);
+      this.lights.onCell(x, y, z, this.world.get(x, y, z)); // torches light up the moment they land
       this.shadowWorldEpoch++; // the baked shadow map just went stale
     };
 
@@ -620,6 +639,14 @@ export class Game {
               this.ui.toast(this.shadowsEnabled
                 ? 'Sun shadows on — long golden afternoons 🌤️'
                 : 'Sun shadows off — a bit faster on older tablets', 2600);
+            },
+            lights: () => (this.lightsEnabled ? 'On' : 'Off'),
+            toggleLights: () => {
+              this.lightsEnabled = !this.lightsEnabled;
+              this.saveSettings();
+              this.ui.toast(this.lightsEnabled
+                ? 'Torchlight on — the dark is friendlier now 🔥'
+                : 'Torchlight off — only the moon lights the night', 2600);
             },
           },
           );
@@ -1169,6 +1196,17 @@ export class Game {
             return false;
           }
         }
+        // A torch belongs on a post or a wall — like a ladder, it refuses to
+        // hang in thin air. Solid ground below, or a solid block beside it.
+        if (id === TORCH) {
+          const footing = this.world.get(px, py - 1, pz);
+          const sides: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+          const onWall = sides.some(([sx, sz]) => isSolidBlock(this.world.get(px + sx, py, pz + sz)));
+          if (!isSolidBlock(footing) && !onWall) {
+            this.particles.burst(px + 0.5, py + 0.5, pz + 0.5, 0xff5d5d, 4, 0.4);
+            return false;
+          }
+        }
         for (const [cx, cy, cz, cid] of toSet) {
           this.world.set(cx, cy, cz, cid);
           const i = worldIdx(cx, cy, cz);
@@ -1554,7 +1592,7 @@ export class Game {
       if (!raw) return;
       const s = JSON.parse(raw) as {
         layout?: string; muted?: boolean; chests?: boolean; weather?: string; day?: string;
-        shadows?: boolean;
+        shadows?: boolean; lights?: boolean;
       };
       if (s.layout === 'auto' || s.layout === 'horizontal' || s.layout === 'vertical' || s.layout === 'grid2x2') {
         this.layout = s.layout;
@@ -1567,6 +1605,7 @@ export class Game {
       }
       if (s.day === 'auto' || s.day === 'day' || s.day === 'night' || s.day === 'none') this.dayMode = s.day;
       if (typeof s.shadows === 'boolean') this.shadowsEnabled = s.shadows;
+      if (typeof s.lights === 'boolean') this.lightsEnabled = s.lights;
     } catch { /* corrupted settings: defaults win */ }
   }
 
@@ -1575,7 +1614,7 @@ export class Game {
       localStorage.setItem(this.settingsKey, JSON.stringify({
         layout: this.layout, muted: this.audio.muted,
         chests: this.chestsAllowed, weather: this.weatherMode, day: this.dayMode,
-        shadows: this.shadowsEnabled,
+        shadows: this.shadowsEnabled, lights: this.lightsEnabled,
       }));
     } catch { /* storage unavailable */ }
   }
@@ -1784,6 +1823,7 @@ export class Game {
       if (b === SAPLING) this.saplings.set(i, -this.saplingGrowSeconds + 10);
     }
     this.dynamite.restoreFromWorld();
+    this.lights.restoreFromWorld(); // the new world's torches, lamps and opened treasure
     for (const p of this.players) p.respawnAt(this.spawnPoint.clone());
     this.lastRevision = this.world.revision;
     void this.saveNow(); // remember the (possibly just restored) world
@@ -1933,6 +1973,10 @@ export class Game {
     // ...and the shader kit's shared uniforms (time, sun, haze colour) move
     // with it — one uniform set, no program rebuilds, ever
     if (this.scene.fog) this.chunks.tickShaders(dt, this.skyEnv.sunInfo(), this.scene.fog.color);
+    // the world's lamps: gather the nearest emitters around the camera being
+    // rendered and publish them into the kit's uniform arrays (numbers only —
+    // the materials never recompile, and the flicker rides the kit clock)
+    this.lights.sync(this.renderCam ?? this.idleCamera, this.starField.stars, this.lightsEnabled);
     this.chunks.update(4);
 
     if (!this.frozen && this.players.length > 0) {
