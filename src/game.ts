@@ -38,7 +38,7 @@ import { AVATAR_COLORS, AVATAR_MODELS, modelDef, NICKNAMES } from './players/ava
 import { ChunkMeshManager } from './render/chunkMeshes';
 import { SandFalls } from './render/sandFalls';
 import { SunState } from './render/shaders';
-import { createSky, SKY_CLEAR, SKY_FAR, SkyEnv } from './render/sky';
+import { createSky, SHADOW_TEXEL, SKY_CLEAR, SKY_FAR, SkyEnv } from './render/sky';
 import { SplitLayout, ViewportManager } from './render/viewportManager';
 import { Hud } from './ui/hud';
 import {
@@ -128,6 +128,18 @@ export class Game {
   private lastBucketHint = -10;
   /** the camera the last frame rendered through — the sky sits on it */
   private renderCam: THREE.Camera | null = null;
+  /** the sky's shadow-casting light — the game steers its map redraw (one
+   *  per frame, from the donor pane: see pickShadowDonor) */
+  private sunLight!: THREE.DirectionalLight;
+  /** True when this frame's pane renders should redraw the shadow map. */
+  private shadowWantRedraw = false;
+  /** voxel-change counter; a new value means the baked map is stale */
+  private shadowWorldEpoch = 0;
+  private lastShadowWorldEpoch = -1;
+  /** redraw at least this often (game seconds), so the sun drift catches up */
+  private static readonly SHADOW_HEARTBEAT = 1.5;
+  private shadowHeartbeat = 0;
+  private lastShadowFocus = new THREE.Vector3(0, 1e3, 0);
   private time = 0;
   private sparkleBlocks = new Set<number>();
   dynamite!: DynamiteManager;
@@ -197,6 +209,7 @@ export class Game {
     // shows exactly the shadows that screen can see — no shared state to leak.
     // updateShadowFocus below just steers the follow box to the players.
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.sunLight = this.skyEnv.getSunLight();
     this.applyShadowSettings();
     this.particles = new ParticleSystem(this.scene);
 
@@ -250,6 +263,7 @@ export class Game {
     this.world.onCellChanged = (x, y, z) => {
       this.sand.notify(x, y, z);
       this.water.notify(x, y, z);
+      this.shadowWorldEpoch++; // the baked shadow map just went stale
     };
 
     // ---- input ----
@@ -1289,6 +1303,11 @@ export class Game {
   private applyShadowSettings(): void {
     if (this.renderer.shadowMap.enabled === this.shadowsEnabled) return;
     this.renderer.shadowMap.enabled = this.shadowsEnabled;
+    if (this.shadowsEnabled && this.sunLight) {
+      // flipping the switch back on: bake a fresh map right away
+      this.sunLight.shadow.needsUpdate = true;
+      this.shadowHeartbeat = Game.SHADOW_HEARTBEAT;
+    }
     // three bakes shadow-ness into every program's cache key — poke every
     // material once so each is recompiled without (or back with) the map
     const seen = new Set<THREE.Material>();
@@ -1311,7 +1330,7 @@ export class Game {
    * followed — even while shadows are off — so flipping the switch back on
    * never reveals a stale box far behind the kids.
    */
-  private updateShadowFocus(): void {
+  private updateShadowFocus(dt: number): void {
     if (this.players.length > 0) {
       let x = 0, y = 0, z = 0;
       for (const p of this.players) {
@@ -1323,6 +1342,49 @@ export class Game {
       const c = this.renderCam ?? this.idleCamera;
       this.skyEnv.focusShadow(c.position.x, Math.max(4, c.position.y - 8), c.position.z);
     }
+
+    // When is a map redraw actually worth its cost (≈200 ms on CI's software
+    // GL)? Only when something that casts a shadow moved: a kid is moving
+    // (their own shadow must ride along, and the follow box crawls with them),
+    // voxels changed under the box, the follow box slid a full texel, or the
+    // slow sun-drift heartbeat came due. Welcome screens and idle menus —
+    // where most CI time is spent — then pay one redraw per heartbeat only.
+    let moving = false;
+    for (const p of this.players) {
+      const v = p.entity.vel;
+      if (v.x * v.x + v.y * v.y + v.z * v.z > 0.16) {
+        moving = true;
+        break;
+      }
+    }
+    const focusMoved = this.players.length > 0
+      && this.skyEnv.shadowFocusPos().distanceToSquared(this.lastShadowFocus)
+        > SHADOW_TEXEL * SHADOW_TEXEL;
+    const worldChanged = this.shadowWorldEpoch !== this.lastShadowWorldEpoch;
+    this.shadowHeartbeat += dt;
+    const due = this.shadowHeartbeat >= Game.SHADOW_HEARTBEAT;
+    const want = this.shadowsEnabled && (moving || focusMoved || worldChanged || due);
+    if (want) {
+      this.shadowHeartbeat = 0;
+      this.lastShadowFocus.copy(this.skyEnv.shadowFocusPos());
+      this.lastShadowWorldEpoch = this.shadowWorldEpoch;
+    }
+    this.shadowWantRedraw = want;
+  }
+
+  /**
+   * Which pane's render call redraws the sun's shadow map this frame: the
+   * first camera whose layer view takes in every avatar (third-person panes
+   * and the welcome/join cameras always do). Before the map exists at all it
+   * is pane 0 by necessity — someone has to bake it first.
+   */
+  private pickShadowDonor(cameras: THREE.Camera[]): number {
+    if (!this.sunLight.shadow.map) return 0; // nothing baked yet: pane 0 bakes
+    for (let i = 0; i < cameras.length; i++) {
+      const lp = this.players.find((p) => p.camera === cameras[i]);
+      if (!lp || lp.showOwnBody) return i;
+    }
+    return 0;
   }
 
   /**
@@ -1835,8 +1897,17 @@ export class Game {
     }
     this.applyAvatarLayers(cameras);
     // steer the sun's shadow follow box before any pane renders
-    this.updateShadowFocus();
-    this.viewportMgr.render(this.renderer, this.scene, cameras);
+    this.updateShadowFocus(dt);
+    // ONE shadow map redraw per frame at most, and only when something that
+    // casts shadows actually moved (see updateShadowFocus): just the donor
+    // pane's render call marks the map dirty, every other pane samples the
+    // map it just baked (at most one frame stale). A first-person kid's own
+    // body is the one thing a donor-less frame can skip — nobody sees
+    // through that camera anyway.
+    const donor = this.shadowsEnabled ? this.pickShadowDonor(cameras) : -1;
+    this.viewportMgr.render(this.renderer, this.scene, cameras, (i) => {
+      if (i === donor && this.shadowWantRedraw) this.sunLight.shadow.needsUpdate = true;
+    });
 
     // HUD updates
     for (let i = 0; i < this.players.length; i++) {

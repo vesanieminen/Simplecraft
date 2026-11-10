@@ -3495,6 +3495,9 @@ test('the player menu fits inside a half-height stacked pane — no overflow', a
 });
 
 test('grown-up settings — split layout and sound — come back after a reload', async ({ page }) => {
+  test.slow(); // three boots in one test, and the sun's shadow pass is real
+  // work on the software rasteriser CI runs on — without the extra headroom
+  // this one sits right on the default 45 s timeout
   await boot(page);
   await joinWithPad(page);
 
@@ -4214,6 +4217,22 @@ test('the sun throws real blocky shadows, and row 9 of Grown-Ups flips them', as
   // anything we build runs down the screen towards the camera.
   await page.evaluate(() => (window as any).__lbw.setDayMode('day'));
   await page.waitForFunction(() => (window as any).__lbw.game.sunInfo().dir.y > 0.15, null, { timeout: 8000 });
+
+  // The user rule: shadows must fall away from the sun you actually SEE. The
+  // shadow light and the lit ball in the sky have to share one azimuth — if
+  // the ball's direction ever drifts off the light again, this catches it.
+  const aim = await page.evaluate(() => {
+    const g = (window as any).__lbw.game;
+    let sun: any = null;
+    g.scene.traverse((o: any) => { if (o.isDirectionalLight && o.castShadow) sun = o; });
+    const ball = g.skyEnv.sunBallDir() as { x: number; y: number; z: number };
+    const light = sun.position.clone().sub(sun.target.position).normalize();
+    const az = (v: { x: number; z: number }) => Math.atan2(v.x, v.z);
+    return { azDot: Math.cos(az(light) - az(ball)), lightY: light.y as number };
+  });
+  expect(aim.azDot, 'shadow light and visible sun share one azimuth').toBeGreaterThan(0.999);
+  expect(aim.lightY, 'and the light stands above the meadow').toBeGreaterThan(0);
+
   await page.waitForFunction('window.__lbw.game.players[0].target !== null', null, { timeout: 15000 });
   await page.evaluate(() => {
     const g = (window as any).__lbw.game;
