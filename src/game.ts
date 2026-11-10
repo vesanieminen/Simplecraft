@@ -37,6 +37,7 @@ import { PlayerEntity } from './players/playerEntity';
 import { AVATAR_COLORS, AVATAR_MODELS, modelDef, NICKNAMES } from './players/avatar';
 import { ChunkMeshManager } from './render/chunkMeshes';
 import { SandFalls } from './render/sandFalls';
+import { SunState } from './render/shaders';
 import { createSky, SKY_CLEAR, SKY_FAR, SkyEnv } from './render/sky';
 import { SplitLayout, ViewportManager } from './render/viewportManager';
 import { Hud } from './ui/hud';
@@ -112,6 +113,11 @@ export class Game {
   weatherMode: WeatherMode = 'auto';
   dayMode: DayMode = 'auto';
   chestsAllowed = true;
+  /**
+   * The Grown-Ups "Shadows" switch (default ON, persisted). Off = no shadow
+   * pass at all and unshadowed materials — the older tablets' escape hatch.
+   */
+  shadowsEnabled = true;
   /** what falls from the sky and how hard — pure, testable (core/weather.ts) */
   readonly weather = new WeatherClock();
   /** which weather the rain hiss carries right now (null = quiet) */
@@ -122,6 +128,10 @@ export class Game {
   private lastBucketHint = -10;
   /** the camera the last frame rendered through — the sky sits on it */
   private renderCam: THREE.Camera | null = null;
+  /** the sky's shadow-casting sun, and a full-layers stand-in camera used to
+   *  render the ONE shared shadow pass each frame (see updateShadowPass) */
+  private sunLight!: THREE.DirectionalLight;
+  private shadowCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 10);
   private time = 0;
   private sparkleBlocks = new Set<number>();
   dynamite!: DynamiteManager;
@@ -184,6 +194,16 @@ export class Game {
     // the saved sky settings (if any) decide what the first frame looks like
     this.skyEnv.setDayMode(this.dayMode);
     if (this.weather.kind) this.skyEnv.setWeather(this.weather.kind, this.weather.intensity);
+
+    // shadows: ONE PCF-soft sun map for the whole game. The split-screen
+    // panes never render it themselves (autoUpdate is off) — updateShadowPass
+    // renders exactly one full-layers pass per frame, so no camera's avatar
+    // layer tricks can leak into the shared map.
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.autoUpdate = false;
+    this.shadowCam.layers.enableAll();
+    this.sunLight = this.skyEnv.getSunLight();
+    this.applyShadowSettings();
     this.particles = new ParticleSystem(this.scene);
 
     // sparkle blocks placed by players emit drifting sparkles
@@ -567,6 +587,15 @@ export class Game {
               this.ui.toast(this.chestsAllowed
                 ? 'Treasure chests unlocked — a few may hide in the next world'
                 : 'Treasure chests hidden', 2600);
+            },
+            shadows: () => (this.shadowsEnabled ? 'On' : 'Off'),
+            toggleShadows: () => {
+              this.shadowsEnabled = !this.shadowsEnabled;
+              this.applyShadowSettings();
+              this.saveSettings();
+              this.ui.toast(this.shadowsEnabled
+                ? 'Sun shadows on — long golden afternoons 🌤️'
+                : 'Sun shadows off — a bit faster on older tablets', 2600);
             },
           },
           );
@@ -1257,6 +1286,55 @@ export class Game {
     this.skyEnv.setDayMode(mode);
   }
 
+  /** where the sun (or moon) is right now — direction, height, warmth, colour */
+  sunInfo(): SunState {
+    return this.skyEnv.sunInfo();
+  }
+
+  /** Apply the Grown-Ups "Shadows" switch; material programs recompile once. */
+  private applyShadowSettings(): void {
+    if (this.renderer.shadowMap.enabled === this.shadowsEnabled) return;
+    this.renderer.shadowMap.enabled = this.shadowsEnabled;
+    // three bakes shadow-ness into every program's cache key — poke every
+    // material once so each is recompiled without (or back with) the map
+    const seen = new Set<THREE.Material>();
+    this.scene.traverse((o) => {
+      const m = (o as THREE.Mesh).material;
+      if (!m) return;
+      for (const one of Array.isArray(m) ? m : [m]) {
+        if (!seen.has(one)) {
+          seen.add(one);
+          one.needsUpdate = true;
+        }
+      }
+    });
+  }
+
+  /**
+   * The one shadow pass per frame. The sky has already parked the sun light
+   * above the followed spot (focusShadow → lerp → texel snap), so this is
+   * just: move the follow box to the players (or the idle camera), bring the
+   * scene graph current, and render the map from a camera that enables every
+   * layer — every split-screen pane then samples the same map, and a
+   * first-person kid still throws a shadow into someone else's pane.
+   */
+  private updateShadowPass(): void {
+    if (this.players.length > 0) {
+      let x = 0, y = 0, z = 0;
+      for (const p of this.players) {
+        x += p.entity.pos.x; y += p.entity.pos.y; z += p.entity.pos.z;
+      }
+      const n = this.players.length;
+      this.skyEnv.focusShadow(x / n, y / n, z / n);
+    } else {
+      const c = this.renderCam ?? this.idleCamera;
+      this.skyEnv.focusShadow(c.position.x, Math.max(4, c.position.y - 8), c.position.z);
+    }
+    this.scene.updateMatrixWorld();
+    this.renderer.shadowMap.needsUpdate = true;
+    this.renderer.shadowMap.render([this.sunLight], this.scene, this.shadowCam);
+  }
+
   /**
    * Start (or stop) falling weather right away — the grown-up menu cycles the
    * mode through the clock, and this is the immediate door the tests use.
@@ -1349,6 +1427,7 @@ export class Game {
       if (!raw) return;
       const s = JSON.parse(raw) as {
         layout?: string; muted?: boolean; chests?: boolean; weather?: string; day?: string;
+        shadows?: boolean;
       };
       if (s.layout === 'auto' || s.layout === 'horizontal' || s.layout === 'vertical' || s.layout === 'grid2x2') {
         this.layout = s.layout;
@@ -1360,6 +1439,7 @@ export class Game {
         this.weather.setMode(s.weather);
       }
       if (s.day === 'auto' || s.day === 'day' || s.day === 'night' || s.day === 'none') this.dayMode = s.day;
+      if (typeof s.shadows === 'boolean') this.shadowsEnabled = s.shadows;
     } catch { /* corrupted settings: defaults win */ }
   }
 
@@ -1368,6 +1448,7 @@ export class Game {
       localStorage.setItem(this.settingsKey, JSON.stringify({
         layout: this.layout, muted: this.audio.muted,
         chests: this.chestsAllowed, weather: this.weatherMode, day: this.dayMode,
+        shadows: this.shadowsEnabled,
       }));
     } catch { /* storage unavailable */ }
   }
@@ -1720,6 +1801,9 @@ export class Game {
     // water drift: the tiling wave sheet slides a touch every frame so a pond
     // never freezes into a still painting
     this.chunks.tickWater(dt);
+    // ...and the shader kit's shared uniforms (time, sun, haze colour) move
+    // with it — one uniform set, no program rebuilds, ever
+    if (this.scene.fog) this.chunks.tickShaders(dt, this.skyEnv.sunInfo(), this.scene.fog.color);
     this.chunks.update(4);
 
     if (!this.frozen && this.players.length > 0) {
@@ -1760,6 +1844,9 @@ export class Game {
       cameras.push(this.idleCamera);
     }
     this.applyAvatarLayers(cameras);
+    // exactly one shared shadow pass before the panes (skipped when a
+    // grown-up switched shadows off — the panes never render it themselves)
+    if (this.shadowsEnabled) this.updateShadowPass();
     this.viewportMgr.render(this.renderer, this.scene, cameras);
 
     // HUD updates

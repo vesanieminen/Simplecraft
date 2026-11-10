@@ -98,7 +98,11 @@ export class SandFalls {
       y1: yFrom + 0.5,
       t: 0,
     };
-    if (!carried) this.group.add(state.mesh);
+    if (!carried) {
+      state.mesh.castShadow = true; // a falling block shades what it falls over
+      state.mesh.receiveShadow = true;
+      this.group.add(state.mesh);
+    }
     state.x = x;
     state.z = z;
     state.y0 = state.mesh.position.y; // resume mid-glide

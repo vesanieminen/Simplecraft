@@ -13,6 +13,7 @@
 import * as THREE from 'three';
 import { WORLD_SX, WORLD_SZ } from '../core/world';
 import { WeatherKind } from '../core/weather';
+import { SunState } from './shaders';
 
 export const DAY_SECONDS = 12 * 60;
 /** the sun's elevation at a day-phase (0..1); > 0 means the sun is up */
@@ -204,6 +205,14 @@ const STOPS: { hour: number; s: SkyStop }[] = [
 
 export type DayMode = 'auto' | 'day' | 'night' | 'none';
 
+/** half-width of the shadow map's follow box, in blocks */
+const SHADOW_SPAN = 40;
+/** how far the shadow light stands back from its target */
+const SHADOW_DIST = 110;
+export const SHADOW_MAP_SIZE = 1024;
+/** ground-grid step the shadow target snaps to, so shadows don't crawl */
+const SHADOW_TEXEL = (SHADOW_SPAN * 2) / SHADOW_MAP_SIZE;
+
 export interface SkyEnv {
   /** Advance the sky by `dt` seconds of game time; snow rides `camera`. */
   update(dt: number, camera: THREE.Camera): void;
@@ -215,6 +224,12 @@ export interface SkyEnv {
   setWeather(kind: WeatherKind | null, intensity: number): void;
   /** the dome mesh — centred on the world middle, kept past every far plane */
   getDome(): THREE.Mesh;
+  /** the shadow-casting sun/moon light — the game renders one pass per frame */
+  getSunLight(): THREE.DirectionalLight;
+  /** where the sun (or moon) is: direction, height, low-sun warmth, colour */
+  sunInfo(): SunState;
+  /** move the shadow map's follow box to this spot (player/camera position) */
+  focusShadow(x: number, y: number, z: number): void;
 }
 
 export function createSky(scene: THREE.Scene): SkyEnv {
@@ -281,7 +296,10 @@ export function createSky(scene: THREE.Scene): SkyEnv {
   stars.renderOrder = -2;
   sky.add(stars);
 
-  scene.fog = new THREE.Fog(SKY_CLEAR, 60, 240);
+  // Exponential haze instead of a hard near/far band: terrain melts into the
+  // sky's own haze colour the way real distances do — near stays crisp, the
+  // far meadow and the horizon fuse. core/water.ts and the dome stay unfogged.
+  scene.fog = new THREE.FogExp2(SKY_CLEAR, 0.0075);
 
   const hemi = new THREE.HemisphereLight(0xcfe8ff, 0x9a8b6a, 1.05);
   scene.add(hemi);
@@ -290,6 +308,24 @@ export function createSky(scene: THREE.Scene): SkyEnv {
   scene.add(dir);
   const amb = new THREE.AmbientLight(0xffffff, 0.25);
   scene.add(amb);
+
+  // ---- shadows: the sun is the only caster, one map, tight frustum --------
+  // The light follows the players (Game.focusShadow → here), its elevation
+  // follows the clock, and the game renders the map ONE pass per frame from a
+  // full-layers camera (see Game.updateShadowPass) — so every split-screen
+  // pane shares the same map and no camera's layer tricks leak into it.
+  // Night keeps a moon shadow at 0.32 light — soft, never the void.
+  dir.castShadow = true;
+  dir.shadow.mapSize.set(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
+  dir.shadow.camera.left = -SHADOW_SPAN;
+  dir.shadow.camera.right = SHADOW_SPAN;
+  dir.shadow.camera.top = SHADOW_SPAN;
+  dir.shadow.camera.bottom = -SHADOW_SPAN;
+  dir.shadow.camera.near = 2;
+  dir.shadow.camera.far = SHADOW_DIST + SHADOW_SPAN * 2;
+  dir.shadow.bias = -0.0005;
+  dir.shadow.normalBias = 0.03; // lifts the acne off flat voxel tops at low sun
+  scene.add(dir.target);
 
   const cur: SkyStop = {
     top: new THREE.Color(), horizon: new THREE.Color(), fog: new THREE.Color(),
@@ -337,6 +373,15 @@ export function createSky(scene: THREE.Scene): SkyEnv {
   let weatherKind: WeatherKind | null = null;
   let painted = -1;
 
+  // The physical sun/moon direction the shadows and shaders follow. This
+  // clock's high noon is 0.25 and midnight 0.75 (see sunElevation); the
+  // azimuth swings half a turn per day so shadows travel as the clock runs.
+  const sunWorldDir = new THREE.Vector3(0.4, 0.9, 0.5);
+  const sunState: SunState = { dir: sunWorldDir, up: 1, low: 0, tint: new THREE.Color(0xfff6e0) };
+  const shadowWant = new THREE.Vector3(WORLD_SX / 2, 12, WORLD_SZ / 2);
+  const shadowFocus = shadowWant.clone();
+  const shadowTmp = new THREE.Vector3();
+
   // The very first frame must already show the dome painted for the boot
   // phase — otherwise a kid boots into an unpainted sphere for one tick.
   mixStop(phase);
@@ -379,9 +424,38 @@ export function createSky(scene: THREE.Scene): SkyEnv {
         painted = hour;
         paintDome(wet);
       }
+      // haze: the fog colour rides the palette; wet weather thickens the soup
       scene.fog!.color.copy(cur.fog);
-      (scene.fog as THREE.Fog).near = 60 - wet * 20;
-      (scene.fog as THREE.Fog).far = 240 - wet * 90;
+      (scene.fog as THREE.FogExp2).density = 0.0075 + wet * 0.0045;
+
+      // The shadow + shader sun: true elevation from the clock, but never
+      // quite horizontal — a horizontal sun throws infinite shadows the
+      // follow box could never hold. Below the horizon it's the moon: same
+      // geometry, opposite side of the sky, and shaders dim its sparkle.
+      let sunAngle = Math.asin(THREE.MathUtils.clamp(elev, -1, 1));
+      const sunIsDown = sunAngle < 0;
+      sunAngle = Math.max(Math.abs(sunAngle), 0.2); // ≥ ~11°, keeps frustums sane
+      const sunAz = 1.1 + (hour - 0.25) * Math.PI * 2 + (sunIsDown ? Math.PI : 0);
+      sunWorldDir.set(
+        Math.cos(sunAngle) * Math.sin(sunAz),
+        Math.sin(sunAngle),
+        Math.cos(sunAngle) * Math.cos(sunAz),
+      );
+      sunState.up = THREE.MathUtils.clamp(sunWorldDir.y, 0, 1)
+        * (1 - wet * 0.6) * (sunIsDown ? 0.3 : 1);
+      sunState.low = THREE.MathUtils.clamp((0.5 - sunWorldDir.y) / 0.3, 0, 1)
+        * (1 - wet * 0.5) * (sunIsDown ? 0.2 : 1);
+      sunState.tint.copy(dir.color);
+
+      // The shadow light hovers over the followed spot (Game points it at the
+      // players). It lags the walk with a lerp, and snaps to the map's texel
+      // grid, so standing still never makes the shadows swim.
+      shadowFocus.lerp(shadowWant, Math.min(1, dt * 3));
+      shadowTmp.copy(shadowFocus);
+      shadowTmp.x = Math.round(shadowTmp.x / SHADOW_TEXEL) * SHADOW_TEXEL;
+      shadowTmp.z = Math.round(shadowTmp.z / SHADOW_TEXEL) * SHADOW_TEXEL;
+      dir.target.position.copy(shadowTmp);
+      dir.position.copy(shadowTmp).addScaledVector(sunWorldDir, SHADOW_DIST);
 
       // clouds: gentle by default, thicker when weather brews; gone with no sky
       const cloudOpacity = marks ? 0.3 + wet * 0.5 + darkness * 0.1 : 0;
@@ -402,6 +476,15 @@ export function createSky(scene: THREE.Scene): SkyEnv {
     },
     getDome(): THREE.Mesh {
       return dome;
+    },
+    getSunLight(): THREE.DirectionalLight {
+      return dir;
+    },
+    sunInfo(): SunState {
+      return sunState;
+    },
+    focusShadow(x: number, y: number, z: number): void {
+      shadowWant.set(x, y, z);
     },
   };
 }

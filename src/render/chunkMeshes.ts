@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { buildChunkGeometry } from '../core/mesher';
 import { CHUNKS_X, World } from '../core/world';
 import { blockAtlasTexture, plantAtlasTexture, waterTexture } from './textures';
+import { patchTerrainFinish, patchWaterSurface, ShaderKit, SunState } from './shaders';
 
 interface ChunkMeshes {
   opaque?: THREE.Mesh;
@@ -18,8 +19,11 @@ interface ChunkMeshes {
 }
 
 export class ChunkMeshManager {
-  private meshes: ChunkMeshes[] = [];
+  /** every chunk's live meshes (tests use this to spot a channel that drew) */
+  meshes: ChunkMeshes[] = [];
   private pending = new Set<number>();
+  /** the animated uniforms behind the patched water + terrain shaders */
+  readonly shaders = new ShaderKit();
   readonly materials = {
     opaque: new THREE.MeshLambertMaterial({ vertexColors: true }),
     translucent: new THREE.MeshLambertMaterial({
@@ -64,7 +68,14 @@ export class ChunkMeshManager {
   constructor(
     private scene: THREE.Scene,
     private world: World,
-  ) {}
+  ) {
+    // procedural polish, injected once into the shared programs: the water
+    // sheet gets waves + sun glint, the two terrain channels a low-sun rim
+    // and a saturation lift. Uniforms animate; programs never rebuild.
+    patchWaterSurface(this.materials.water, this.shaders);
+    patchTerrainFinish(this.materials.opaque, this.shaders);
+    patchTerrainFinish(this.materials.textured, this.shaders);
+  }
 
   /** flat indices of sand cells the mesher must leave out (SandFalls draws them) */
   skipSand?: Set<number>;
@@ -121,6 +132,11 @@ export class ChunkMeshManager {
     map.offset.y = (map.offset.y + dt * 0.013) % 1;
   }
 
+  /** move the sun/haze/time uniforms the patched shaders read (every frame) */
+  tickShaders(dt: number, sun: SunState, haze: THREE.Color): void {
+    this.shaders.tick(dt, sun, haze);
+  }
+
   private swap(
     slot: ChunkMeshes,
     which: 'opaque' | 'transp' | 'cross' | 'tex' | 'texT' | 'wet',
@@ -139,6 +155,11 @@ export class ChunkMeshManager {
       mesh.frustumCulled = true;
       mesh.matrixAutoUpdate = false;
       mesh.updateMatrix();
+      // terrain casts and catches shadows (cliffs shade the meadow); sheets
+      // that are see-through only receive — a thin plate casting a full slab
+      // of shade is exactly the fake kids notice
+      mesh.castShadow = which === 'opaque' || which === 'tex';
+      mesh.receiveShadow = which !== 'cross';
       this.scene.add(mesh);
       slot[which] = mesh;
     }

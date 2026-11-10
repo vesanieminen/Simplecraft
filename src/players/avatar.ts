@@ -447,6 +447,21 @@ export function createAvatar(colorHex: string, model: ModelId = 'kid'): AvatarPa
   shadow.userData.noFade = true;
   group.add(shadow);
 
+  // Real sun shadows: every body part casts and catches, so a kid shades the
+  // ground and the trees. The two decals under the feet stay out of the
+  // shadow map — the blob below is their own fake contact shadow, and a thin
+  // torus casting confetti is just noise.
+  group.traverse((o) => {
+    if ((o as THREE.Mesh).isMesh) {
+      o.castShadow = true;
+      o.receiveShadow = true;
+    }
+  });
+  ring.castShadow = false;
+  ring.receiveShadow = false;
+  shadow.castShadow = false;
+  shadow.receiveShadow = false;
+
   return { group, body, chest, leftArm, rightArm, leftLeg, rightLeg, tail, ring, shadow, crouchT: 0 };
 }
 
