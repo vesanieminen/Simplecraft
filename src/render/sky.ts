@@ -207,8 +207,9 @@ export type DayMode = 'auto' | 'day' | 'night' | 'none';
 
 /** half-width of the shadow map's follow box, in blocks (AGENTS: keep it a
  *  few dozen — the pass is CPU-cheap to render but every caster vertex in
- *  the box costs a vertex on weak GPUs) */
-const SHADOW_SPAN = 30;
+ *  the box costs a vertex on weak GPUs; CI's software GL measurably walks
+ *  faster at 24 than at 30) */
+const SHADOW_SPAN = 24;
 /** how far the shadow light stands back from its target */
 const SHADOW_DIST = 110;
 export const SHADOW_MAP_SIZE = 1024;

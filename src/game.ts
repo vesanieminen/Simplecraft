@@ -136,6 +136,9 @@ export class Game {
   /** voxel-change counter; a new value means the baked map is stale */
   private shadowWorldEpoch = 0;
   private lastShadowWorldEpoch = -1;
+  /** mesh-structure changes (chunk remeshes, avatars, animals): same deal */
+  private shadowMeshEpoch = 0;
+  private lastShadowMeshEpoch = -1;
   /** redraw at least this often (WALL seconds), so the sun drift catches up */
   private static readonly SHADOW_HEARTBEAT = 1.0;
   /** keep baking this long (wall seconds) after the world edits, so chunks
@@ -543,6 +546,7 @@ export class Game {
         toggleCamera: () => { p.firstPerson = !p.firstPerson; },
         cycleCostume: () => {
           const m = p.entity.cycleModel();
+          this.shadowMeshEpoch++; // the baked map holds the old costume's shape
           const def = modelDef(m);
           this.ui.toast(`${p.entity.name} is now a ${def.name}! ${def.icon}`);
         },
@@ -1370,7 +1374,9 @@ export class Game {
     const focusMoved = this.players.length > 0
       && this.skyEnv.shadowFocusPos().distanceToSquared(this.lastShadowFocus)
         > SHADOW_TEXEL * SHADOW_TEXEL;
-    const worldChanged = this.shadowWorldEpoch !== this.lastShadowWorldEpoch;
+    const worldChanged =
+      this.shadowWorldEpoch !== this.lastShadowWorldEpoch ||
+      this.shadowMeshEpoch !== this.lastShadowMeshEpoch;
     if (worldChanged) this.shadowEditUntil = this.wallNow + Game.SHADOW_EDIT_WINDOW;
     this.shadowHeartbeat += realDt;
     const due = this.shadowHeartbeat >= Game.SHADOW_HEARTBEAT;

@@ -1788,6 +1788,9 @@ async function rowIndexOf(page: Page, needle: string): Promise<number> {
 
 test('My Worlds menu lists saved worlds, plays one back with builds intact, and deletes it', async ({ page }) => {
   test.slow();
+  // three world boots in one test, and CI's software GL pays a shadow bake
+  // per moving frame — 135 s was landing on the line more than once
+  test.setTimeout(180_000);
   await boot(page);
   await joinWithPad(page);
   await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 10000 });
