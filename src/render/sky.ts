@@ -205,13 +205,15 @@ const STOPS: { hour: number; s: SkyStop }[] = [
 
 export type DayMode = 'auto' | 'day' | 'night' | 'none';
 
-/** half-width of the shadow map's follow box, in blocks */
-const SHADOW_SPAN = 40;
+/** half-width of the shadow map's follow box, in blocks (AGENTS: keep it a
+ *  few dozen — the pass is CPU-cheap to render but every caster vertex in
+ *  the box costs a vertex on weak GPUs) */
+const SHADOW_SPAN = 30;
 /** how far the shadow light stands back from its target */
 const SHADOW_DIST = 110;
 export const SHADOW_MAP_SIZE = 1024;
 /** ground-grid step the shadow target snaps to, so shadows don't crawl */
-const SHADOW_TEXEL = (SHADOW_SPAN * 2) / SHADOW_MAP_SIZE;
+export const SHADOW_TEXEL = (SHADOW_SPAN * 2) / SHADOW_MAP_SIZE;
 
 export interface SkyEnv {
   /** Advance the sky by `dt` seconds of game time; snow rides `camera`. */
@@ -230,6 +232,11 @@ export interface SkyEnv {
   sunInfo(): SunState;
   /** move the shadow map's follow box to this spot (player/camera position) */
   focusShadow(x: number, y: number, z: number): void;
+  /** where the follow box actually is now (read it after `focusShadow`) */
+  shadowFocusPos(): THREE.Vector3;
+  /** the lit ball's exact direction in the sky (no elevation clamp) — what
+   *  the eye sees; `sunInfo().dir` is this, lifted off the horizon */
+  sunBallDir(): THREE.Vector3;
 }
 
 export function createSky(scene: THREE.Scene): SkyEnv {
@@ -311,12 +318,16 @@ export function createSky(scene: THREE.Scene): SkyEnv {
 
   // ---- shadows: the sun is the only caster, one map, tight frustum --------
   // The light hovers over the players (Game.updateShadowFocus → here) and its
-  // elevation follows the clock. three re-draws the map inside each pane's
-  // render pass, using that pane's camera layer view — so what a kid sees is
-  // exactly what that screen can cast, and no camera's avatar-layer tricks
-  // leak into another's picture. Night keeps a soft moon shadow (0.32 light).
+  // elevation follows the clock. The game redraws the map exactly once a
+  // frame — from the DONOR pane, the first pane whose camera sees every
+  // avatar — and all other panes sample that map (at most one frame stale).
+  // Night keeps a soft moon shadow (0.32 light) — soft, never the void.
   dir.castShadow = true;
   dir.shadow.mapSize.set(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
+  // ONE map redraw per frame: the game marks `shadow.needsUpdate` only for
+  // the donor pane (the first pane that can see every avatar), the other
+  // panes sample that same map. See Game.render → viewportMgr.render.
+  dir.shadow.autoUpdate = false;
   dir.shadow.camera.left = -SHADOW_SPAN;
   dir.shadow.camera.right = SHADOW_SPAN;
   dir.shadow.camera.top = SHADOW_SPAN;
@@ -373,10 +384,11 @@ export function createSky(scene: THREE.Scene): SkyEnv {
   let weatherKind: WeatherKind | null = null;
   let painted = -1;
 
-  // The physical sun/moon direction the shadows and shaders follow. This
-  // clock's high noon is 0.25 and midnight 0.75 (see sunElevation); the
-  // azimuth swings half a turn per day so shadows travel as the clock runs.
+  // The physical sun/moon direction the shadows and shaders follow — always
+  // the direction of the visible ball, never an invented clock azimuth.
+  const UP_Z = new THREE.Vector3(0, 0, 1);
   const sunWorldDir = new THREE.Vector3(0.4, 0.9, 0.5);
+  let curHour = 0.35;
   const sunState: SunState = { dir: sunWorldDir, up: 1, low: 0, tint: new THREE.Color(0xfff6e0) };
   const shadowWant = new THREE.Vector3(WORLD_SX / 2, 12, WORLD_SZ / 2);
   const shadowFocus = shadowWant.clone();
@@ -396,11 +408,14 @@ export function createSky(scene: THREE.Scene): SkyEnv {
 
       if (dayMode === 'auto') phase = (phase + dt / DAY_SECONDS) % 1;
       const hour = dayMode === 'day' ? 0.5 : dayMode === 'night' ? 0.0 : phase;
+      curHour = hour;
       const elev = sunElevation(hour);
       mixStop(hour);
 
       // sun & moon: the pivot spins once per day, noon up top, midnight below
-      orbit.rotation.z = ((hour + 0.25) % 1) * Math.PI * 2;
+      // (sun.position is (0,230,120) — straight up at rotation 0 — so the
+      // zero of the spin is noon itself, phase 0.25)
+      orbit.rotation.z = (((hour - 0.25) % 1) + 1) % 1 * Math.PI * 2;
       const marks = dayMode !== 'none';
       orbit.visible = marks;
       stars.visible = marks;
@@ -428,19 +443,20 @@ export function createSky(scene: THREE.Scene): SkyEnv {
       scene.fog!.color.copy(cur.fog);
       (scene.fog as THREE.FogExp2).density = 0.0075 + wet * 0.0045;
 
-      // The shadow + shader sun: true elevation from the clock, but never
-      // quite horizontal — a horizontal sun throws infinite shadows the
-      // follow box could never hold. Below the horizon it's the moon: same
-      // geometry, opposite side of the sky, and shaders dim its sparkle.
-      let sunAngle = Math.asin(THREE.MathUtils.clamp(elev, -1, 1));
-      const sunIsDown = sunAngle < 0;
-      sunAngle = Math.max(Math.abs(sunAngle), 0.2); // ≥ ~11°, keeps frustums sane
-      const sunAz = 1.1 + (hour - 0.25) * Math.PI * 2 + (sunIsDown ? Math.PI : 0);
-      sunWorldDir.set(
-        Math.cos(sunAngle) * Math.sin(sunAz),
-        Math.sin(sunAngle),
-        Math.cos(sunAngle) * Math.cos(sunAz),
-      );
+      // The shadow + shader sun is the BALL YOU SEE: take whichever of the
+      // two is above the horizon, rotate it exactly as the orbit does, and
+      // shadows provably fall away from the light in the sky (user: shadows
+      // must follow the sun). Only one touch of prudence: the elevation is
+      // never allowed to go quite horizontal — a horizontal sun throws
+      // infinite shadows the follow box could never hold.
+      const sunIsDown = elev < 0;
+      sunWorldDir.copy(sunIsDown ? moon.position : sun.position)
+        .applyAxisAngle(UP_Z, orbit.rotation.z)
+        .normalize();
+      if (sunWorldDir.y < 0.198) { // ≥ ~11°, keeps frustums sane
+        sunWorldDir.y = 0.198;
+        sunWorldDir.normalize();
+      }
       sunState.up = THREE.MathUtils.clamp(sunWorldDir.y, 0, 1)
         * (1 - wet * 0.6) * (sunIsDown ? 0.3 : 1);
       sunState.low = THREE.MathUtils.clamp((0.5 - sunWorldDir.y) / 0.3, 0, 1)
@@ -485,6 +501,16 @@ export function createSky(scene: THREE.Scene): SkyEnv {
     },
     focusShadow(x: number, y: number, z: number): void {
       shadowWant.set(x, y, z);
+    },
+    shadowFocusPos(): THREE.Vector3 {
+      return shadowFocus;
+    },
+    sunBallDir(): THREE.Vector3 {
+      // exactly the lit ball's direction — what the eye sees in the sky
+      return shadowTmp
+        .copy(sunElevation(curHour) < 0 ? moon.position : sun.position)
+        .applyAxisAngle(UP_Z, orbit.rotation.z)
+        .normalize();
     },
   };
 }
