@@ -4,9 +4,9 @@
  */
 
 import * as THREE from 'three';
-import { blockDef } from '../core/blocks';
+import { blockDef, isLadderBlock, isSolidBlock, LADDER, solidHeightOf } from '../core/blocks';
 import {
-  canStandAt, CROUCH_H, inWater, moveAabb, PLAYER_H, playerAabb,
+  canStandAt, CROUCH_H, inWater, moveAabb, onLadder as onLadderTest, PLAYER_H, playerAabb,
   grounded as groundedTest, headClearOfWater, nearShore, submergedFraction, MoveResult,
 } from '../core/physics';
 import { World, WORLD_SX, WORLD_SZ, WORLD_SY } from '../core/world';
@@ -31,6 +31,8 @@ const SWIM_TRIM = 0.62; // this fraction of the body under water is neutral buoy
 const STROKE_SECONDS = 0.85; // one breaststroke pull per…
 export const WATER_JUMP_V = 8.4; // push-off at the surface: clears a one-block shore
 const WATER_JUMP_TIME = 0.45; // buoyancy stays off while that leap carries them out
+/** a hand-over-hand on a ladder: steady, and the same going down as up */
+export const CLIMB_V = 2.9;
 
 export interface StepInput {
   moveX: number; // strafe (-1..1)
@@ -68,6 +70,8 @@ export class PlayerEntity {
   inWaterNow = false;
   /** true while paddling in water (drives the horizontal swim pose) */
   swimmingNow = false;
+  /** true while holding on to a ladder (gravity off; jump climbs, sneak descends) */
+  climbingNow = false;
   /** Minecraft-style sneak: squat hitbox, slow creep, ledge protection */
   crouching = false;
   walkPhase = 0;
@@ -154,6 +158,30 @@ export class PlayerEntity {
     }
   }
 
+  /**
+   * Climb over whatever the ladder leans against. When a climbing kid has their
+   * feet in a ladder cell, any solid block beside them (the wall's top step)
+   * whose surface they can stand on, close enough to reach, pulls them up onto
+   * it. This is what turns "climb a ladder" into "get onto the wall" — the top
+   * rung and a step over, exactly like the big game, but automatic.
+   */
+  private mantelOntoLedge(world: World): void {
+    const cx = Math.floor(this.pos.x), cz = Math.floor(this.pos.z);
+    const F = Math.floor(this.pos.y + 0.02); // the cell the feet are in
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+      const nx = cx + dx, nz = cz + dz;
+      const block = world.get(nx, F, nz);
+      if (!isSolidBlock(block)) continue; // only step onto a real block
+      const topY = F + solidHeightOf(block); // the surface to stand on
+      if (topY - this.pos.y > 1.05) continue; // too tall to swing over in one move
+      if (!canStandAt(world, nx + 0.5, topY, nz + 0.5)) continue; // no room up there
+      this.pos.set(nx + 0.5, topY, nz + 0.5);
+      this.vel.set(this.vel.x * 0.2, 0, this.vel.z * 0.2);
+      this.grounded = true;
+      return;
+    }
+  }
+
   step(world: World, input: StepInput, events: StepEvents): void {
     const dt = Math.min(input.dt, 0.05);
     this.zoomTime = Math.max(0, this.zoomTime - dt);
@@ -163,6 +191,15 @@ export class PlayerEntity {
     // a push-off leap is a real jump: buoyancy is off while it lasts
     const swimming = this.inWaterNow && this.waterJump <= 0;
     this.swimmingNow = swimming;
+    // A ladder outranks the water: the point of a ladder over a pond is to
+    // climb out of the pond. Gravity switches off the moment you hold the rungs.
+    const climbing = !this.flying && onLadderTest(world, this.aabb);
+    this.climbingNow = climbing;
+    // are the FEET on a rung? that is what lets you climb further up (so you
+    // never rise above the top of a ladder)
+    const feetOnLadder = isLadderBlock(world.get(
+      Math.floor(this.pos.x), Math.floor(this.pos.y), Math.floor(this.pos.z),
+    ));
 
     // horizontal target velocity in yaw space.
     // forward F = (sin yaw, 0, cos yaw) matches the avatar facing (+Z at yaw 0).
@@ -186,6 +223,24 @@ export class PlayerEntity {
       if (input.jump || input.flyUp) vy += FLY_VERT;
       if (input.flyDown) vy -= FLY_VERT;
       this.vel.y += (vy - this.vel.y) * (1 - Math.exp(-12 * dt));
+    } else if (climbing) {
+      // The ladder holds you up: no gravity. Hold jump to climb up, hold the
+      // sneak/dive button (Ctrl / B / ◯ / d-pad ▾ — same as diving) to slide
+      // down, let go and you cling to the rungs in place. Same button pair the
+      // kids already use in the water, so nobody has to learn a new one.
+      const targetVy = input.jump && feetOnLadder ? CLIMB_V
+        : input.swimDown ? -CLIMB_V
+        : 0;
+      this.vel.y += (targetVy - this.vel.y) * (1 - Math.exp(-16 * dt));
+      this.crouching = false; // a crouch on a ladder is just a slow ladder
+      this.jumpBuffer = 0;
+      this.coyote = 0; // a tap on a ladder climbs, it never launches you
+      // one hand-over-hand "stroke" every beat, but only while actually moving
+      this.strokeT -= dt;
+      if (this.strokeT <= 0) {
+        this.strokeT = STROKE_SECONDS;
+        if (input.jump || input.swimDown) { events.footfall = true; events.footfallOn = LADDER; }
+      }
     } else if (swimming) {
       // gentle buoyancy: hold jump to kick up, hold the sneak key to dive;
       // deep under floats you back to the surface, shallow water lets you
@@ -251,6 +306,11 @@ export class PlayerEntity {
     this.vel.set(res.vx, res.vy, res.vz);
     this.grounded = res.hitGround || groundedTest(world, box);
 
+    // Top of the ladder: the last bit of a climb is swinging over the ledge.
+    // Climb up into a ladder cell that has a solid block beside it the kid can
+    // stand on, and they come up onto it — no extra button, keep climbing.
+    if (climbing && input.jump) this.mantelOntoLedge(world);
+
     // keep inside world bounds (invisible walls)
     this.pos.x = Math.max(0.35, Math.min(WORLD_SX - 0.35, this.pos.x));
     this.pos.z = Math.max(0.35, Math.min(WORLD_SZ - 0.35, this.pos.z));
@@ -305,13 +365,18 @@ export class PlayerEntity {
         events.footfallOn = world.get(Math.floor(this.pos.x), Math.floor(this.pos.y - 0.1), Math.floor(this.pos.z));
       }
     } else if (swimming) this.walkPhase += dt * 8; // stroke tempo
+    else if (climbing) this.walkPhase += dt * (Math.abs(this.vel.y) > 0.2 ? 9 : 2); // hand-over-hand, still when clinging
     else if (!this.grounded) {
       this.walkPhase += dt * 2;
       this.footDist = 1.2; // no giant stomp the instant they land
     } else {
       this.footDist = 1.2;
     }
-    animateAvatar(this.avatar, this.walkPhase, this.moving && this.grounded, !this.grounded && !swimming, dt, this.crouching, swimming);
+    const climbAnim = climbing && !swimming;
+    animateAvatar(
+      this.avatar, this.walkPhase, (this.moving && this.grounded) || (climbAnim && Math.abs(this.vel.y) > 0.2),
+      !this.grounded && !swimming && !climbing, dt, this.crouching, swimming, climbAnim,
+    );
     this.syncAvatar(dt);
   }
 

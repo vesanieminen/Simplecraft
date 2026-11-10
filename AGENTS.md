@@ -83,7 +83,12 @@ event. Renaming a storage key orphans the family's existing saves.
   chain reactions. Fuses run on **game** time, which is roughly half wall
   clock in headless Chromium — never `waitForTimeout` for an explosion, poll
   `game.dynamite.blastCount`. Blasts never touch `y <= 0`, `unbreakable`
-  blocks or water, and `SCORCH` is deliberately not in the palette.
+  blocks or water, and `SCORCH` is deliberately not in the palette. A **lit
+  fuse rides the save and keeps burning in every later boot** of a shared
+  world — the persistence e2e leaves one alight on purpose, so it now defuses
+  (`world.set(AIR)`; the manager extinguishes the rig when the voxel is gone)
+  before it ends, or the next terrain-sensitive course near spawn gets its
+  wall carved mid-test (that is how the ladder e2e failed on its CI debut).
 - Swimming (`players/playerEntity.ts`): buoyancy is a *levelled float*, not a
   speed cap — `physics.submergedFraction` samples four heights up the body and
   the vertical target is `(frac - SWIM_TRIM) * 2.2`, so deep under drifts you
@@ -116,8 +121,8 @@ event. Renaming a storage key orphans the family's existing saves.
   toggle-up is refused under a low ceiling, and `step` undoes any horizontal
   move that would leave the feet unsupported while crouched on the ground —
   kids never walk off ledges. Camera/aim eye height comes from
-  `entity.headHeight`; the avatar squats via `group.scale.y` in
-  `animateAvatar`. Flight force-clears crouch.
+  `entity.headHeight`; the look of it is a pose, never a scale (see below).
+  Flight force-clears crouch.
 - Sky/camera invariant: the sky dome (radius `SKY_RADIUS`) is parented to a group
   centred on the **middle** of the world — the coordinate origin is a map
   *corner*, so centring the dome there puts its far side past the far plane and
@@ -130,6 +135,12 @@ event. Renaming a storage key orphans the family's existing saves.
   2D canvas in the page and counting offending pixels (see `blackPixels` in
   `tests/e2e/game.spec.ts`); `gl.readPixels` is useless there because the
   drawing buffer is already swapped.
+- Block ids a test reaches for must exist on `__lbw.ids` (`src/main.ts`) —
+  `ids.MISSING` handed back `undefined`, which `World.set` wrote as AIR, so a
+  test could "place" nothing and still pass off whatever geometry the scene
+  already held (`world.set` now refuses a non-integer id). When an assertion
+  depends on a block being drawn: place it, read the voxel back, and let a few
+  frames pass — chunk remeshing is budgeted a few chunks per frame.
 - Physical gamepad behaviour is verified manually (checklist in the README);
   virtual pads in tests exercise the same input abstraction, which is not a
   substitute for hardware QA.
@@ -139,8 +150,41 @@ event. Renaming a storage key orphans the family's existing saves.
   input abstraction, so they are a good regression net — but re-check the
   README's manual checklist with real pads after any input change (newly added
   Leave / Waiting-Players rows, the water-jump fix, the slab / real-stairs /
-  treasure-chest blocks and the new B/◯ **crouch toggle** still owe the couch
-  a turn).
+  treasure-chest blocks, and **this branch's whole set**: the **LT = pet · RT =
+  build · X = break** trigger remap, the 🪣 bucket on both triggers, the new
+  Weather / Day & Night / Treasure-Chests rows (Back is row 9 now) and the
+  crouch **pose**) still owe the couch a turn.
+- Ladders (`LADDER=40`, atlas cell `ATLAS_LADDER=28`→count 29, `drawLadder`):
+  **not solid, not opaque** (you walk INTO the cell — never write a test that
+  expects to stand on one), wood sound family, palette right after DOOR, icon
+  🧗 (🪜 stays with STAIRS). A 0.22-thin panel (`blocks.LADDER_DEPTH`,
+  `ladderBoxes`) flush against the wall its CLIMB SIDE faces away from; the
+  direction lives in `world.ladderFacing` (LadderFacing 0..3), saved as
+  **version 5** (server validates 0..3 and merges like the other maps).
+  `setLadderFacing` must `touchAt` (same id, so `world.set` early-returns).
+  The mesher draws it via `addTexturedSubBox(..., { cullFlush: true })` — the
+  face buried in the wall is culled only when that neighbour is a full cell.
+  **Climbing** is a branch in `playerEntity.step` BEFORE swimming (a ladder
+  over a pond beats the water — pond tests live near spawn): `physics.onLadder`
+  (feet cell or head cell is a ladder → gravity off, cling); hold jump →
+  `CLIMB_V` up but **only while the FEET cell is a ladder** (that's what
+  stops you rising past the top rung); hold `swimDown` (same dive/crouch
+  buttons) → down; rung hand-over-hand footfalls every `STROKE_SECONDS` on
+  the LADDER id. Tap-crouch is force-cleared while climbing. **Mantel**:
+  climbing + jump, any SOLID neighbour whose `topY - pos.y <= 1.05` and
+  `canStandAt` → teleport onto it — the wall's own cells block mid-climb
+  mantels because canStandAt collides the whole body, so the top is cleared
+  first (that's the whole trick — "get on the wall" with no extra button).
+  **Placement needs a wall**: facing from aim (`game.ladderFacingFromAim`,
+  wall→cell direction, yaw fallback when aiming at a floor), refuse with red
+  particles unless the cell BEHIND (opposite the climb side) is solid or a
+  ladder, or the cell below is a ladder; pet button spins it (`rotateLadder`,
+  reuses `rotateStairFacing`). `ladderFacing.delete` on replace/remove/blast
+  (the server merge keeps deleted keys as harmless orphans — blocks decide).
+  `entity.climbingNow` is the e2e lens; `__lbw.atlas.ladder` decodes the
+  painted art off mesh UVs. The e2e restores its near-spawn wall **byte for
+  byte + saveNow** — `world.set` records mods literally, so restoring to AIR
+  saves a hole in the meadow for every later test.
 - Partial blocks share one shape language: `BlockDef.solidHeight` is both the
   squat box the mesher paints (`mesher.addTexturedSubBox`) and the box
   `physics.solidBoxesOf` collides with (slab 0.5, treasure chest 0.85). Stairs
@@ -194,32 +238,48 @@ event. Renaming a storage key orphans the family's existing saves.
 - Water flows (`core/water.ts`, `Game.water`): **two ids**. `WATER` (10) is an
   eternal source (the sea, and any a kid places from the palette) — unbreakable,
   never an aim target (`raycast.hitRemovable`), full-cell. `WATER_FLOW` (38) is
-  travelling water; its depth 0..6 lives in `world.waterLevel` (flat index →
-  level), saved as **version 4** `waterLevels` (server merges it like the other
-  maps). The sim is a dirty-set driven by the same `World.onCellChanged` hook as
-  sand: each 0.2 s step re-reads every dirty cell's best supply (a side
-  neighbour one level deeper, or water falling in from **above keeps its depth**),
-  >`MAX_WATER_LEVEL` (6) drains to AIR. Sideways spread is `level+1`, capped at
-  6 and unconditional — water reaching a ledge edge **pours over it** like the
-  big game (an elevated source fans out; accepted as MC-like). Reach is
-  strictly bounded: the shallowest cell always
-  needs a deeper one. Cutting a chain makes levels **climb** (each flow cell
-  `notify`s its neighbours when its own level changes, incl. shallowing) until
-  they fall past the cap and dry, cell by cell. `world.set` deletes the level
-  entry; improving an existing flow cell's depth needs `world.touchAt` (same id,
-  so `set` early-returns). **All water renders full-cell** — sources and flow
-  cells are the same translucent textured cube; the depth level is sim-only
-  (reach, drying), never a draw height, so floods read as solid water bodies
-  instead of floating ribbons. The general face pass culls water↔water faces
-  (`isWaterId(id) && isWaterId(n)`) so a pool reads as one body. Anything wet
-  is `blocks.isWaterId(id)` — physics, sand (displaced water rides up), blasts
-  (skip both ids), animals/collectibles all use it, never a bare `=== WATER`.
-  Terrain writes cells directly (no hook), so a fresh sea starts still. **Tests:** terrain ponds and the sea are eternal
+  travelling water; its depth lives in `world.waterLevel` (flat index → level),
+  saved as **version 4** `waterLevels` (server merges it like the other maps).
+  The sim is a dirty set driven by the same `World.onCellChanged` hook as sand.
+  **The model is Minecraft parity (Nov 2026 rewrite), four rules:** (1) a
+  spring reaches **exactly seven cells** — `MAX_WATER_LEVEL` is 7, sideways
+  spread costs +1 level per cell and level 7 cells stop; (2) water spreads
+  sideways only into a cell with **something under it** (`supported`: solid or
+  settled water) — it never leans out into thin air; (3) where it runs out of
+  ground it **falls straight down keeping its depth** — a cell with no footing,
+  or one a drop put in mid-air (`pouring` set, cleared when a cell comes to
+  rest on ground), feeds only the column below it and NEVER spreads sideways;
+  a WATER source over a hole never moves, it pours from `y − 1` (full-strength
+  column, pool runs 7 again from the base). Letting mid-air cells spread was
+  the old bug: one spring at the top of a hill backed the whole slope up and
+  drew it as a diagonal stack of blue plates. (4) **Two sources feed a third**
+  (`makesSource`, checked in `evaluate` before the supply math): a flow cell
+  with ≥2 horizontal `WATER` neighbours, or ≥1 plus a `WATER` above, standing
+  on ground/settled water, converts to `WATER` (level entry deleted). Traps:
+  those new springs are eternal **and unbreakable** like the sea (bucket them
+  away in tests, or overwrite with `world.set`), and digging a corner off the
+  shore really does leave a spring behind — Java does the same. Held up only
+  by a **strictly deeper** side neighbour or by water falling in from above,
+  so a cut-off flood cannot prop itself up: the shallow end fails first and
+  `drain` cascades the news (≤`CASCADE_CELLS`=4 per step), which is the dry
+  line walking back up the channel. **Bedrock divergence, deliberate:** Java
+  water never drains on its own; ours does (the user picked it, and the bucket
+  depends on "pull the spring, the flood runs home").
+  `world.set` deletes the level entry; improving an existing flow
+  cell's depth needs `world.touchAt` (same id, so `set` early-returns). Levels
+  0..7 are the whole scale — `world.applySave` clamps waterLevels to `v <= 7`,
+  `flowLevelAt` defaults to 7, and `server/index.ts` validates 0..7. Anything
+  wet is `blocks.isWaterId(id)` — physics, sand (displaced water rides up),
+  blasts (skip both ids), animals/collectibles all use it, never a bare
+  `=== WATER`. Terrain writes cells directly (no hook), so a fresh sea starts
+  still. **Tests:** terrain ponds and the sea are eternal
   *flowing* sources on this branch — any e2e course near spawn must ring its
   site with a full-height stone caisson and scrub every wet cell inside, since
   falling water keeps its depth and one wet cell left above a wall re-rains
   on the course forever (the sand and water-flow tests do exactly this, and
-  their dry-waits dump wet-cell maps on failure for the next CI sleuth).
+  their dry-waits dump wet-cell maps on failure for the next CI sleuth). The
+  slope test asserts the invariant the eye checks: every wet cell has ground or
+  water under it, or is a falling cell with water above it.
 - Fish (`core/fish.ts`, `Game.fish`) live in every column of water: five
   kinds, **minnow + sunfish school** (a `School` anchor wanders through valid
   water and the flock follows via anchor-seek + slowly circling offsets +
@@ -277,3 +337,102 @@ event. Renaming a storage key orphans the family's existing saves.
   satchel keeps the catch' (reuses the fishing test's pond recipe and refill
   ritual, and asserts the menu has NO Satchel row). The D-pad ▾ satchel
   button still owes the couch a hardware check.
+- Treasure chests are **placeable** (palette + `paletteFor(allowChests)`, save
+  version still 4) and a kid's own chest pays random treasure every time. The
+  Grown-Ups row **🧰 Treasure Chests** (`chests`/`toggleChests`) hides the
+  palette entry *and* refuses placement (`chestsAllowed` in `lbw-settings`);
+  hidden worlds still contain terrain chests. The new GrownUps rows
+  (Weather 6, Day & Night 7, Treasure Chests 8) sit **after** Waiting Players
+  so row pins 0–5 hold; **Back is now index 9** — `selectRow(6)` would hit
+  Weather. Chests still never appear in `FAVORITES`.
+- An opened chest opens **only at the top** (Nov 2026 user complaint: the old
+  one painted an open lid down its SIDES). `CHEST_OPEN` keeps CHEST's
+  `sideAtlasCell`/`bottomAtlasCell` and both use `CHEST_HEIGHT` — from the
+  side they are the same box; `chestOpenBoxes` (blocks.ts) is body + `inner`
+  (walls `CHEST_INSET` in, treasure at `CHEST_DEPTH` below the rim).
+  `mesher.addChestShape`: open body = `addTexturedSubBox` with
+  `skip: faceSkip(FACE_PY)`; then 4 rim strips (`atlasUvs` samples a SLICE of
+  a cell — a thin strip shows a thin slice of planks, never the whole tile
+  stretched), `addInnerFace` for the 4 walls seen from INSIDE + the treasure
+  quad, all skipped when `isFullCellBlock` sits above (never draw an interior
+  nobody can see). The LID is pure render, `addLidPlate`: two quads (art side
+  `ATLAS_CHEST_LID`, shaded side `ATLAS_CHEST_INSIDE`) hinged on the −z rim
+  and leaning back into the cell ABOVE — it's the only chest part that leaves
+  the cell, so skip it when `(x, y+1, z−1)` is full, and give up any test that
+  assumes chests never render outside their cell (the new chest test's z
+  window is −0.6..+1.6 for this reason). Atlas cell 26 is repurposed
+  `ATLAS_CHEST_OPEN_SIDE` → `ATLAS_CHEST_INSIDE` (`drawChestOpenSide` is
+  gone); `ATLAS_CELL_COUNT` stays 28. The sealed-cube quad test now asserts
+  `chest − openChest === 1` (the lid top is the only difference in there),
+  and `__lbw.atlas` exposes the chest cell ids so the geometry test can
+  decode a face's artwork from its UV (`cell = floor(u × cells)`).
+  `scripts/chest-shot.ts` parks a camera (hides the avatar) for still lifes
+  of shut/opened from three angles.
+- The bucket (`core/bucket.ts`, `BUCKET=39` where WATER sat in `PALETTE`):
+  every kid carries one, `LocalPlayer.bucketFull` is **session-only**. Only a
+  WATER source fills it; pouring sets a new WATER source at the aim's
+  `px/py/pz`. Digging with a bucket scoops; WATER_FLOW still breaks normally.
+  The drain-back is the flow sim's own cut-off drying (levels climb until they
+  pass the reach cap) — no extra code, and the whole channel is dry within a
+  second. Don't claim a per-cell reverse wave in docs or tests: the levels
+  re-equilibrate across the pool first, so the dry-out order is ±1 step and
+  not assertable. e2e: 'the water bucket scoops a spring…' drives it through
+  `__lbw.bucketAt(playerIdx, aim)` with exact RayHits.
+- Interaction is **LT / L2** (`BUTTON_MAP` 6→interact, 7→place, 2→remove;
+  keyboard E/R-Click/L-Click unchanged). `GAMEPAD_BUTTON_MAP` is exported and
+  mirrored on `__lbw.padMap` — the 'the triggers are the hands' test pins it.
+  Keyboard contract (R-Click builds, L-Click breaks, E interacts) still holds.
+- Crouch is a **pose, not a squash** (`players/avatar.ts`), and the rig has no
+  knees — so the pose is three angles, worked out against the pivot geometry:
+  `parts.body` (which pivots at the FEET) tips forward `CROUCH_LEAN`, which is
+  the only thing that can lower the hips; `CROUCH_LEGS` swings the legs further
+  forward *inside* the tipped body so the feet plant themselves in front; and
+  `parts.chest` (the hip pivot at `CROUCH_HIP=0.5`) hangs the torso forward over
+  them by `CROUCH_FOLD`. Everything is lerped by `parts.crouchT`. Traps learned
+  the hard way: rotating a leg about the hip **cannot** lower the hip (the old
+  `CROUCH_KNEE=-1.25` just flung the feet up — a handstand); tipping the body
+  and the legs by the same angle is only a leaning plank; and a limb pointing
+  DOWN swings BACKWARD for a positive `rotation.x`, so "arms hang" under a
+  forward-tipped torso means a positive arm angle. Scale stays **1** everywhere
+  (the original pose scaled `group.scale.y` and squashed juice-box kids and
+  every costume with them). `body.rotation`/`body.position` belong to the
+  crouch; `group.rotation` belongs to the swim lean. The crouch e2e measures the
+  drawn matrices: scale 1 on group and body, `body.rotation.x`, the hunch past
+  the tip, the legs inside a sane band, and the head top at least 0.25 below its
+  standing height. `scripts/crouch-shots.ts` shoots the profile + the in-play
+  three-quarter view for eyeballing it.
+- Water draws at its depth (`water.ts waterSurfaceHeight(world,x,y,z)`): submerged
+  cell (water above) or a falling cell → **1** (a full cell — this is what stops
+  a deep body drawing as a stack of thin plates); otherwise the big game's nine
+  steps: **`(8 − level) / 9`** — a source or a full-strength plunge stands
+  8/9, level 4 stands 4/9, and the seventh cell of a reach is a thin 1/9 sheet
+  (`level = world.flowLevelAt`, 0 for WATER). So a soak lies flat and thin, a
+  pool stands to its brim, and a waterfall is a solid
+  ribbon. The mesher's **water channel** (`ChunkGeometry.water`,
+  `materials.water`, tiling `textures.waterTexture`, drifting via
+  `chunks.tickWater(dt)` — Game calls it every frame) draws each cell as a box
+  to `addWaterCube`'s **corner-averaged** height (`waterCornerHeights`: the wet
+  cells meeting at each corner, same y only — blending with a lower column's
+  absolute height flips the quad inside out). Two traps that made water look
+  like a chessboard of coasters: per-cell UVs (one whole wave tile per cell —
+  `waterFaceUvs` samples in WORLD units instead) and `materials.water`
+  `depthWrite: false`, which blended every surface of every cell in a body into
+  every other one. Physics still treats every wet cell as a full cell.
+  `__lbw.waterSurfaceAt` is the test lens; `scripts/water-slope-shot.ts` shoots
+  a spring pouring down a staircase for eyeballing it.
+- Sky & weather: `core/weather.ts` `WeatherClock` (game time, public
+  `weatherNow('rain'|'snow'|'off')` on Game; `__lbw.weatherNow`) decides what
+  falls; `render/sky.ts` draws it (sun+moon orbit pivot, stars, cloud puffs,
+  rain/snow `THREE.Points` riding `__lbw.renderCam` — Game sets it each frame
+  before `skyEnv.update(dt, cam)`, dome vertex colours repaint only when the
+  hour moves). Day-phase lives in the sky (`setDayMode('auto'|'day'|'night'|
+  'none')`, `dayPhase()`; `__lbw.setDayMode` / `__lbw.dayPhase`). **Night is
+  never black**: light floors ≥ ~0.3, so the 'no black hole' and 'blackPixels'
+  tests stay green at midnight (the weather test asserts it). Audio:
+  `audio.rainLoop(intensity)` must be re-called ~1×/s (it re-triggers itself;
+  stop via `rainLoopStop()`), thunder only on heavy rain every ≥9 s; both log
+  `weather:rain…/weather:thunder` into `AudioKit.recent` (that ring must not
+  overflow the 'sounds carry the material' test — it samples 25).
+- ⚠️ **This worktree has twice silently reverted working-tree files mid-session**
+  (game.ts, sky.ts, main.ts, tests…): commit early, commit often, and re-check
+  `git status`/`git log` after any mysterious failure.

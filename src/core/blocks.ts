@@ -45,13 +45,28 @@ export const STAIRS: BlockId = 35; // a real step: half the cell low, half of it
 export const CHEST: BlockId = 36; // a treasure chest, lid shut
 export const CHEST_OPEN: BlockId = 37; // the same chest with the lid up: treasure already taken
 export const WATER_FLOW: BlockId = 38; // travelling water: spreads, shallows and dries up
+/**
+ * The bucket (core/bucket.ts): NOT a block anyone can stand in — it is the one
+ * palette item that is a *tool*. Emptied, it scoops a spring of WATER up;
+ * full, pressing build pours that spring out again. It is never written into
+ * the voxel grid, so nothing about the world's storage changes.
+ */
+export const BUCKET: BlockId = 39;
+/**
+ * The climbing ladder (core/physics.ts onLadder, players/playerEntity.ts):
+ * NOT solid — you walk into it, not onto it — and it never fills its cell:
+ * a thin panel stands flush against the wall behind it, which way it points
+ * living in world.ladderFacing (see LadderFacing below). Hold jump to climb
+ * up, hold the sneak/dive button to climb down, hold nothing to cling.
+ */
+export const LADDER: BlockId = 40;
 
 /**
  * Cells of the procedural *block* texture atlas (see render/textures.ts).
  * One 32x32 cell per block face style, laid out in a single row; the mesher
  * divides u by ATLAS_CELL_COUNT, so keep it in step with BLOCK_CELLS there.
  */
-export const ATLAS_CELL_COUNT = 28;
+export const ATLAS_CELL_COUNT = 29;
 export const ATLAS_DYNAMITE_SIDE = 0;
 export const ATLAS_DYNAMITE_CAP = 1;
 export const ATLAS_GRASS_TOP = 2;
@@ -83,9 +98,45 @@ export const ATLAS_CHEST_SIDE = 23;
 export const ATLAS_CHEST_LID = 24;
 /** the chest's underside: dark boards and iron braces */
 export const ATLAS_CHEST_BOTTOM = 25;
-/** the same chest with its lid up: dark inside, gold spilling out */
-export const ATLAS_CHEST_OPEN_SIDE = 26;
+/** the INSIDE of the chest's walls, seen down into an opened chest */
+export const ATLAS_CHEST_INSIDE = 26;
+/** the treasure sitting at the bottom of an opened chest */
 export const ATLAS_CHEST_OPEN_TOP = 27;
+/** a climbing ladder: two upright rails and the rungs between them */
+export const ATLAS_LADDER = 28;
+
+/**
+ * How a treasure chest is built. It is not a cube, and only its TOP ever
+ * opens: shut, it is a 0.85 box with the lid painted on top. Opened, the box
+ * is the SAME box — a chest's sides do not change when you lift the lid — but
+ * its top face is gone, and in its place the mesher draws an opening you can
+ * look down into: the inside of the walls, the treasure at the bottom of them,
+ * and a wooden rim where the lid lay. The lid itself is pure render — see
+ * mesher.ts addLidPlate — because a lid is the only thing about a chest that
+ * ever leaves its own cell.
+ */
+export const CHEST_HEIGHT = 0.85;
+/** how far below the rim the treasure lies (the chest's inside depth) */
+export const CHEST_DEPTH = 0.3;
+/** how thick the chest's walls look from above, in cells */
+export const CHEST_INSET = 0.16;
+
+/**
+ * The boxes of an OPEN treasure chest in the cell at (x, y, z). The body is
+ * the shut chest's box (same footprint, same height — what a kid stands on
+ * does not change when a lid comes off); `inner` is the hollow inside it,
+ * whose floor is where the treasure lies. The mesher draws both.
+ */
+export function chestOpenBoxes(x: number, y: number, z: number): {
+  body: VoxelBox; inner: VoxelBox;
+} {
+  const rim = y + CHEST_HEIGHT;
+  const floorY = rim - CHEST_DEPTH;
+  return {
+    body: [x, y, z, x + 1, rim, z + 1],
+    inner: [x + CHEST_INSET, floorY, z + CHEST_INSET, x + 1 - CHEST_INSET, rim, z + 1 - CHEST_INSET],
+  };
+}
 
 /**
  * Cells of the *plant* atlas (cross blocks). Keep in step with PLANT_CELLS
@@ -188,12 +239,15 @@ const DEFS: BlockDef[] = [
     sideAtlasCell: ATLAS_LEAVES, solid: true, opaque: true,
   },
   {
+    // Water is drawn from its own animated sheet (render/textures.ts
+    // waterTexture), not from the block atlas: a flowing surface wants to move.
+    // Its cell height comes from how deep it is (core/water.ts waterSurfaceHeight).
     id: WATER, name: 'Water', icon: '💧', color: rgb(79, 179, 232),
-    sideAtlasCell: ATLAS_WATER, solid: false, opaque: false, translucent: true,
+    solid: false, opaque: false, translucent: true,
   },
   {
     id: WATER_FLOW, name: 'Flowing Water', icon: '💧', color: rgb(96, 190, 238),
-    sideAtlasCell: ATLAS_WATER, solid: false, opaque: false, translucent: true,
+    solid: false, opaque: false, translucent: true,
   },
   { id: FLOWER_RED, name: 'Flower', icon: '🌷', color: rgb(255, 122, 108), solid: false, opaque: false, cross: true, atlasCell: 0 },
   { id: FLOWER_YELLOW, name: 'Sunflower', icon: '🌼', color: rgb(255, 214, 94), solid: false, opaque: false, cross: true, atlasCell: 1 },
@@ -269,18 +323,38 @@ const DEFS: BlockDef[] = [
     // A squat treasure chest (0.85 of a cell tall, painted with a brass lock).
     // A dozen or so are hidden in every world; the pet button lifts the lid and
     // out comes a random treasure (see core/treasure.ts). Opened ones stay open.
+    // Only the TOP of a chest opens, so the shut chest is the one that owns the
+    // artwork: the opened one keeps these very side and bottom cells.
     id: CHEST, name: 'Treasure Chest', icon: '📦', color: rgb(178, 122, 70),
     sideAtlasCell: ATLAS_CHEST_SIDE, capAtlasCell: ATLAS_CHEST_LID,
     bottomAtlasCell: ATLAS_CHEST_BOTTOM,
-    solid: true, opaque: true, solidHeight: 0.85,
+    solid: true, opaque: true, solidHeight: CHEST_HEIGHT,
   },
   {
     // lid up, treasure gone: it keeps looking opened forever, so nobody
-    // shakes the same chest twice
+    // shakes the same chest twice. It is the same box from outside (the same
+    // side art, the same height, so what you stand on does not change) — the
+    // difference is on top: an opening you can see down into, and the lid
+    // standing up at the back (see mesher.ts addOpenChestShape).
     id: CHEST_OPEN, name: 'Chest (open)', icon: '📦', color: rgb(151, 104, 60),
-    sideAtlasCell: ATLAS_CHEST_OPEN_SIDE, capAtlasCell: ATLAS_CHEST_OPEN_TOP,
+    sideAtlasCell: ATLAS_CHEST_SIDE, capAtlasCell: ATLAS_CHEST_OPEN_TOP,
     bottomAtlasCell: ATLAS_CHEST_BOTTOM,
-    solid: true, opaque: true, solidHeight: 0.85,
+    solid: true, opaque: true, solidHeight: CHEST_HEIGHT,
+  },
+  {
+    // A climbing ladder: not solid (you walk into it, not onto it), a thin
+    // panel against the wall you aimed at. Hold jump to climb, hold sneak to
+    // slide down (see playerEntity's climbing branch).
+    id: LADDER, name: 'Ladder', icon: '🧗', color: rgb(210, 168, 110),
+    sideAtlasCell: ATLAS_LADDER,
+    solid: false, opaque: false,
+  },
+  {
+    // The one palette item that is a tool instead of a brick: scoop a spring
+    // with it, pour the spring out somewhere else (core/bucket.ts). The
+    // player carries it, so it never lands in the voxel grid.
+    id: BUCKET, name: 'Bucket', icon: '🪣', color: rgb(186, 205, 224),
+    solid: false, opaque: false,
   },
 ];
 
@@ -338,7 +412,7 @@ export type SoundFamily = 'wood' | 'stone' | 'soft' | 'glass' | 'plant';
 
 const SOUND_FAMILIES = new Map<BlockId, SoundFamily>([
   [WOOD, 'wood'], [PLANKS, 'wood'], [SLAB, 'wood'], [STAIRS, 'wood'], [CHEST, 'wood'], [CHEST_OPEN, 'wood'],
-  [MUSIC, 'wood'], [DYNAMITE, 'wood'],
+  [MUSIC, 'wood'], [DYNAMITE, 'wood'], [LADDER, 'wood'],
   [STONE, 'stone'], [BRICKS, 'stone'], [ROCK, 'stone'],
   [GRASS, 'soft'], [DIRT, 'soft'], [SAND, 'soft'], [SCORCH, 'soft'], [C_WHITE, 'soft'], [BOUNCY, 'soft'],
   [GLASS, 'glass'], [GLOW, 'glass'], [SPARKLE, 'glass'],
@@ -368,6 +442,14 @@ export function isStairsBlock(id: BlockId): boolean {
 /** either state of a treasure chest — the pet button lifts the lid */
 export function isChestBlock(id: BlockId): boolean {
   return id === CHEST || id === CHEST_OPEN;
+}
+/** the bucket tool — scoops a spring up, pours it out again (core/bucket.ts) */
+export function isBucket(id: BlockId): boolean {
+  return id === BUCKET;
+}
+/** a climbing ladder — never solid, always leaning against a wall */
+export function isLadderBlock(id: BlockId): boolean {
+  return id === LADDER;
 }
 /** collidable height of a block id in its cell (0 for non-solids, 0.5 for a slab) */
 export function solidHeightOf(id: BlockId): number {
@@ -402,18 +484,56 @@ export function rotateStairFacing(facing: number): StairFacing {
 }
 
 /**
- * Blocks offered in the child-friendly creative palette (in order). Treasure
- * chests are deliberately NOT here — they are meant to be *found*, hidden in
- * the terrain by terrain.ts, not built. Break one or pet it to open; once a
- * lid is up (CHEST_OPEN) it stays open in that world forever.
+ * Which way a ladder leans: the direction its CLIMBING side faces — away
+ * from the wall it is nailed to. 0 = climbs from +x (panel against the -x
+ * wall), 1 = -x, 2 = +z, 3 = -z. Stored in world.ladderFacing.
+ */
+export type LadderFacing = 0 | 1 | 2 | 3;
+
+/** how thick a ladder's plank panel is, in cells (thin — a real ladder is) */
+export const LADDER_DEPTH = 0.22;
+
+/**
+ * The ladder's plank panel inside the cell at (x, y, z): full height, full
+ * width, but only LADDER_DEPTH thick, standing against the wall the facing
+ * points away from. Physics passes through it; the mesher paints it.
+ */
+export function ladderBoxes(x: number, y: number, z: number, facing: LadderFacing): VoxelBox {
+  const f = facing >= 0 && facing <= 3 ? facing : 0;
+  const d = LADDER_DEPTH;
+  if (f === 0) return [x, y, z, x + d, y + 1, z + 1]; // climbed from +x: panel hugs the -x wall
+  if (f === 1) return [x + 1 - d, y, z, x + 1, y + 1, z + 1];
+  if (f === 2) return [x, y, z, x + 1, y + 1, z + d];
+  return [x, y, z + 1 - d, x + 1, y + 1, z + 1];
+}
+
+/**
+ * Blocks offered in the child-friendly creative palette (in order). The bucket
+ * stands where the water source used to: water is *poured* from a bucket now,
+ * never set down straight from a menu, so kids have to walk a puddle home.
+ * Treasure chests are here only when grown-ups allow building them — see
+ * `paletteFor`, which is the palette the game actually shows.
  */
 export const PALETTE: BlockId[] = [
-  GRASS, DIRT, STONE, SAND, WOOD, PLANKS, STAIRS, SLAB, DOOR, BRICKS, GLASS, LEAVES,
-  WATER,
+  GRASS, DIRT, STONE, SAND, WOOD, PLANKS, STAIRS, SLAB, DOOR, LADDER, BRICKS, GLASS, LEAVES,
+  BUCKET,
   SAPLING, FLOWER_RED, FLOWER_YELLOW, TALLGRASS,
   GLOW, BOUNCY, SPARKLE, MUSIC, DYNAMITE,
   C_RED, C_ORANGE, C_YELLOW, C_GREEN, C_BLUE, C_PURPLE, C_PINK, C_WHITE,
 ];
+
+/**
+ * The live palette: the base list, plus a treasure chest among the things you
+ * build when grown-ups have left "Treasure Chests" on (Grown-Up Settings).
+ * Chests are still only *found* in a world where they are off — the toggle
+ * decides whether a kid may place one, nothing about the loot inside.
+ */
+export function paletteFor(allowChests: boolean): BlockId[] {
+  if (!allowChests) return PALETTE;
+  const withChests = [...PALETTE];
+  withChests.splice(withChests.indexOf(DOOR) + 1, 0, CHEST);
+  return withChests;
+}
 
 /** Quick-cycling favorites for shoulder buttons. */
 export const FAVORITES: BlockId[] = [

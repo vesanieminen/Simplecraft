@@ -4,7 +4,9 @@
  *    tuft) sampled by the cross-quads with alpha-test cutout;
  *  - a horizontal atlas of 32x32 *block* cells: every block in the game is
  *    painted from here rather than flat-tinted (grass, dirt, stone, planks,
- *    bricks, glass, water, the candy colours, bedrock, scorch, dynamite…).
+ *    bricks, glass, the candy colours, bedrock, scorch, dynamite…);
+ *  - one extra *tileable* sheet for water (waterTexture), which lives outside
+ *    the atlas so the sea can scroll without dragging its neighbours with it.
  *
  * A block face is only a few dozen pixels on screen and side faces lose about
  * half their brightness to the baked face shading, ambient occlusion and
@@ -13,8 +15,8 @@
 
 import * as THREE from 'three';
 import {
-  ATLAS_BOUNCY, ATLAS_BRICKS, ATLAS_CELL_COUNT, ATLAS_CHEST_BOTTOM, ATLAS_CHEST_LID,
-  ATLAS_CHEST_OPEN_SIDE, ATLAS_CHEST_OPEN_TOP, ATLAS_CHEST_SIDE, ATLAS_DIRT, ATLAS_DOOR, ATLAS_DOOR_TOP, ATLAS_DYNAMITE_CAP,
+  ATLAS_BOUNCY, ATLAS_BRICKS, ATLAS_CELL_COUNT, ATLAS_CHEST_BOTTOM, ATLAS_CHEST_INSIDE, ATLAS_CHEST_LID,
+  ATLAS_CHEST_OPEN_TOP, ATLAS_CHEST_SIDE, ATLAS_DIRT, ATLAS_DOOR, ATLAS_DOOR_TOP, ATLAS_DYNAMITE_CAP, ATLAS_LADDER,
   ATLAS_DYNAMITE_SIDE, ATLAS_GLASS, ATLAS_GLOW, ATLAS_GRASS_SIDE, ATLAS_GRASS_TOP,
   ATLAS_LEAVES, ATLAS_LOG_END, ATLAS_LOG_SIDE, ATLAS_MUSIC, ATLAS_PLANKS, ATLAS_ROCK,
   ATLAS_SAND, ATLAS_SCORCH, ATLAS_SPARKLE, ATLAS_STONE, ATLAS_WATER, ATLAS_WEAVE,
@@ -521,19 +523,39 @@ function drawChestBottom(ctx: CanvasRenderingContext2D, ox: number): void {
   outline(ctx, ox, '#33241a');
 }
 
-/** the chest with the lid up: the lid standing along the top, gold spilling out */
-function drawChestOpenSide(ctx: CanvasRenderingContext2D, ox: number): void {
-  chestBoards(ctx, ox, '#a97b45', '#7a4d22', 83);
-  rect(ctx, ox, 0, 0, S, 7, '#d9a766'); // the lid swung up
-  rect(ctx, ox, 0, 7, S, 1, '#7a4d22');
-  rect(ctx, ox, 0, 8, S, 2, '#f2c14e'); // its brass edge
-  // the dark inside, lit by what is in it
-  rect(ctx, ox, 2, 11, 28, 12, '#33241a');
-  rect(ctx, ox, 2, 11, 28, 1, '#5c4230');
-  goldPile(ctx, ox, -6);
-  ctx.fillStyle = '#fff6ac';
-  for (const [x, y] of [[6, 12], [25, 14]] as const) ctx.fillRect(ox + x, y, 1, 3);
-  outline(ctx, ox, '#6e4520');
+/**
+ * The climbing ladder. Two upright rails and bright rungs on a dark recessed
+ * back — seen from a kid's camera a side face loses about half its light to
+ * FACE_SHADE, so the wood is painted pale and the gaps deep.
+ */
+function drawLadder(ctx: CanvasRenderingContext2D, ox: number): void {
+  rect(ctx, ox, 0, 0, S, S, '#5a3d22'); // the shadowed wall behind the ladder
+  for (const y of [3, 9, 15, 21, 27]) rect(ctx, ox, 0, y, S, 2, '#493119'); // plank gaps
+  for (const x of [5, 23]) { // the two rails, with a lit edge on each
+    rect(ctx, ox, x, 0, 4, S, '#c89257');
+    rect(ctx, ox, x, 0, 1, S, '#e6b478');
+  }
+  for (const y of [2, 11, 20, 29]) { // rungs: bright in the middle so they pop
+    rect(ctx, ox, 5, y, 22, 3, '#e0b070');
+    rect(ctx, ox, 5, y, 22, 1, '#f7d9a4');
+    rect(ctx, ox, 5, y + 2, 22, 1, '#a8713a');
+  }
+  outline(ctx, ox, '#493119');
+}
+
+/** the inside of the chest's walls, seen when you look down into an opened chest */
+function drawChestInside(ctx: CanvasRenderingContext2D, ox: number): void {
+  // the inside of a box is darker and smoother than its outside: plain boards,
+  // a shadow at the bottom where the treasure lies, and the brass hinge band
+  // along the top edge where the lid used to sit
+  chestBoards(ctx, ox, '#7d5433', '#5c3d24', 89);
+  rect(ctx, ox, 0, 0, S, 3, '#a8763f');
+  rect(ctx, ox, 0, 3, S, 1, '#4c331d');
+  rect(ctx, ox, 4, 1, 4, 1, '#f2c14e'); // the lid's hinge
+  rect(ctx, ox, 24, 1, 4, 1, '#f2c14e');
+  rect(ctx, ox, 0, 26, S, 6, '#3d2a1a'); // the dark foot of the inside
+  for (const [x, y] of [[3, 27], [12, 29], [22, 27], [28, 30]] as const) rect(ctx, ox, x, y, 2, 1, '#2b1f16');
+  outline(ctx, ox, '#3d2a1a');
 }
 
 /** the same chest seen from above: dark rim, a heaped-up pile of gold and gems */
@@ -703,11 +725,59 @@ const BLOCK_ART: Record<number, CellArt> = {
   [ATLAS_CHEST_SIDE]: drawChestSide,
   [ATLAS_CHEST_LID]: drawChestLid,
   [ATLAS_CHEST_BOTTOM]: drawChestBottom,
-  [ATLAS_CHEST_OPEN_SIDE]: drawChestOpenSide,
+  [ATLAS_CHEST_INSIDE]: drawChestInside,
   [ATLAS_CHEST_OPEN_TOP]: drawChestOpenTop,
+  [ATLAS_LADDER]: drawLadder,
 };
 
 let cachedBlock: THREE.CanvasTexture | null = null;
+
+let cachedWater: THREE.CanvasTexture | null = null;
+
+/**
+ * Water gets its own *tileable* sheet rather than a cell of the block atlas:
+ * a flowing surface wants to move, and sliding the atlas's UVs would drag the
+ * neighbouring artwork across the sea. Every wave here is a whole number of
+ * periods across the tile, so it wraps without a seam, and `Game` drifts the
+ * texture's offset a little every frame — ponds shimmer, floods look like they
+ * are running.
+ */
+export function waterTexture(): THREE.CanvasTexture {
+  if (cachedWater) return cachedWater;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = S;
+  const ctx = canvas.getContext('2d')!;
+  const img = ctx.createImageData(S, S);
+  const px = img.data;
+  const TAU = Math.PI * 2;
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      // three crossing wave trains, all whole periods across the tile
+      const w = Math.sin((x / S) * TAU * 2)
+        + Math.sin((y / S) * TAU * 2 + 1.2)
+        + 0.6 * Math.sin(((x + y) / S) * TAU * 3 + 0.5);
+      const t = (w + 2.6) / 5.2; // 0..1
+      let r: number, g: number, b: number;
+      if (t > 0.76) { r = 0xe8; g = 0xf8; b = 0xff; } // foam sparkle
+      else if (t > 0.58) { r = 0x8f; g = 0xd2; b = 0xf7; } // crest
+      else if (t > 0.32) { r = 0x5c; g = 0xb4; b = 0xee; } // body
+      else { r = 0x3a; g = 0x8e; b = 0xcb; } // trough
+      const i = (y * S + x) * 4;
+      px[i] = r; px[i + 1] = g; px[i + 2] = b; px[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  // same reason as the block atlas: tints in this game are plain linear values
+  tex.colorSpace = THREE.NoColorSpace;
+  cachedWater = tex;
+  return tex;
+}
 
 export function blockAtlasTexture(): THREE.CanvasTexture {
   if (cachedBlock) return cachedBlock;

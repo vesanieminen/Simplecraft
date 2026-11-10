@@ -401,4 +401,105 @@ export class AudioKit {
     this.tone('triangle', f, f, 0.5, 0.22);
     this.tone('sine', f * 2, f * 2, 0.3, 0.06);
   }
+
+  // ----------------------------------------------------------------- weather
+  // Rain is the one sound that must not be a one-shot: it is a bed of noise
+  // that lives as long as the sky is wet, and the game re-triggers it about
+  // once a second like a heartbeat. Noise through a band-pass, fading in over
+  // a second — a downpour has low rumble under the hiss, so the band slides
+  // down as the intensity climbs. Snow falls silent (kids notice the quiet).
+
+  private rainGain: GainNode | null = null;
+  private rainSrc: AudioBufferSourceNode | null = null;
+  private rainFilter: BiquadFilterNode | null = null;
+  private rainBuf: AudioBuffer | null = null;
+  private rainEndsAt = 0;
+
+  /**
+   * Keep the rain hissing (re-trigger ~1×/s): returns true if it is sounding.
+   * `intensity` is 0..1.
+   */
+  rainLoop(intensity: number): boolean {
+    if (!this.ctx || !this.master || this.muted) return false;
+    const t = this.ctx.currentTime;
+    if (t < this.rainEndsAt) return true; // last puff still playing: no overlap
+    if (this.rainSrc) {
+      try { this.rainSrc.stop(); } catch { /* already gone */ }
+      this.rainSrc = null;
+    }
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.rainNoise();
+    src.loop = true;
+    const filter = this.rainFilter ?? this.ctx.createBiquadFilter();
+    this.rainFilter = filter;
+    filter.type = 'bandpass';
+    filter.frequency.value = 800 + intensity * 900;
+    filter.Q.value = 0.4;
+    const gain = this.rainGain ?? this.ctx.createGain();
+    this.rainGain = gain;
+    src.connect(filter).connect(gain).connect(this.master);
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.linearRampToValueAtTime(0.0015 + intensity * 0.02, t + 0.9);
+    src.start(t);
+    this.rainSrc = src;
+    this.rainEndsAt = t + 1.1; // re-trigger just before the loop would gap
+    this.recent.push(`weather:rain:${Math.round(intensity * 100) / 100}`);
+    return true;
+  }
+
+  /** a one-second hiss buffer, made once and looped forever after */
+  private rainNoise(): AudioBuffer | null {
+    if (!this.ctx) return null;
+    if (this.rainBuf) return this.rainBuf;
+    const len = Math.floor(this.ctx.sampleRate * 1.0);
+    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * 0.6;
+    this.rainBuf = buf;
+    return buf;
+  }
+
+  /** the sky cleared: fade the hiss out and cut it loose */
+  rainLoopStop(): void {
+    if (this.ctx && this.rainGain) {
+      const t = this.ctx.currentTime;
+      this.rainGain.gain.cancelScheduledValues(t);
+      this.rainGain.gain.setValueAtTime(Math.max(this.rainGain.gain.value, 0.0001), t);
+      this.rainGain.gain.linearRampToValueAtTime(0.0001, t + 0.7);
+    }
+    const src = this.rainSrc;
+    this.rainSrc = null;
+    this.rainEndsAt = 0;
+    if (src) setTimeout(() => { try { src.stop(); } catch { /* silent */ } }, 800);
+  }
+
+  /**
+   * Thunder: a long low rumble with a crack on top. Only heavy rain thunders,
+   * and never more than once every ~9 seconds, so it startles but does not
+   * scare. The rumble is a detuned saw pair sliding down through a lowpass.
+   */
+  thunder(): void {
+    if (!this.ctx || !this.master || this.muted) return;
+    const t = this.ctx.currentTime;
+    // crack: short bright noise
+    this.noise(0.35, 0.1, 2400, 0.6);
+    // rumble: two low saws, slow decay, wobble in the filter to make it roll
+    for (const [f, dur] of [[44, 2.2], [58, 1.8]] as const) {
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(f, t);
+      osc.frequency.exponentialRampToValueAtTime(f * 0.7, t + dur);
+      const lp = this.ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.setValueAtTime(300, t);
+      lp.frequency.linearRampToValueAtTime(90, t + dur);
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.14, t);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      osc.connect(lp).connect(gain).connect(this.master);
+      osc.start(t);
+      osc.stop(t + dur + 0.05);
+    }
+    this.recent.push('weather:thunder');
+  }
 }

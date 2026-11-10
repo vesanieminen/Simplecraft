@@ -4,7 +4,7 @@
  */
 
 import {
-  AIR, isDoorClosedBlock, isStairsBlock, isWaterId, solidHeightOf, StairFacing, stairBoxes, VoxelBox,
+  AIR, isDoorClosedBlock, isLadderBlock, isStairsBlock, isWaterId, solidHeightOf, StairFacing, stairBoxes, VoxelBox,
 } from './blocks';
 import { idx as worldIdx, World } from './world';
 
@@ -288,6 +288,24 @@ export function inWater(world: World, box: Aabb): boolean {
   return isWaterId(bodyBlock(world, box)) || isWaterId(world.get(
     Math.floor(box.x + box.w / 2), Math.floor(box.y + 0.2), Math.floor(box.z + box.d / 2),
   ));
+}
+
+/**
+ * True while the body is inside a ladder's cell — feet cell or a cell the
+ * torso still spans (so a kid falling past a tall ladder is caught by it).
+ * The whole cell counts, not just the thin plank panel: once a kid is in the
+ * cell they are holding the rungs.
+ */
+export function onLadder(world: World, box: Aabb): boolean {
+  const x0 = Math.floor(box.x), x1 = Math.floor(box.x + box.w - 1e-6);
+  const z0 = Math.floor(box.z), z1 = Math.floor(box.z + box.d - 1e-6);
+  for (let x = x0; x <= x1; x++) {
+    for (let z = z0; z <= z1; z++) {
+      if (isLadderBlock(world.get(x, Math.floor(box.y), z))
+        || isLadderBlock(world.get(x, Math.floor(box.y + box.h - 0.08), z))) return true;
+    }
+  }
+  return false;
 }
 
 /**

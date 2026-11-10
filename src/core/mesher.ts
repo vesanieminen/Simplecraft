@@ -6,11 +6,14 @@
 
 import * as THREE from 'three';
 import {
-  ATLAS_CELL_COUNT, ATLAS_DOOR, ATLAS_PLANKS, blockDef, isCrossBlock, isDoorBlock,
-  isDoorClosedBlock, isFullCellBlock, isOpaqueBlock, isStairsBlock, isTranslucentBlock, isWaterId,
-  PLANT_ATLAS_CELLS, SAND, StairFacing, stairBoxes, VoxelBox,
+  ATLAS_CHEST_INSIDE, ATLAS_CHEST_LID, ATLAS_CHEST_OPEN_TOP, ATLAS_CELL_COUNT, ATLAS_DOOR, ATLAS_LADDER, ATLAS_PLANKS,
+  BlockId, blockDef,
+  CHEST_INSET, CHEST_OPEN, chestOpenBoxes, isChestBlock, isCrossBlock, isDoorBlock,
+  isDoorClosedBlock, isFullCellBlock, isLadderBlock, isOpaqueBlock, isStairsBlock, isTranslucentBlock, isWaterId,
+  LadderFacing, ladderBoxes, PLANT_ATLAS_CELLS, SAND, StairFacing, stairBoxes, VoxelBox,
 } from './blocks';
 import { CHUNK, idx as worldIdx, WORLD_SY, World } from './world';
+import { waterSurfaceHeight } from './water';
 
 function hashByte(x: number, y: number, z: number): number {
   let h = (x * 73856093 + y * 19349663 + z * 83492791) | 0;
@@ -21,6 +24,9 @@ function hashByte(x: number, y: number, z: number): number {
 
 const AO_LEVELS = [0.55, 0.74, 0.88, 1.0];
 const FACE_SHADE = [0.78, 0.78, 1.0, 0.55, 0.86, 0.86]; // +x -x +y -y +z -z
+/** how much darker the inside of an opened chest is than its outside: the
+ *  treasure down there is in shadow, which is what reads as depth */
+const CHEST_INSIDE_SHADE = 0.62;
 
 interface FaceSpec {
   dir: [number, number, number];
@@ -99,8 +105,14 @@ export interface ChunkGeometry {
   cross: THREE.BufferGeometry | null;
   /** cubes painted from the block texture atlas (dynamite, grass, stone…) */
   textured: THREE.BufferGeometry | null;
-  /** see-through cubes painted from the same atlas (glass, water) */
+  /** see-through cubes painted from the same atlas (glass) */
   texturedTranslucent: THREE.BufferGeometry | null;
+  /**
+   * Water, on its own: it is drawn at the height its depth says it stands at
+   * (see core/water.ts waterSurfaceHeight) and sampled from a tiling sheet the
+   * game scrolls, so a flood lies flat and the sea shimmers.
+   */
+  water: THREE.BufferGeometry | null;
 }
 
 class GeomBuilder {
@@ -160,7 +172,8 @@ export function buildChunkGeometry(
   const transp = new GeomBuilder();
   const cross = new GeomBuilder();
   const tex = new GeomBuilder();
-  const texT = new GeomBuilder(); // painted glass and water: atlas art, see-through
+  const texT = new GeomBuilder(); // painted glass: atlas art, see-through
+  const wet = new GeomBuilder(); // water: its own tiling sheet, drawn at water height
 
   const x0 = cx * CHUNK, z0 = cz * CHUNK;
 
@@ -171,6 +184,14 @@ export function buildChunkGeometry(
         if (id === 0) continue;
         if (skipSand?.has(worldIdx(x, y, z)) && id === SAND) continue; // in flight
         const def = blockDef(id);
+
+        if (isWaterId(id)) {
+          // Water is the one block that is not drawn as a whole cube: a source
+          // stands nearly full, travelling water lies flatter the farther it has
+          // run, and a column through the air stands full so waterfalls read.
+          addWaterCube(wet, world, x, y, z, id);
+          continue;
+        }
 
         if (isCrossBlock(id)) {
           addCrossQuads(cross, x, y, z, def.atlasCell ?? 2);
@@ -193,6 +214,25 @@ export function buildChunkGeometry(
           // straight through them.
           const box = doorPanelBox(world, x, y, z)!;
           addTexturedSubBox(tex, world, [x, y, z], box, def.sideAtlasCell ?? ATLAS_DOOR,
+            { cullFlush: true });
+          continue;
+        }
+        if (isChestBlock(id)) {
+          // A chest is a box that only ever opens at the TOP. Shut, that is all
+          // there is to it: the squat box with its lid painted on. Opened, the
+          // box does not change at all — lifting a lid does not change what a
+          // chest looks like from the side — but the lid steps up to the back
+          // of the cell and the top of the box becomes an opening you can look
+          // down the inside of, to the treasure lying at the bottom.
+          addChestShape(tex, world, x, y, z, id);
+          continue;
+        }
+        if (isLadderBlock(id)) {
+          // A ladder is a thin plank panel nailed to one wall of its cell
+          // (ladderBoxes picks the wall from world.ladderFacing). The face
+          // buried in that wall is culled flush; the climb side shows the rungs.
+          const facing = (world.ladderFacing.get(worldIdx(x, y, z)) ?? 0) as LadderFacing;
+          addTexturedSubBox(tex, world, [x, y, z], ladderBoxes(x, y, z, facing), def.sideAtlasCell ?? ATLAS_LADDER,
             { cullFlush: true });
           continue;
         }
@@ -221,8 +261,7 @@ export function buildChunkGeometry(
           const nx = x + f.dir[0], ny = y + f.dir[1], nz = z + f.dir[2];
           const n = world.get(nx, ny, nz);
           if (isFullCellBlock(n)) continue; // that neighbour already covers this face
-          if (n === id) continue; // water-water, glass-glass: hide interior
-          if (isWaterId(id) && isWaterId(n)) continue; // source next to flow: keep ONE face
+          if (n === id) continue; // glass-glass: hide interior (water is meshed separately)
 
           // base tint for this face
           let base = def.color;
@@ -269,8 +308,92 @@ export function buildChunkGeometry(
 
   return {
     opaque: opaque.build(), translucent: transp.build(), cross: cross.build(),
-    textured: tex.build(), texturedTranslucent: texT.build(),
+    textured: tex.build(), texturedTranslucent: texT.build(), water: wet.build(),
   };
+}
+
+/**
+ * UVs for one water face, sampled in WORLD units rather than 0..1 per cell.
+ * A per-cell sheet makes every wet cell show one whole tile of the wave art,
+ * so a flat flood reads as a chessboard of blue coasters. Sampling where the
+ * cell actually is makes the art run across a body of water as one continuous
+ * surface, and the drift in `tickWater` slides the whole sheet together.
+ */
+function waterFaceUvs(dir: [number, number, number], pts: [number, number, number][]): [number, number][] {
+  return pts.map(([px, py, pz]) => {
+    if (dir[1] !== 0) return [px, pz] as [number, number]; // the top and the floor: the horizontal plane
+    if (dir[0] !== 0) return [pz, py] as [number, number]; // an east/west wall
+    return [px, py] as [number, number]; // a north/south wall
+  });
+}
+
+/**
+ * The height of the water sheet at the four horizontal corners of a cell,
+ * averaged with the wet cells that share each corner (same level only).
+ *
+ * One height per cell is what made a sheet read as a stack of tiles: every cell
+ * drew its own flat plate, so water running down a slope or thinning out of a
+ * pond looked like a staircase of coasters. Averaging the four cells around each
+ * corner turns that into one continuous surface. Only wet neighbours at the same
+ * level count — a lower cell's absolute height can be below our own floor, and
+ * blending with that flips the quad inside out (a black hole in the water).
+ */
+function waterCornerHeights(
+  world: World, x: number, y: number, z: number, h: number,
+): [number, number, number, number] {
+  const out: [number, number, number, number] = [h, h, h, h];
+  for (let i = 0; i < 4; i++) {
+    // index is (x-side) | (z-side << 1): 0 = this cell's own -x/-z corner
+    const ax = i & 1;
+    const az = i >> 1;
+    // the four cells that meet at the corner (x + ax, z + az)
+    let sum = h, n = 1;
+    for (const [dx, dz] of [[ax - 1, az - 1], [ax, az - 1], [ax - 1, az], [ax, az]] as const) {
+      if (dx === 0 && dz === 0) continue; // ourselves: already counted
+      if (!isWaterId(world.get(x + dx, y, z + dz))) continue;
+      sum += waterSurfaceHeight(world, x + dx, y, z + dz);
+      n++;
+    }
+    out[i] = sum / n;
+  }
+  return out;
+}
+
+/**
+ * One water cell: a box from the cell floor up to the surface its depth says
+ * it stands at. Faces are only drawn where something can actually see them —
+ * a solid neighbour, water at least as deep, or the water directly above and
+ * below hides them. The top edge of every face rides the corner-averaged
+ * sheet, so neighbouring cells meet at the same height instead of butting two
+ * flat plates together.
+ */
+function addWaterCube(
+  g: GeomBuilder, world: World, x: number, y: number, z: number, id: BlockId,
+): void {
+  const h = waterSurfaceHeight(world, x, y, z);
+  const ch = waterCornerHeights(world, x, y, z, h);
+  const base = blockDef(id).color;
+  for (let fi = 0; fi < 6; fi++) {
+    const f = FACES[fi];
+    const nx = x + f.dir[0], ny = y + f.dir[1], nz = z + f.dir[2];
+    const n = world.get(nx, ny, nz);
+    if (isFullCellBlock(n)) continue; // stone or dirt hides that side of it
+    if (isWaterId(n) && fi !== FACE_PY && fi !== FACE_NY) {
+      // a neighbour as deep as we are covers the shared face; a shallower one
+      // leaves our face to be seen through its surface
+      if (waterSurfaceHeight(world, nx, ny, nz) >= h - 1e-6) continue;
+    } else if (isWaterId(n)) {
+      continue; // the water above or below swallows that face
+    }
+    const shade = FACE_SHADE[fi];
+    const tint: [number, number, number][] = f.corners.map(() => [
+      base[0] * shade, base[1] * shade, base[2] * shade,
+    ]);
+    const pts = f.corners.map(([ax, ay, az]) => [
+      ax ? x + 1 : x, ay ? y + ch[(ax ? 1 : 0) | (az ? 2 : 0)] : y, az ? z + 1 : z,
+    ] as [number, number, number]);
+    g.quad(pts[0], pts[1], pts[2], pts[3], f.dir, tint, waterFaceUvs(f.dir, pts));
+  }
 }
 
 /** textured faces sample the atlas at full brightness; shading comes from AO + face angle */
@@ -379,6 +502,143 @@ function addStairShape(
   // the upper part keeps its `away` face: that is the riser of the step
   addTexturedSubBox(g, world, [x, y, z], [tx0, mid, tz0, tx1, tall[4], tz1], sideCell,
     { cullFlush: true, skip: faceSkip(FACE_NY) });
+}
+
+/**
+ * A treasure chest, shut or open.
+ *
+ * Shut, it is the squat box it has always been: 0.85 of the cell, its own side
+ * art, its lid painted across the top.
+ *
+ * Open, it is the same box — the sides, the height, the footprint, all
+ * unchanged, because lifting a lid changes none of them — with the top face
+ * taken off and what is really in there drawn instead: four walls seen from
+ * the INSIDE, the treasure lying at the bottom of them, and a wooden rim where
+ * the lid used to sit. Only the top changes; a chest still looks closed from
+ * every side.
+ */
+function addChestShape(
+  g: GeomBuilder, world: World, x: number, y: number, z: number, id: BlockId,
+): void {
+  const def = blockDef(id);
+  const side = def.sideAtlasCell ?? ATLAS_CHEST_LID;
+  const bottom = def.bottomAtlasCell ?? side;
+  const cell: [number, number, number] = [x, y, z];
+  const { body, inner } = chestOpenBoxes(x, y, z);
+
+  if (id !== CHEST_OPEN) {
+    addTexturedSubBox(g, world, cell, body, side, { cullFlush: true, capCell: ATLAS_CHEST_LID, bottomCell: bottom });
+    return;
+  }
+
+  // the box, minus its top: FACE_PY is drawn in four rim strips below so the
+  // opening can sit in the middle of it
+  addTexturedSubBox(g, world, cell, body, side,
+    { cullFlush: true, bottomCell: bottom, skip: faceSkip(FACE_PY) });
+
+  // The open top — and the lid — are only worth drawing if something can look
+  // in, and the only thing that can is a camera through the cell above.
+  if (!isFullCellBlock(world.get(x, y + 1, z))) {
+    const vary = 1 + (hashByte(x, y, z) - 0.5) * 0.07;
+    // the rim: the top of the chest's walls, planks where the lid lay
+    const t = CHEST_INSET;
+    const ry = body[4];
+    const top = (x0: number, x1: number, z0: number, z1: number): void => {
+      const pts: [number, number, number][] = [
+        [x0, ry, z1], [x1, ry, z1], [x1, ry, z0], [x0, ry, z0],
+      ];
+      const shade = FACE_SHADE[FACE_PY] * vary;
+      const tint: [number, number, number][] = pts.map(() => [shade, shade, shade]);
+      // sampled in the cell's own art space, so a thin strip shows a thin
+      // slice of the planks rather than the whole 32-px tile stretched over it
+      const uv = atlasUvs(ATLAS_PLANKS, x0 - x, x1 - x, 1 - (z1 - z), 1 - (z0 - z));
+      g.quad(pts[0], pts[1], pts[2], pts[3], [0, 1, 0], tint, uv);
+    };
+    top(x, x + 1, z, z + t);
+    top(x, x + 1, z + 1 - t, z + 1);
+    top(x, x + t, z + t, z + 1 - t);
+    top(x + 1 - t, x + 1, z + t, z + 1 - t);
+    // the inside of the walls, and the treasure at the bottom of them
+    for (const fi of [FACE_PX, FACE_NX, FACE_PZ, FACE_NZ]) addInnerFace(g, inner, fi, ATLAS_CHEST_INSIDE, CHEST_INSIDE_SHADE);
+    addInnerFace(g, inner, FACE_PY, ATLAS_CHEST_OPEN_TOP, 0.9);
+
+    // The lid, up from the rim the way a lid actually comes off: hinged at the
+    // far edge and leaning back a little, like a book opened too far. It rises
+    // into the cell above the chest, so it stays out of the opening from every
+    // side you approach from — and if there is a block behind and above for it
+    // to lean into, it just does not get drawn.
+    if (!isFullCellBlock(world.get(x, y + 1, z - 1))) {
+      addLidPlate(g, x, body[4], z, vary);
+    }
+  }
+}
+
+/** where the open lid hinges along the far edge of the rim, and where its
+ *  raised tip ends up: just short of a full block above the chest, leaning
+ *  back into the cell behind that */
+const LID_HINGE = 0.12;
+const LID_RISE = 1.02;
+const LID_LEAN = 0.4;
+
+/**
+ * The open chest's lid: one flat plate, hinged on the rim and tilted back,
+ * painted with the lid's own art on the face the player sees and with the
+ * chest's dark inside art on the face that shades the opening. Two quads —
+ * the plate is thin enough that its edges are not worth drawing.
+ */
+function addLidPlate(
+  g: GeomBuilder, x: number, hingeY: number, z: number, vary: number,
+): void {
+  const hz = z + LID_HINGE;
+  const ey = hingeY + LID_RISE;
+  const ez = hz - LID_LEAN;
+  // outward normal of the painted face: perpendicular to the plate, leaning
+  // up and toward the player (the +z side of the chest)
+  const ny = hz - ez;
+  const nz = ey - hingeY;
+  const nl = Math.hypot(ny, nz);
+  const a: [number, number, number] = [x, hingeY, hz];
+  const b: [number, number, number] = [x + 1, hingeY, hz];
+  const c: [number, number, number] = [x + 1, ey, ez];
+  const d: [number, number, number] = [x, ey, ez];
+  const shade = (s: number): [number, number, number][] =>
+    [0, 1, 2, 3].map(() => [s, s, s]) as [number, number, number][];
+  g.quad(a, b, c, d, [0, ny / nl, nz / nl], shade(0.95 * vary), atlasUvs(ATLAS_CHEST_LID, 0, 1, 0, 1));
+  const dim = 0.95 * vary * CHEST_INSIDE_SHADE;
+  g.quad(d, c, b, a, [0, -ny / nl, -nz / nl], shade(dim), atlasUvs(ATLAS_CHEST_INSIDE, 0, 1, 0, 1));
+}
+
+/**
+ * One face of the INSIDE of a box: the face `fi` would draw on the outside,
+ * moved to the far side of the box and turned to face inwards. That is what
+ * makes an opened chest something you can look down into rather than a hole
+ * you can see straight through.
+ */
+function addInnerFace(
+  g: GeomBuilder, box: VoxelBox, fi: number, cell: number, dim: number,
+): void {
+  const [x0, y0, z0, x1, y1, z1] = box;
+  const f = FACES[fi];
+  const pts = f.corners.map(([ax, ay, az]) => [
+    f.dir[0] > 0 ? x0 : f.dir[0] < 0 ? x1 : (ax ? x1 : x0),
+    f.dir[1] > 0 ? y0 : f.dir[1] < 0 ? y1 : (ay ? y1 : y0),
+    f.dir[2] > 0 ? z0 : f.dir[2] < 0 ? z1 : (az ? z1 : z0),
+  ] as [number, number, number]);
+  const shade = FACE_SHADE[fi] * dim;
+  const tint: [number, number, number][] = pts.map(() => [shade, shade, shade]);
+  g.quad(pts[0], pts[1], pts[2], pts[3], f.dir, tint, faceUvs(fi, cell, cell, cell));
+}
+
+/**
+ * UVs inside one atlas cell, given as a rectangle in the cell's OWN 0..1 art
+ * space. Sampling a slice is what keeps a thin quad (a chest's rim) showing a
+ * thin slice of the art instead of the whole tile squeezed into it.
+ */
+function atlasUvs(cell: number, u0: number, u1: number, v0: number, v1: number): [number, number][] {
+  const pad = 0.5 / 32; // same half-pixel inset as faceUvs
+  const eu = (v: number): number => (cell + pad + v * (1 - 2 * pad)) / ATLAS_CELLS;
+  const ev = (v: number): number => pad + v * (1 - 2 * pad);
+  return [[eu(u0), ev(v0)], [eu(u1), ev(v0)], [eu(u1), ev(v1)], [eu(u0), ev(v1)]];
 }
 
 /**

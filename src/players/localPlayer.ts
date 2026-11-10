@@ -26,6 +26,13 @@ export interface WorldHooks {
 export class LocalPlayer {
   camera: THREE.PerspectiveCamera;
   selected: BlockId = FAVORITES[0];
+  /**
+   * 🪣 Is the bucket full of water right now? Every kid carries exactly one
+   * bucket (the palette's water tile became a tool in Nov 2026), so a single
+   * flag is the whole inventory. Like the fish satchel it is session-only:
+   * reloading goes home with an empty bucket.
+   */
+  bucketFull = false;
   firstPerson = false;
   sensitivity = 1;
   target: RayHit | null = null;

@@ -25,7 +25,8 @@ Creative mode, built for a 5-year-old and a parent on one couch.
 - **🎒 A fish satchel** — every catch waits in the kid's pouch (see the 🐟
   chip on the HUD) until they press **D-pad ▾** / **I** and eat it right in
   the world, for a tasty boost.
-- **Doors you can open, proper stairs, treasure chests hidden in every world,
+- **Doors you can open, proper stairs, 🧗 ladders you can climb, treasure
+  chests hidden in every world,
   slabs, saplings that grow into trees** — and planks that finally look like
   planks.
 - Glowing stars to collect, bouncy blocks, musical blocks, and a world
@@ -156,11 +157,11 @@ milestone; see Roadmap. Today, each computer gets the same saved world.)
 | Left stick | Walk / swim / fly sideways |
 | Right stick | Look around / aim |
 | A / ✕ | Jump (hold while flying = up) |
-| LT / L2 | Place block |
-| RT / R2 | Break block |
+| LT / L2 | **Pet animals · open/close doors · open chests · cast & reel the fishing line · scoop or pour with the bucket** |
+| RT / R2 | **Place block** (with a bucket in hand: scoop the water you look at, or pour it out) |
+| X / ☐ | **Break block** (hold while flying = down) |
 | LB / L1 | Previous block · previous costume on the join card |
 | RB / R1 | Next block · next costume on the join card |
-| X / ☐ | Pet animals · open/close doors (hold while flying = down) |
 | Y / △ | Open the block palette (before anyone joins: choose a world) |
 | D-pad | Navigate menus |
 | Start / Options | Player menu (fly, camera, **costume**, home, help…) |
@@ -178,7 +179,10 @@ Q/R cycle blocks · F palette · E pet animals / open doors · Esc menu · Enter
 
 *(The build/break buttons were swapped in November 2026 — kids build far
 more than they dig, so the comfy left trigger / right mouse button now
-builds. The Grown-Ups cannot turn this back; muscle memory will follow.)*
+builds. And in the same month the interaction moved to **LT / L2** (the
+pet-and-open button), because X was doing double duty as break *and*
+petting. Keyboard: **E** pets and opens, **R-Click** builds, **L-Click**
+breaks. The Grown-Ups cannot turn this back; muscle memory will follow.)*
 
 ## Flowers you can actually pick
 
@@ -193,7 +197,7 @@ things that aren't solid. Water sources and bedrock stay indestructible
 never get in the way when you place a block (the two aim at slightly
 different things so both just work).
 
-## Doors, slabs, stairs and saplings 🚪
+## Doors, slabs, stairs, ladders and saplings 🚪
 
 New in the palette (Y / △), right next to the planks they're built from:
 
@@ -224,6 +228,19 @@ New in the palette (Y / △), right next to the planks they're built from:
   because a step has a front. If it landed the wrong way round, aim at it and press
   **X / ☐ / E**: it spins a quarter turn on the spot. Each step remembers which
   way it points, across saves and restarts.
+- **🧗 Ladder** — lean a ladder on a wall and **hold jump to climb it**. It is
+  not a solid block: you walk *into* it, not onto it, and the moment you are
+  in its cell gravity simply lets go. Hold jump for a steady hand-over-hand
+  climb, hold the sneak/dive button (**Ctrl** / **B** / **◯** / **D-pad ▾** —
+  the same button you use to dive in water) to slide back down, and hold
+  nothing to cling to the rungs. Climb to the top rung and keep holding jump:
+  the last bit is automatic — the kid swings over onto whatever the ladder
+  leans against, so a ladder up a cliff becomes *getting on the wall*.
+  Ladders need a wall: you can only place one against a solid block (or on
+  top of another ladder), and it nails itself to the face you were aiming at,
+  exactly like a stair points against a wall. Placed the wrong way round? Aim
+  at it and press **X / ☐ / E**: it spins a quarter turn. Which wall it leans
+  on survives saves and restarts.
 - **🌳 Sapling** — plant one on clear ground, run off to build something,
   and about half a minute later it grows into a full tree — trunk, leaves
   and all, with a little sparkle and a toast. Saplings you leave behind
@@ -259,9 +276,15 @@ that *happens*:
   adopts that spot, voice included.
 - **💎 A GIANT diamond** — twenty-five stars, and by far the rarest find.
 
-An opened chest **stays opened** (it is drawn with its lid up and its gold
-showing): press the button again and it tells you the treasure is already
-yours, so nobody shakes the same chest twice. Chests are also in the block
+An opened chest **stays opened**: press the button again and it tells you the
+treasure is already yours, so nobody shakes the same chest twice. And it looks
+opened the way a chest really does — **only the top opens**. The box keeps the
+exact same sides and height it had when it was shut (so it is still the same
+thing to stand on), while its top becomes an opening you can look down into:
+a plank rim, the inside of the walls, and the gold still lying at the bottom
+of them, with the lid hinged at the back and leaning up behind. Stack a block
+on the opening and the inside tucks away — nobody draws an interior that
+nothing can see. Chests are also in the block
 palette, so children can hide their own — and one chest per (world, seed) pair
 is a fair game of hide and seek.
 
@@ -320,27 +343,90 @@ a block above the water, place a block or dig a step to make a stair.
 
 ## Water flows 💧
 
-Water now behaves like the big game. The sea is made of **source** blocks:
-eternal, and unbreakable — you will never drain the ocean or fall through it.
-But dig into the shore and the sea **flows in**: water pours straight down at
-full depth, spreads sideways one cell per tick getting one step shallower as
-it goes, and stops dead six cells from any source. A channel you dig into a
-pond fills up visibly, cell by cell, and a waterfall keeps its depth all the
-way down the cliff.
+Water behaves like the big game, down to the numbers. The sea is made of
+**source** blocks: eternal, and unbreakable — you will never drain the ocean
+or fall through it. But dig into the shore and the sea **flows in**, and it
+obeys the same rules the big game uses:
 
-- **Flowing water is real shallow water.** Each travelling cell remembers how
-  deep its supply is and is drawn that shallow — a puddle, a knee-deep sheet,
-  a full block by the source. Pools read as one body of water, not a stack of
-  boxes.
+1. **It spreads exactly seven blocks.** A spring pushes travelling water out
+   up to seven cells — one ninth thinner per cell — and then stops. That tidy
+   ring is the reach, not a limitation: it is precisely how far water spreads
+   in the big game.
+2. **It only spreads where it has something under it.** Water never leans out
+   into thin air: a cell spreads sideways only into a neighbour with ground (or
+   settled water) below it.
+3. **Where it runs out of ground, it falls — straight down.** Not diagonally,
+   not a step at a time: the whole drop at once, and a fall *costs nothing* —
+   falling water keeps its full depth. So a hillside flood is a staircase of
+   waterfalls, and the pool at the bottom of a waterfall runs the full seven
+   blocks again from where the water lands.
+4. **Two sources feed a third.** Where a stream is squeezed between two
+   springs — beside and beside, or beside and above — it becomes a spring
+   itself. Dig a scoop in a 2×2 pond and a third source grows to fill it,
+   the same trick kids use for infinite water outside. (New springs are
+   eternal like the sea; break the ones you don't want with a bucket first.)
+
+- **Flowing water is real shallow water, at the big game's exact heights.**
+  A spring's surface stands eight-ninths of the way up its cell, and travelling
+  water loses exactly one ninth per cell of reach — the seventh cell is a thin
+  one-ninth sheet. The surface is smoothed across cell corners, so a flood is
+  one continuous sheet of water rather than a stack of tiles.
 - **Break the flow to fight a flood.** Travelling water *can* be broken with
   RT / R2: scoop a gap across your trench and everything beyond it loses its
-  chain to a source and dries up, cell by cell. Or just fill the trench with
-  blocks. Sources never break.
-- **Water is in the palette now.** Place a source and give your fort a moat —
-  that source is eternal too, so plan the moat before you dig it.
+  chain to a source and gives up — the shallow end first, then back up the
+  channel towards the water. Or just fill the trench with blocks. Sources never
+  break. (This drying is the one place we borrow from Bedrock: Java's water
+  never drains by itself, but a flood that never ends is no fun for kids —
+  and the water bucket relies on it.)
 - Sand sinks through it (and the displaced water rides up), flowers get
   washed over, and a fresh world's sea sits perfectly still until somebody
   changes something under it.
+
+## The water bucket 🪣
+
+The water block in the palette became a **tool**: every kid always carries
+exactly one bucket, full or empty (the name under the crosshair says which).
+
+- **Empty, look at a spring, press build (RT / R2) or pet (LT / L2)** — the
+  bucket comes back full. Only a *source* fills it: travelling water is too
+  thin to carry, which is the whole water sim in one sentence.
+- **Full, look at a gap, press build** — a new eternal spring appears right
+  there, and the water sets off spreading exactly like the sea does. Moats,
+  waterfalls and indoor ponds are one bucket away.
+- **Scoop the spring back out and the flood runs home**: travelling water can
+  only stand where something deeper is holding it up, so once its spring is gone
+  the water collapses from the shallow end and the dry line walks back up the
+  channel towards where the water came from — the same trick the big game plays
+  when you remove a source.
+- The bucket's full/empty state is session-only, like the fish satchel:
+  going home empties it.
+
+## Rain, snow and the wandering sun 🌦️
+
+Clouds drift across the sky, and now and then it **rains** — a soft hiss, a
+silver curtain, occasionally a faraway crack of thunder through a heavy
+downpour. Snow falls sometimes too, silent and slow. And the sun *circles*:
+sunrise turns the world gold, noon is the bright blue you know, sunset goes
+orange, and night is a deep starlit blue that never, ever goes truly black —
+a pitch-black sky frightens kids, so the lights have a floor under them.
+
+Grown-ups control the sky (*Start → 🧑 Grown-Ups*):
+
+| Row | Choices |
+|---|---|
+| **🌦️ Weather** | Sometimes (a few minutes of dry, maybe a short shower) · Never · Always rain · Always snow |
+| **☀️ Day & Night** | Day and night (the sun circles ~12 real minutes) · Always day · Always night · No sun or moon |
+
+Both choices are saved on the tablet, and a parked sun parks instantly —
+bedtime stories at perpetual sunset, or a rainstorm that never stops,
+whichever the family wants.
+
+## Treasure chests — and the grown-up switch 🔒
+
+(See [Treasure chests](#treasure-chests-) above for the loot.) Because chests
+are placeable now, there is a **🧑 Grown-Ups → 🧰 Treasure Chests: On/Off** row:
+with it **Off**, the chest leaves the palette and no kid can place one — the
+world's hidden chests are still there to find, but the loot spigot is closed.
 
 ## Dynamite 🧨
 

@@ -1000,9 +1000,42 @@ test('crouch: the red button sneaks — slow shuffle, ledge protection, crawling
     return { x: p.pos.x, y: p.pos.y, z: p.pos.z, crouch: p.crouching, grounded: p.grounded, sp: Math.hypot(p.vel.x, p.vel.z) };
   });
 
+  // the head-top, standing: the yardstick the crouch has to beat
+  const standingHead = await page.evaluate(() => {
+    const a = (window as any).__lbw.game.players[0].entity.avatar;
+    return a.chest.matrixWorld.elements[7] + 1.05; // the head top sits 1.05 above the hip pivot
+  });
+
   // tap B (the Back button): crouch on — and the shuffle is slow
   await tap(page, 'back');
   await page.waitForFunction('window.__lbw.game.players[0].entity.crouching === true', null, { timeout: 8000 });
+  await frames(page, 30); // the fold eases in over a quarter second
+
+  // the pose itself, measured in the WORLD (the matrix the renderer just drew
+  // with), because the point of the crouch is what it does to the silhouette:
+  // the kid tips forward over their feet, the head comes down, and nothing is
+  // scaled — the old squash made every juice-box kid 40 % shorter, and the
+  // first rebuild of this pose flung the feet into the air instead
+  const pose = await page.evaluate(() => {
+    const a = (window as any).__lbw.game.players[0].entity.avatar;
+    const worldY = (o: any) => o.matrixWorld.elements[7];
+    return {
+      scale: a.group.scale.y, bodyScale: a.body.scale.y,
+      crouchT: a.crouchT, lean: a.body.rotation.x, fold: a.chest.rotation.x,
+      hipY: worldY(a.chest), headY: worldY(a.chest) + 1.05 * Math.cos(a.body.rotation.x + a.chest.rotation.x),
+      legL: a.leftLeg.rotation.x, legR: a.rightLeg.rotation.x,
+    };
+  });
+  expect(pose.scale, 'the avatar is never squashed').toBeCloseTo(1, 3);
+  expect(pose.bodyScale, 'nor is any part of it').toBeCloseTo(1, 3);
+  expect(pose.crouchT, 'fully crouched').toBeGreaterThan(0.9);
+  expect(pose.lean, 'tipped forward over the feet').toBeGreaterThan(0.35);
+  expect(pose.fold, 'hunched past the hips').toBeGreaterThan(pose.lean * 0.6);
+  // legs bent under the kid, not flung up behind (the old −1.25 handstand)
+  expect(pose.legL, 'legs stay bent under').toBeLessThan(-0.4);
+  expect(pose.legL, 'legs stay bent under').toBeGreaterThan(-1.4);
+  expect(pose.headY, 'the head comes down a hand-span or more').toBeLessThan(standingHead - 0.25);
+
   await page.evaluate(() => (window as any).__testPad.setMove(0, -1));
   await waitForMove(page, { x: fx + 0.5, z: fz + 0.5 }, 1.0);
   const sneaking = await e();
@@ -1268,7 +1301,7 @@ test('sand obeys gravity: tumbles down, sinks through water, squashes plants and
   }, { x0, z0, gy, grass: ids.GRASS, air: ids.AIR });
 });
 
-test('water flows: a dug channel floods from the source, shallows with reach, falls deep and dries when cut off', async ({ page }) => {
+test('water flows: a dug channel floods from the source, reaches exactly seven, falls deep, makes new springs and dries when cut off', async ({ page }) => {
   test.slow();
   await boot(page);
   await joinWithPad(page);
@@ -1319,10 +1352,14 @@ test('water flows: a dug channel floods from the source, shallows with reach, fa
     S.set(arg.fx + 2, arg.gy, arg.fz, arg.water);
   }, { fx, fz, gy, air: ids.AIR, water: ids.WATER, flow: ids.WATER_FLOW, stone: ids.STONE });
 
-  // water creeps: wait until it has covered its full six-cell reach
+  // water creeps: wait until the flood has covered the whole reach — the far
+  // end is the seventh cell out from the source, Minecraft's range exactly
   await page.waitForFunction((arg: { x6: number; gy: number; fz: number; flow: number }) =>
     (window as any).__lbw.game.world.get(arg.x6, arg.gy, arg.fz) === arg.flow,
-  { x6: fx + 8, gy, fz, flow: ids.WATER_FLOW }, { timeout: 20000 });
+  { x6: fx + 9, gy, fz, flow: ids.WATER_FLOW }, { timeout: 20000 });
+  // let a couple more steps run — if the sim could push past seven cells, this
+  // is where the eighth would appear
+  await page.waitForTimeout(1500);
 
   const cellAt = (x: number, y: number) => page.evaluate((c: { x: number; y: number; z: number }) => {
     const w = (window as any).__lbw.game.world;
@@ -1333,16 +1370,36 @@ test('water flows: a dug channel floods from the source, shallows with reach, fa
     };
   }, { x, y, z: fz });
 
-  // the source stands eternal and full; the channel shallows one step per cell
+  // the source stands eternal and full; the channel shallows one step per cell,
+  // and it stops dead at seven — Minecraft's range exactly. The eighth cell of
+  // the dig stays dry even though there is ground under it: reach, not
+  // terrain, is what ends a flood.
   expect((await cellAt(fx + 2, gy)).id).toBe(ids.WATER);
-  for (let k = 1; k <= 6; k++) {
+  for (let k = 1; k <= 7; k++) {
     const c = await cellAt(fx + 2 + k, gy);
     expect(c.id, `cell +${k}`).toBe(ids.WATER_FLOW);
     expect(c.lvl, `depth +${k}`).toBe(k);
   }
-  // and the supply runs out: nothing wet past six cells
-  expect((await cellAt(fx + 9, gy)).id).toBe(ids.AIR);
-  expect((await cellAt(fx + 10, gy)).id).toBe(ids.AIR);
+  const past = await cellAt(fx + 10, gy);
+  expect([ids.WATER, ids.WATER_FLOW], 'the flood stops at seven blocks').not.toContain(past.id);
+
+  // and the water DRAWS at its depth — the big game's nine steps of surface
+  // height: (8 − level)/9, so a spring stands 8/9 full and the seventh cell
+  // of the reach is a thin 1/9 sheet. No more floating ribbons of full cubes.
+  const surfaceAt = (x: number, y: number) =>
+    page.evaluate((c: { x: number; y: number; z: number }) => (window as any).__lbw.waterSurfaceAt(c.x, c.y, c.z),
+      { x, y, z: fz });
+  // wet cells now draw in a channel of their own (tiling, drifting water art),
+  // not with the painted-glass art they rode in on before
+  expect(await page.evaluate(() => (window as any).__lbw.game.scene.children
+    .filter((o: any) => o.isMesh && o.material === (window as any).__lbw.game.chunks.materials.water).length),
+    'the water channel is live').toBeGreaterThan(0);
+  expect(await surfaceAt(fx + 2, gy), 'spring surface').toBeCloseTo(8 / 9, 3);
+  expect(await surfaceAt(fx + 4, gy), 'depth-2 surface').toBeCloseTo(6 / 9, 3);
+  expect(await surfaceAt(fx + 7, gy), 'depth-5 surface').toBeCloseTo(3 / 9, 3);
+  expect(await surfaceAt(fx + 9, gy), 'far end of the reach').toBeCloseTo(1 / 9, 3);
+  // a dry cell draws nothing at all
+  expect(await surfaceAt(fx + 12, gy), 'dry cell draws nothing').toBe(0);
 
   // falling water keeps its depth: cut a shaft and the plunge is as deep as the channel above it
   await page.evaluate((arg: { x: number; gy: number; fz: number; air: number }) => {
@@ -1359,7 +1416,7 @@ test('water flows: a dug channel floods from the source, shallows with reach, fa
     const { sz, sy } = (window as any).__lbw.dims;
     return { version: save.version, at: String((arg.x3 * sz + arg.fz) * sy + arg.gy), levels: save.waterLevels ?? {} };
   }, { x3: fx + 3, fz, gy });
-  expect(saved.version).toBe(4);
+  expect(saved.version).toBe(5);
   expect(saved.levels[saved.at]).toBe(1);
 
   // break the chain at the source: levels climb, then the whole flood drains away
@@ -1393,12 +1450,41 @@ test('water flows: a dug channel floods from the source, shallows with reach, fa
     throw new Error(`drain stuck; wet: ${dump}`);
   }
 
-  // water is in the block palette, so kids can make their own ponds
+  // Two sources feed a third: with the channel dry again, stand a spring on
+  // either side of a dry cell. The flow that meets in the middle has two
+  // source blocks squeezing it from the sides, so it becomes a source itself —
+  // the 2×2 scoop kids use to multiply a spring, straight out of the big game.
+  await page.evaluate((arg: { x1: number; x2: number; gy: number; fz: number; water: number }) => {
+    const S = (window as any).__lbw.game.world;
+    S.set(arg.x1, arg.gy, arg.fz, arg.water);
+    S.set(arg.x2, arg.gy, arg.fz, arg.water);
+  }, { x1: fx + 3, x2: fx + 5, gy, fz, water: ids.WATER });
+  await page.waitForFunction((arg: { x: number; gy: number; fz: number; water: number }) =>
+    (window as any).__lbw.game.world.get(arg.x, arg.gy, arg.fz) === arg.water,
+  { x: fx + 4, gy, fz, water: ids.WATER }, { timeout: 10000 });
+  // the new spring stands full like its parents, and carries no flow depth —
+  // it is an eternal source now, not a travelling cell on somebody's chain
+  expect(await surfaceAt(fx + 4, gy), 'the new source stands 8/9 full').toBeCloseTo(8 / 9, 3);
+  expect((await cellAt(fx + 4, gy)).lvl, 'a source has no flow level').toBe(-1);
+
+  // the bucket is in the block palette where the water block used to be:
+  // kids carry a spring around instead of tiling the meadow with ponds
   await tap(page, 'palette');
   await page.waitForSelector('.palette-grid');
-  const waterIcon = await page.evaluate(() =>
-    [...document.querySelectorAll('.palette-cell')].some((c) => c.textContent?.includes('\u{1F4A7}')));
-  expect(waterIcon).toBe(true);
+  const paletteIcons = await page.evaluate(() => {
+    const cells = [...document.querySelectorAll<HTMLElement>('.palette-cell')];
+    // keyed off the cell the app marks as a tool, not off the emoji codepoint:
+    // the bucket glyph (U+1FAA3) is newer than most of the palette's art, and
+    // a hard-coded escape is one typo away from a lie
+    return {
+      bucket: cells.some((c) => c.dataset.tool === '1' && c.textContent?.includes('Bucket')),
+      water: cells.some((c) => c.textContent?.includes('Water')),
+      toolMarked: cells.some((c) => c.classList.contains('tool')),
+    };
+  });
+  expect(paletteIcons.bucket).toBe(true);
+  expect(paletteIcons.water).toBe(false);
+  expect(paletteIcons.toolMarked).toBe(true);
   await tap(page, 'back'); // close the palette again
   await page.waitForSelector('.palette-grid', { state: 'detached' });
 
@@ -1409,6 +1495,125 @@ test('water flows: a dug channel floods from the source, shallows with reach, fa
     for (let x = arg.fx + 2; x <= arg.fx + 10; x++) S.set(x, arg.gy, arg.fz, arg.grass);
     S.set(arg.fx + 7, arg.gy - 1, arg.fz, arg.grass);
   }, { fx, fz, gy, grass: ids.GRASS });
+  await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); });
+});
+
+test('water on a slope runs DOWN it: no blue plates hanging in the air, and the seven-block reach still ends the flood', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  const site = await clearRunway(page);
+  const { fx, fz, gy } = site;
+
+  // a staircase cut down through the meadow, two cells per step, inside a
+  // full-height stone caisson with a sealed floor (see the flow test: on this
+  // branch every pond flows, so a course only trusts water it poured itself).
+  // The site is snapshotted first and put back exactly at the end — this course
+  // digs DOWN and walls itself in, and a walled pit by spawn strands the next
+  // test's kid where it cannot walk.
+  const x0 = fx + 2, x1 = fx + 14;
+  const box = { x0: x0 - 2, x1: x1 + 2, z0: fz - 2, z1: fz + 2, y0: gy - 14, y1: gy + 14 };
+  const before = await page.evaluate((b: typeof box) => {
+    const S = (window as any).__lbw.game.world;
+    const out: number[] = [];
+    for (let x = b.x0; x <= b.x1; x++) for (let y = b.y0; y <= b.y1; y++) for (let z = b.z0; z <= b.z1; z++) out.push(S.get(x, y, z));
+    return out;
+  }, box);
+  await page.evaluate((arg: {
+    x0: number; x1: number; z0: number; z1: number; gy: number;
+    air: number; stone: number; water: number;
+  }) => {
+    const S = (window as any).__lbw.game.world;
+    const SY: number = (window as any).__lbw.dims.sy;
+    for (let x = arg.x0 - 2; x <= arg.x1 + 2; x++) {
+      for (let z = arg.z0 - 2; z <= arg.z1 + 2; z++) {
+        const ring = x === arg.x0 - 2 || x === arg.x1 + 2 || z === arg.z0 - 2 || z === arg.z1 + 2;
+        for (let y = 1; y < SY; y++) if (ring) S.set(x, y, z, arg.stone);
+      }
+    }
+    for (let x = arg.x0 - 1; x <= arg.x1 + 1; x++) {
+      for (let z = arg.z0 - 1; z <= arg.z1 + 1; z++) {
+        const top = arg.gy - Math.floor((x - arg.x0) / 2); // the staircase
+        for (let y = 1; y < SY; y++) S.set(x, y, z, y <= top ? arg.stone : arg.air);
+      }
+    }
+    S.set(arg.x0, arg.gy + 1, arg.z0, arg.water); // a spring at the top step
+  }, { x0, x1, z0: fz, z1: fz, gy, air: ids.AIR, stone: ids.STONE, water: ids.WATER });
+
+  // the flood has to climb DOWN the staircase: each step is a two-cell flat
+  // ending in a drop, and water falls keeping its depth. The reach is spent a
+  // level per cell, so the seventh cell out — the far edge of step four — is
+  // where the stream runs out of supply, exactly as in the big game.
+  await page.waitForFunction((arg: { x: number; y: number; z: number; flow: number }) =>
+    (window as any).__lbw.game.world.get(arg.x, arg.y, arg.z) === arg.flow,
+  { x: x0 + 7, y: gy - 2, z: fz, flow: ids.WATER_FLOW }, { timeout: 30000 });
+
+  // and every wet cell must either be standing on something or be on its way
+  // down: that is the whole complaint. The old sim let water spread sideways
+  // from mid-air, so a hillside flood drew as a diagonal stack of blue plates
+  // with nothing under them.
+  const audit = await page.evaluate((arg: {
+    x0: number; x1: number; z0: number; z1: number; y0: number; y1: number;
+  }) => {
+    const w = (window as any).__lbw.game.world;
+    const { AIR, WATER, WATER_FLOW } = (window as any).__lbw.ids;
+    const wet = (x: number, y: number, z: number) => {
+      const id = w.get(x, y, z);
+      return id === WATER || id === WATER_FLOW;
+    };
+    const out = { wetCells: 0, hanging: [] as string[], falling: 0, beyond: [] as string[] };
+    for (let x = arg.x0; x <= arg.x1; x++) for (let z = arg.z0; z <= arg.z1; z++) {
+      for (let y = arg.y1; y >= arg.y0; y--) {
+        if (!wet(x, y, z)) continue;
+        out.wetCells++;
+        if (x > arg.x0 + 8) out.beyond.push(`${x},${y},${z}`); // window x0 = x0-1; reach ends at x0+7
+        const below = w.get(x, y - 1, z);
+        if (below !== AIR && !wet(x, y - 1, z)) continue; // solid footing
+        if (wet(x, y - 1, z)) continue; // standing on settled water
+        if (wet(x, y + 1, z)) { out.falling++; continue; } // a waterfall cell: falling
+        out.hanging.push(`${x},${y},${z}`);
+      }
+    }
+    return out;
+  }, { x0: x0 - 1, x1: x1 + 1, z0: fz - 1, z1: fz + 1, y0: gy - 8, y1: gy + 3 });
+
+  expect(audit.wetCells, 'the staircase got wet').toBeGreaterThan(12);
+  expect(audit.hanging, `water hanging in the air at ${audit.hanging.join(' ')}`).toEqual([]);
+  // and the seven-block reach ends the flood even though the staircase keeps
+  // going down for twice as long: the lower steps stay as dry as the day they
+  // were carved. (In the big game it is reach, not terrain, that ends a
+  // stream — a slope only buys you free depth while the water is FALLING.)
+  expect(audit.beyond, `water past the reach at ${audit.beyond.join(' ')}`).toEqual([]);
+
+  // scoop the spring and the whole slope dries: no cell on the hill can hold
+  // water up once the chain back to the water is cut
+  await page.evaluate((arg: { x: number; y: number; z: number; air: number }) => {
+    (window as any).__lbw.game.world.set(arg.x, arg.y, arg.z, arg.air);
+  }, { x: x0, y: gy + 1, z: fz, air: ids.AIR });
+  await page.waitForFunction((arg: { x0: number; x1: number; z: number; y0: number; y1: number; water: number; flow: number }) => {
+    const w = (window as any).__lbw.game.world;
+    for (let x = arg.x0; x <= arg.x1; x++) {
+      for (let y = arg.y0; y <= arg.y1; y++) {
+        const id = w.get(x, y, arg.z);
+        if (id === arg.water || id === arg.flow) return false;
+      }
+    }
+    return true;
+  }, { x0, x1, z: fz, y0: gy - 7, y1: gy + 2, water: ids.WATER, flow: ids.WATER_FLOW }, { timeout: 30000 });
+
+  // Put the meadow back exactly as it was, whole site box and in the same order
+  // it was captured. This course digs DOWN and walls itself in with a
+  // full-height caisson, so anything less than a restore leaves a walled pit
+  // beside spawn — and the next test's kid can't walk out of it, which is how
+  // 'grown-up menu: freeze' came back timing out on CI.
+  await page.evaluate((arg: { b: typeof box; cells: number[] }) => {
+    const S = (window as any).__lbw.game.world;
+    const { b } = arg;
+    let i = 0;
+    for (let x = b.x0; x <= b.x1; x++) for (let y = b.y0; y <= b.y1; y++) for (let z = b.z0; z <= b.z1; z++) S.set(x, y, z, arg.cells[i++]);
+  }, { b: box, cells: before });
   await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); });
 });
 /** opens Grown-Up Settings, switches Freeze, and closes the menu again */
@@ -2116,6 +2321,16 @@ test('a stick you left lying around is still there after a reload, fuse and all'
   expect(after.block).toBe(ids.DYNAMITE);
   expect(after.lit).toBe(true);   // and it starts burning again
   expect(after.active).toBeGreaterThan(0);
+
+  // ...and now put the live stick OUT. Its fuse runs on GAME time and rides
+  // the save, so every later boot in this shared world keeps it burning —
+  // and the first later course built near spawn (the ladder's) gets its wall
+  // carved out from under it mid-test. Defusing = set the cell to AIR: the
+  // manager notices the missing voxel and extinguishes the rig next tick.
+  await page.evaluate((c: Cell) => {
+    (window as any).__lbw.game.world.set(c.x, c.y, c.z, 0);
+  }, cell);
+  await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); });
 });
 
 // -------------------------------------------------------------------- artwork
@@ -2153,9 +2368,13 @@ test('every block is painted from the atlas, not flat-tinted', async ({ page }) 
   expect(art.paletteSizes.every((s) => s >= 3)).toBe(true); // no cell is one flat fill
   expect(new Set(art.sigs).size).toBe(art.cells);
 
-  // and the game really uses the artwork: painted blocks (opaque and see-through)
+  // and the game really uses the artwork: painted blocks, both the opaque ones
+  // and the see-through ones. Water used to be what proved the translucent
+  // channel was live (it drew with the glass art), but it has a channel of its
+  // own now, so the glass has to speak for itself — which means waiting for the
+  // chunk rebuild, since remeshing is budgeted a few chunks per frame.
   await joinWithPad(page);
-  const channels = await page.evaluate(() => {
+  const site = await page.evaluate(() => {
     const game = (window as any).__lbw.game;
     const ids = (window as any).__lbw.ids;
     const e = game.players[0].entity;
@@ -2163,17 +2382,35 @@ test('every block is painted from the atlas, not flat-tinted', async ({ page }) 
     const y = game.world.surfaceY(x, z) + 1;
     game.world.set(x, y, z, ids.STONE);
     game.world.set(x + 1, y, z, ids.GLASS);
+    // read straight back, and hand the coordinates forward: the kid drifts, so
+    // recomputing "three blocks to my right" after a wait misses the glass
+    return { x: x + 1, y, z, idAfter: game.world.get(x + 1, y, z), glass: ids.GLASS };
+  });
+  expect(site.idAfter, `the glass stands where it was placed — ${JSON.stringify(site)}`).toBe(site.glass);
+  await frames(page, 30);
+  const channels = await page.evaluate((at: { x: number; y: number; z: number }) => {
+    const game = (window as any).__lbw.game;
+    const S = game.world;
+    const geo = (window as any).__lbw.chunkGeometry(S, Math.floor(at.x / 16), Math.floor(at.z / 16));
+    const count = (mat: any) =>
+      game.scene.children.filter((o: any) => o.isMesh && o.material === mat).length;
+    const quads = (g: any) => (g ? g.attributes.position.count / 24 : -1);
     return {
-      painted: game.scene.children.filter((o: any) => o.isMesh && o.material === game.chunks.materials.textured).length,
-      seeThrough: game.scene.children.filter(
-        (o: any) => o.isMesh && o.material === game.chunks.materials.texturedTranslucent).length,
+      probe: {
+        ...at, id: S.get(at.x, at.y, at.z),
+        texTQuads: quads(geo?.texturedTranslucent),
+        texQuads: quads(geo?.textured),
+        transpQuads: quads(geo?.translucent),
+      },
+      painted: count(game.chunks.materials.textured),
+      seeThrough: count(game.chunks.materials.texturedTranslucent),
       uved: game.scene.children
         .filter((o: any) => o.isMesh && o.material === game.chunks.materials.textured)
         .every((o: any) => !!o.geometry.attributes.uv),
     };
-  });
+  }, site);
   expect(channels.painted).toBeGreaterThan(0);
-  expect(channels.seeThrough).toBeGreaterThan(0); // glass and water carry art too
+  expect(channels.seeThrough, `glass carries atlas art — probe ${JSON.stringify(channels.probe)}`).toBeGreaterThan(0);
   expect(channels.uved).toBe(true);
 });
 
@@ -2226,8 +2463,278 @@ test('a partial block keeps its neighbours faces, so nothing around it is see-th
   for (const name of ['chest', 'openChest', 'slab', 'stairs'] as const) {
     expect(quads[name] - quads.allCubes, `${name} swallowed a neighbour face`).toBeGreaterThanOrEqual(6);
   }
-  // and the two chests are the same shape, so they cost the same faces
-  expect(quads.openChest).toBe(quads.chest);
+  // and sealed inside planks, an opened chest is a shut chest minus its lid:
+  // only the top ever opens, and down in there that face is the only change
+  expect(quads.chest - quads.openChest).toBe(1);
+});
+
+/**
+ * What "a chest only opens at the top" has to mean in the geometry, face by
+ * face: an opened chest shows the SAME side artwork as a shut one, has no lid
+ * lying across its rim, and instead shows an opening — the inside of the
+ * walls, treasure lying strictly below the rim — with the lid raised off the
+ * box, leaning back over the cell behind. And cover the chest's top and the
+ * whole opening vanishes again: what cannot be looked into is not drawn.
+ */
+test('an opened chest is a shut chest with an opening on top, not opened sides', async ({ page }) => {
+  await boot(page);
+  const shape = await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    const S = game.world;
+    const ids = (window as any).__lbw.ids;
+    const atlas = (window as any).__lbw.atlas;
+    const chunk = (window as any).__lbw.dims.chunk;
+    const mid = Math.floor((window as any).__lbw.dims.sx / 2);
+    const cx = Math.floor(mid / chunk) * chunk + 2;
+    const cz = cx;
+    const y0 = S.surfaceY(cx, cz) + 4;
+    const clear = () => {
+      for (let dx = -1; dx <= 6; dx++)
+        for (let dz = -1; dz <= 2; dz++)
+          for (let dy = -1; dy <= 4; dy++) S.set(cx + dx, y0 + dy, cz + dz, 0, false);
+    };
+    clear();
+    S.set(cx, y0, cz, ids.CHEST, false);
+    S.set(cx + 4, y0, cz, ids.CHEST_OPEN, false);
+
+    /** every quad in one chest's column, decoded: atlas cell, normal, centroid */
+    const faces = (bx: number) => {
+      const geo = (window as any).__lbw.chunkGeometry(S, Math.floor(cx / chunk), Math.floor(cz / chunk));
+      const pos = geo.textured.getAttribute('position').array;
+      const nor = geo.textured.getAttribute('normal').array;
+      const uv = geo.textured.getAttribute('uv').array;
+      const out: { cell: number; ny: number; n: [number, number, number]; y: number; maxY: number }[] = [];
+      for (let t = 0; t < pos.length; t += 9) {
+        const mx = (pos[t] + pos[t + 3] + pos[t + 6]) / 3;
+        const mz = (pos[t + 2] + pos[t + 5] + pos[t + 8]) / 3;
+        // the z band is wider than the cell: the open lid leans back over the
+        // cell behind, and it is very much part of this chest's shape
+        if (mx < bx - 0.01 || mx > bx + 1.01 || mz < cz - 0.6 || mz > cz + 1.6) continue;
+        const my = (pos[t + 1] + pos[t + 4] + pos[t + 7]) / 3;
+        out.push({
+          cell: Math.floor(uv[t * 2 / 3] * atlas.cells),
+          n: [nor[t] + nor[t + 3] + nor[t + 6], nor[t + 1] + nor[t + 4] + nor[t + 7], nor[t + 2] + nor[t + 5] + nor[t + 8]].map((v) => v / 3) as [number, number, number],
+          ny: (nor[t + 1] + nor[t + 4] + nor[t + 7]) / 3,
+          y: my - y0,
+          maxY: Math.max(pos[t + 1], pos[t + 4], pos[t + 7]) - y0,
+        });
+      }
+      // two triangles per quad
+      const quads = (pred: (f: typeof out[number]) => boolean): number => out.filter(pred).length / 2;
+      const side = (f: typeof out[number]): boolean => Math.abs(f.ny) < 0.01;
+      return {
+        sides: quads((f) => f.cell === atlas.side && side(f)),
+        flatLid: quads((f) => f.cell === atlas.lid && f.ny > 0.9),
+        tiltedLid: quads((f) => f.cell === atlas.lid && f.ny > 0.2 && f.ny < 0.9),
+        inside: quads((f) => f.cell === atlas.inside && side(f)),
+        treasure: quads((f) => f.cell === atlas.treasure),
+        treasureY: Math.max(0, ...out.filter((f) => f.cell === atlas.treasure).map((f) => f.y)),
+        lidMaxY: Math.max(0, ...out.filter((f) => f.cell === atlas.lid).map((f) => f.maxY)),
+      };
+    };
+    const shut = faces(cx);
+    const open = faces(cx + 4);
+    clear();
+    S.set(cx, y0, cz, ids.CHEST, false);
+    S.set(cx + 4, y0, cz, ids.CHEST_OPEN, false);
+    S.set(cx + 4, y0 + 1, cz, ids.PLANKS, false); // a plank over the opening
+    const covered = faces(cx + 4);
+    return { shut, open, covered };
+  });
+  // from the side there is no such thing as an opened chest: four sides, the
+  // very same artwork the shut chest wears
+  expect(shape.open.sides).toBe(4);
+  expect(shape.shut.sides).toBe(4);
+  // the shut chest's lid lies flat across the top; an opened chest has taken
+  // that face off entirely, and the lid now stands tilted above the cell
+  expect(shape.shut.flatLid).toBe(1);
+  expect(shape.open.flatLid).toBe(0);
+  expect(shape.open.tiltedLid).toBe(1);
+  expect(shape.open.lidMaxY).toBeGreaterThan(1); // it rises into the cell above
+  // what the opening shows: the inside of four walls, and treasure strictly
+  // below the rim (0.85) — you look DOWN into a chest, never through its side
+  expect(shape.open.inside).toBe(4);
+  expect(shape.open.treasure).toBe(1);
+  expect(shape.open.treasureY).toBeLessThan(0.85);
+  expect(shape.shut.inside).toBe(0);
+  expect(shape.shut.treasure).toBe(0);
+  // and a block over the top hides it all again — the sides still read shut
+  expect(shape.covered.tiltedLid).toBe(0);
+  expect(shape.covered.inside).toBe(0);
+  expect(shape.covered.treasure).toBe(0);
+  expect(shape.covered.sides).toBe(4);
+});
+
+/**
+ * A ladder is a wall you climb, not a wall you bump into. It is never solid
+ * (you walk into its cell), it is painted from the ladder atlas cell, and once
+ * you are in that cell gravity lets go: hold jump to climb up, hold the
+ * sneak/dive button to slide down, and at the top rung a step onto the ledge.
+ */
+test('a ladder: walk into it, hold jump to climb up, sneak to climb down, get on the wall', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page);
+
+  // Build a three-block stone wall with a ladder nailed to its near face,
+  // snapshotting the six cells first so the end of the test can hand the
+  // meadow back to the tests that come after.
+  const site = await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    const S = game.world;
+    const ids = (window as any).__lbw.ids;
+    const atlas = (window as any).__lbw.atlas;
+    const e = game.players[0].entity;
+    const x = Math.round(e.pos.x), z = Math.round(e.pos.z);
+    const G = S.surfaceY(x, z); // the kid stands at feet y = G + 1 on the meadow
+    const orig: number[] = [];
+    for (let k = 1; k <= 3; k++) {
+      orig.push(S.get(x, G + k, z + 1), S.get(x, G + k, z));
+      S.set(x, G + k, z + 1, ids.STONE); // the wall
+      S.set(x, G + k, z, ids.LADDER); // the ladder we climb
+      S.setLadderFacing(x, G + k, z, 3); // climbed from -z, panel against the +z wall
+    }
+    e.pos.set(x + 0.5, G + 1, z + 0.5);
+    e.vel.set(0, 0, 0);
+    e.yaw = 0; // stick forward walks +z, straight into the ladder
+
+    // is it painted from the ladder's atlas cell? decode the mesh UVs.
+    const chunk = (window as any).__lbw.dims.chunk;
+    const geo = (window as any).__lbw.chunkGeometry(S, Math.floor(x / chunk), Math.floor(z / chunk));
+    let ladderFaces = 0;
+    if (geo.textured) {
+      const pos = geo.textured.getAttribute('position').array;
+      const uv = geo.textured.getAttribute('uv').array;
+      for (let t = 0; t < pos.length; t += 9) {
+        const cx = (pos[t] + pos[t + 3] + pos[t + 6]) / 3;
+        const cz = (pos[t + 2] + pos[t + 5] + pos[t + 8]) / 3;
+        if (Math.floor(cx) !== x || Math.floor(cz) !== z) continue; // the ladder column
+        if (Math.floor(uv[(t / 3) * 2] * atlas.cells) === atlas.ladder) ladderFaces++;
+      }
+    }
+    return {
+      x, z, G, wallTopY: G + 4, orig, ladder: ids.LADDER, stone: ids.STONE,
+      passable: !S.isSolid(x, G + 1, z), // the cell the kid walks into is not solid
+      facing: S.getLadderFacing(x, G + 1, z),
+      ladderFaces,
+    };
+  });
+  expect(site.passable, 'a ladder is not solid — you walk into it').toBe(true);
+  expect(site.facing).toBe(3);
+  expect(site.ladderFaces).toBeGreaterThan(0); // and it is painted from the ladder art
+
+  // walk into it: hold forward and the kid walks straight into the ladder's
+  // cell and stops against the wall behind it, never on top of a rung
+  await page.evaluate((s: { x: number; z: number; G: number }) => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    e.pos.set(s.x + 0.5, s.G + 1, s.z - 2.5);
+    e.vel.set(0, 0, 0);
+    (window as any).__testPad.setMove(0, -1);
+  }, site);
+  await page.waitForFunction(
+    (s: { z: number }) => (window as any).__lbw.game.players[0].entity.pos.z > s.z + 0.3,
+    site, { timeout: 10000 },
+  );
+  await page.evaluate((s: { x: number; z: number; G: number }) => {
+    (window as any).__testPad.setMove(0, 0);
+    const e = (window as any).__lbw.game.players[0].entity;
+    e.pos.set(s.x + 0.5, s.G + 1, s.z + 0.5); // stand on the bottom rung
+    e.vel.set(0, 0, 0);
+  }, site);
+
+  // hold jump: gravity lets go and the kid climbs, and at the top the last
+  // rung is a step over onto the wall
+  await page.evaluate(() => (window as any).__testPad.set('jump', true));
+  const up = await page.waitForFunction(
+    (s: { wallTopY: number; z: number }) => {
+      const e = (window as any).__lbw.game.players[0].entity;
+      if (!(e.grounded && e.pos.y >= s.wallTopY - 0.05 && e.pos.z > s.z + 0.5)) return false;
+      return { y: e.pos.y, z: e.pos.z };
+    },
+    site, { timeout: 15000 },
+  ).then((h) => h.jsonValue() as Promise<{ y: number; z: number }>);
+  await page.evaluate(() => (window as any).__testPad.set('jump', false));
+  expect(up.y).toBeGreaterThanOrEqual(site.wallTopY - 0.05);
+  expect(up.z).toBeGreaterThan(site.z + 0.5); // swung over onto the wall, not still on the ladder
+
+  // sneak (the same dive button) descends: back to the top rung and hold it,
+  // and the kid slides down the ladder to its foot instead of falling
+  const fromY = await page.evaluate((s: { x: number; z: number; G: number }) => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    e.pos.set(s.x + 0.5, s.G + 3, s.z + 0.5);
+    e.vel.set(0, 0, 0);
+    return e.pos.y;
+  }, site);
+  await page.evaluate(() => (window as any).__testPad.set('crouch', true));
+  const afterDown = await page.waitForFunction(
+    (from: number) => {
+      const e = (window as any).__lbw.game.players[0].entity;
+      return e.pos.y < from - 1.5 ? e.pos.y : false;
+    },
+    fromY, { timeout: 15000 },
+  ).then((h) => h.jsonValue() as Promise<number>);
+  await page.evaluate(() => (window as any).__testPad.set('crouch', false));
+  expect(afterDown).toBeLessThan(fromY - 1.5); // slid down more than a block and a half
+  expect(afterDown).toBeGreaterThanOrEqual(site.G + 0.99); // and the meadow catches them
+
+  // and the kid LOOKS like they're climbing: upright body, arms reaching up
+  // over the head (the e2e measures the drawn matrices, not screenshots)
+  const pose = await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    const a = e.avatar;
+    return {
+      climbing: e.climbingNow,
+      armL: a.leftArm.rotation.x, armR: a.rightArm.rotation.x,
+      groupScaleY: a.group.scale.y, bodyScaleY: a.body.scale.y,
+    };
+  });
+  expect(pose.climbing).toBe(true); // still holding the rungs at the foot of the ladder
+  expect(Math.min(pose.armL, pose.armR), 'an arm reaches up').toBeLessThan(-1.6);
+  expect(pose.groupScaleY, 'a climb is a pose, never a squash').toBeCloseTo(1, 2);
+  expect(pose.bodyScaleY).toBeCloseTo(1, 2);
+
+  // the save carries the ladder AND which wall it leans on (version 5)
+  const saved = await page.evaluate(async (s: { x: number; z: number; G: number }) => {
+    const game = (window as any).__lbw.game;
+    await game.saveNow();
+    const save = game.world.toSave();
+    const { sz, sy } = (window as any).__lbw.dims;
+    return {
+      version: save.version,
+      facing: (save.ladderFacing ?? {})[String((s.x * sz + s.z) * sy + s.G + 2)] ?? -1,
+    };
+  }, site);
+  expect(saved.version).toBe(5);
+  expect(saved.facing, 'a ladder remembers its wall').toBe(3);
+
+  // and a reload brings the ladder back, nailed to the same wall
+  await page.reload();
+  await page.waitForFunction('window.__lbw !== undefined');
+  const restored = await page.evaluate((s: { x: number; z: number; G: number }) => {
+    const S = (window as any).__lbw.game.world;
+    return {
+      block: S.get(s.x, s.G + 2, s.z),
+      facing: S.getLadderFacing(s.x, s.G + 2, s.z),
+      wall: S.get(s.x, s.G + 3, s.z + 1),
+    };
+  }, site);
+  expect(restored.block).toBe(site.ladder);
+  expect(restored.facing).toBe(3);
+  expect(restored.wall).toBe(site.stone);
+
+  // hand the meadow back: every cell we touched, byte for byte, and save
+  await page.evaluate(async (s: { x: number; z: number; G: number; orig: number[] }) => {
+    const game = (window as any).__lbw.game;
+    const S = game.world;
+    const { sz, sy } = (window as any).__lbw.dims;
+    for (let k = 0; k < 3; k++) {
+      const y = s.G + 1 + k;
+      S.set(s.x, y, s.z + 1, s.orig[k * 2]); // the wall cell
+      S.set(s.x, y, s.z, s.orig[k * 2 + 1]); // the ladder cell
+      S.ladderFacing.delete((s.x * sz + s.z) * sy + y);
+      S.touchAt(s.x, s.z);
+    }
+    await game.saveNow();
+  }, site);
 });
 
 test('the kids are dressed: knitted jumpers, denim legs, a faced head', async ({ page }) => {
@@ -2472,7 +2979,7 @@ test('doors: two blocks high and half a block deep — build, pat open, walk thr
       swingTop: save.doorFacing?.[at(1)],
     };
   }, door2);
-  expect(saved.version).toBe(4);
+  expect(saved.version).toBe(5);
   expect(saved.bottom).toBe(ids.DOOR);
   expect(saved.top).toBe(ids.DOOR_TOP);
   expect(saved.swingBottom === 0 || saved.swingBottom === 1).toBe(true);
@@ -2745,7 +3252,7 @@ test('stairs: a real step — it points away from the builder, walking one climb
       })),
     };
   }, { run: [0, 1, 2, 3].map((k) => ({ x: step.x + k, y: step.y + k, z: step.z })) });
-  expect(after.version).toBe(4);
+  expect(after.version).toBe(5);
   for (const s of after.run) {
     expect(s.block).toBe(ids.STAIRS);
     expect([0, STAIR_TURN[0]]).toContain(s.facing);
@@ -2789,7 +3296,8 @@ test('treasure chests: every world hides them, and the pet button trades a lid f
   expect(await blockAtCell(page, chest)).toBe(ids.CHEST);
   expect(await blockAtCell(page, chest, 1)).toBe(ids.AIR);
 
-  // and confirm the palette really no longer offers the chest
+  // and the palette offers the chest too now — kids place their own treasure
+  // (a grown-up can hide the row again in Grown-Up Settings; a later test does)
   await tap(page, 'palette');
   await page.waitForSelector('.palette-grid');
   const chestInPalette = await page.evaluate((chestId: number) => {
@@ -2797,7 +3305,7 @@ test('treasure chests: every world hides them, and the pet button trades a lid f
       (c) => Number((c as HTMLElement).dataset.id) === chestId,
     );
   }, ids.CHEST);
-  expect(chestInPalette).toBe(false);
+  expect(chestInPalette).toBe(true);
   await tap(page, 'back'); // close the palette again
 
   const tally = () => page.evaluate(() => {
@@ -3446,4 +3954,184 @@ test('keyboard arrows only tilt the view — ArrowUp never jumps', async ({ page
     startY, { timeout: 5000 },
   );
   await page.evaluate(() => (window as any).__testPad.release('up'));
+});
+
+test('the triggers are the hands: L2 pets and opens, R2 builds, X breaks', async ({ page }) => {
+  await boot(page);
+  // Nov 2026 remap: the triggers are the hands kids already hold the pad with.
+  // L2/LT is the nice button (pet · fish · open · pour), R2/RT builds (and
+  // pours), X/Square breaks. Keyboard keeps E · R-Click · L-Click.
+  const map = await page.evaluate(() => (window as any).__lbw.padMap as Record<string, string[]>);
+  expect(map[6], 'L2 / LT').toContain('interact');
+  expect(map[7], 'R2 / RT').toContain('place');
+  expect(map[2], 'X / Square').toContain('remove');
+  expect(map[0], 'A / Cross still jumps').toContain('jump');
+});
+
+test('the water bucket scoops a spring, pours a new one, and a cut-off flood runs home', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  const site = await clearRunway(page);
+  const { fx, fz, gy } = site;
+
+  // the same sealed stone course the flow test swears by: a full-height
+  // caisson, a stone floor, and a spring feeding a channel of travelling water
+  await page.evaluate((arg: { fx: number; fz: number; gy: number; air: number; water: number; stone: number }) => {
+    const S = (window as any).__lbw.game.world;
+    const SY: number = (window as any).__lbw.dims.sy;
+    for (let x = arg.fx - 3; x <= arg.fx + 12; x++) {
+      for (let z = arg.fz - 3; z <= arg.fz + 3; z++) {
+        const ring = x === arg.fx - 3 || x === arg.fx + 12 || z === arg.fz - 3 || z === arg.fz + 3;
+        for (let y = 1; y < SY; y++) if (ring) S.set(x, y, z, arg.stone);
+      }
+    }
+    for (let x = arg.fx - 2; x <= arg.fx + 11; x++) {
+      for (let z = arg.fz - 2; z <= arg.fz + 2; z++) {
+        S.set(x, arg.gy - 1, z, arg.stone); // sealed floor
+        for (let y = arg.gy; y <= arg.gy + 2; y++) S.set(x, y, z, arg.air);
+      }
+    }
+    S.set(arg.fx + 2, arg.gy, arg.fz, arg.water);
+  }, { fx, fz, gy, air: ids.AIR, water: ids.WATER, stone: ids.STONE });
+
+  await page.waitForFunction((arg: { x: number; gy: number; fz: number; flow: number }) =>
+    (window as any).__lbw.game.world.get(arg.x, arg.gy, arg.fz) === arg.flow,
+  { x: fx + 7, gy, fz, flow: ids.WATER_FLOW }, { timeout: 20000 });
+
+  // 🪣 the bucket is in hand: scooping the SPRING empties the channel behind it
+  await page.evaluate((b: number) => (window as any).__lbw.game.players[0].setSelected(b), ids.BUCKET);
+  const scooped = await page.evaluate((arg: { x: number; gy: number; fz: number; water: number }) =>
+    (window as any).__lbw.bucketAt(0, { block: arg.water, x: arg.x, y: arg.gy, z: arg.fz, px: arg.x, py: arg.gy + 1, pz: arg.fz, dist: 1 }),
+  { x: fx + 2, gy, fz, water: ids.WATER });
+  expect(scooped, 'the bucket came back full').toBe(true);
+  expect(await page.evaluate(() => (window as any).__lbw.game.players[0].bucketFull)).toBe(true);
+  expect(await page.evaluate((c: { x: number; y: number; z: number }) =>
+    (window as any).__lbw.game.world.get(c.x, c.y, c.z), { x: fx + 2, y: gy, z: fz })).toBe(ids.AIR);
+
+  // the flood runs HOME: with its spring scooped out, no travelling cell has a
+  // chain back to water left, so the whole channel gives up within a moment —
+  // the shallow puddles at the end of the reach first, since they are the ones
+  // a deeper neighbour was propping up. (Watched from inside the page, so the
+  // timing is the sim's own game time, not a wall-clock guess.)
+  const drainedIn = await page.evaluate((arg: { src: number; k1: number; gy: number; fz: number; air: number }) =>
+    new Promise<number>((resolve, reject) => {
+      const w = (window as any).__lbw.game.world;
+      const t0 = performance.now();
+      const timer = setInterval(() => {
+        let wet = 0;
+        for (let k = 1; k <= arg.k1; k++) if (w.get(arg.src + k, arg.gy, arg.fz) !== arg.air) wet++;
+        if (wet === 0) { clearInterval(timer); resolve(performance.now() - t0); }
+        else if (performance.now() - t0 > 20000) {
+          clearInterval(timer);
+          reject(new Error(`${wet} cells of the cut-off flood are still standing`));
+        }
+      }, 50);
+    }), { src: fx + 2, k1: 6, gy, fz, air: ids.AIR });
+  expect(drainedIn, 'a cut-off flood runs home in about a second').toBeLessThan(8000);
+
+  // full bucket, aimed at a gap: a NEW spring appears and the water sets off
+  // spreading from where it landed
+  const poured = await page.evaluate((arg: { x: number; gy: number; fz: number; stone: number }) =>
+    (window as any).__lbw.bucketAt(0, { block: arg.stone, x: arg.x, y: arg.gy - 1, z: arg.fz, px: arg.x, py: arg.gy, pz: arg.fz, dist: 1 }),
+  { x: fx + 8, gy, fz, stone: ids.STONE });
+  expect(poured, 'the bucket poured out').toBe(true);
+  expect(await page.evaluate(() => (window as any).__lbw.game.players[0].bucketFull)).toBe(false);
+  expect(await page.evaluate((c: { x: number; y: number; z: number }) =>
+    (window as any).__lbw.game.world.get(c.x, c.y, c.z), { x: fx + 8, y: gy, z: fz })).toBe(ids.WATER);
+  await page.waitForFunction((arg: { x: number; gy: number; fz: number; flow: number }) =>
+    (window as any).__lbw.game.world.get(arg.x, arg.gy, arg.fz) === arg.flow,
+  { x: fx + 10, gy, fz, flow: ids.WATER_FLOW }, { timeout: 20000 });
+
+  // scoop the new spring and the fresh flood runs home too
+  const scooped2 = await page.evaluate((arg: { x: number; gy: number; fz: number; water: number }) =>
+    (window as any).__lbw.bucketAt(0, { block: arg.water, x: arg.x, y: arg.gy, z: arg.fz, px: arg.x, py: arg.gy + 1, pz: arg.fz, dist: 1 }),
+  { x: fx + 8, gy, fz, water: ids.WATER });
+  expect(scooped2).toBe(true);
+  await page.waitForFunction((arg: { x1: number; x2: number; gy: number; fz: number; air: number }) => {
+    const w = (window as any).__lbw.game.world;
+    for (let x = arg.x1; x <= arg.x2; x++) if (w.get(x, arg.gy, arg.fz) !== arg.air) return false;
+    return true;
+  }, { x1: fx + 9, x2: fx + 11, gy, fz, air: ids.AIR }, { timeout: 30000 });
+
+  // tidy up so later tests find clean grass (and bank the refill before boot)
+  await page.evaluate((arg: { fx: number; fz: number; gy: number; grass: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let x = arg.fx - 2; x <= arg.fx + 11; x++) {
+      for (let z = arg.fz - 2; z <= arg.fz + 2; z++) S.set(x, arg.gy, z, arg.grass);
+    }
+  }, { fx, fz, gy, grass: ids.GRASS });
+  await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); });
+});
+
+test('rain falls on the meadow and the sun circles the sky', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+
+  // a grown-up turns the rain on: the clock goes wet, the audio starts hissing
+  const strength = await page.evaluate(() => (window as any).__lbw.weatherNow('rain'));
+  expect(strength).toBeGreaterThan(0);
+  await page.waitForFunction('window.__lbw.game.weather.isActive === true', null, { timeout: 8000 });
+  const wet = await page.evaluate(() => ({
+    kind: (window as any).__lbw.game.weather.kind as string | null,
+    hiss: (window as any).__lbw.game.audio.recent.some((r: string) => r.startsWith('weather:rain')),
+  }));
+  expect(wet.kind).toBe('rain');
+  expect(wet.hiss, 'the rain hiss reached the audio kit').toBe(true);
+
+  // the grown-up menu grew three rows under Waiting Players — the old rows
+  // stay exactly where every other test pins them
+  await tap(page, 'menu');
+  await page.waitForSelector('.menu-list');
+  await selectRow(page, 9); // Grown-Ups
+  await tap(page, 'jump');
+  await page.waitForSelector('.menu-list');
+  const labels = await page.evaluate(() =>
+    [...document.querySelectorAll('.menu-item')].map((r) => r.textContent ?? ''));
+  expect(labels[0]).toContain('Freeze');
+  expect(labels[5], 'Waiting Players keeps row 5').toContain('Waiting Players');
+  expect(labels.some((l) => l.includes('Weather'))).toBe(true);
+  expect(labels.some((l) => l.includes('Day & Night'))).toBe(true);
+  expect(labels.some((l) => l.includes('Treasure Chests'))).toBe(true);
+  await tap(page, 'back'); // close Grown-Ups
+  await tap(page, 'back'); // close the player menu
+
+  // snow, then dry: the clock follows the grown-up's wheel
+  await page.evaluate(() => (window as any).__lbw.weatherNow('snow'));
+  await page.waitForFunction('window.__lbw.game.weather.kind === "snow"', null, { timeout: 8000 });
+  await page.evaluate(() => (window as any).__lbw.weatherNow('off'));
+  await page.waitForFunction('window.__lbw.game.weather.isActive === false', null, { timeout: 8000 });
+
+  // the sun: parked at midnight the light drops low but never vanishes...
+  await page.evaluate(() => (window as any).__lbw.setDayMode('night'));
+  await page.waitForFunction(() => {
+    let dir = 0, hemi = 0;
+    (window as any).__lbw.game.scene.traverse((o: any) => {
+      if (o.isDirectionalLight) dir = o.intensity;
+      if (o.isHemisphereLight) hemi = o.intensity;
+    });
+    return dir < 0.4 && hemi >= 0.3;
+  }, null, { timeout: 8000 });
+  // ...parked at noon it is proper day again. (Threshold 1.0, not 1.6: a
+  // storm that has just been switched off dims the sun by up to 30 % while
+  // the sky's `wet` value fades out, and midnight sits at 0.32 — anything
+  // between them proves the lights moved with the clock.)
+  await page.evaluate(() => (window as any).__lbw.setDayMode('day'));
+  await page.waitForFunction(() => {
+    let dir = 0;
+    (window as any).__lbw.game.scene.traverse((o: any) => { if (o.isDirectionalLight) dir = o.intensity; });
+    return dir > 1.0;
+  }, null, { timeout: 15000 });
+  // ...and in auto mode the clock actually circles
+  await page.evaluate(() => (window as any).__lbw.setDayMode('auto'));
+  const t0 = await page.evaluate(() => (window as any).__lbw.dayPhase());
+  await page.waitForFunction((p: number) => Math.abs((window as any).__lbw.dayPhase() - p) > 1e-4, t0, { timeout: 15000 });
+
+  // midnight is blue, never the void: the sky test's black-pixel census passes
+  await page.evaluate(() => (window as any).__lbw.setDayMode('night'));
+  await frames(page, 30);
+  expect(await blackPixels(page), 'midnight keeps real colour').toBeLessThan(600);
 });
