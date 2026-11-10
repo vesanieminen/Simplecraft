@@ -11,16 +11,24 @@ import { Action, ControllerType, InputSource, RawFrame, applyDeadzone } from './
  *  rod, spin a step) and "put it down" (R2/RT: build) — the way the big game
  *  does it. Breaking moved onto the west face button (X / ☐), which used to be
  *  the interact button. D-pad down doubles as the fish satchel: in menus it
- *  only navigates, in the world it opens the pouch. */
+ *  only navigates, in the world it opens the pouch.
+ *  2026-11-10: the family came back with "actions should happen with the
+ *  L2/LT button — placing a block, petting an animal, placing doors and
+ *  ladders; removing with R2/RT". So LT now carries BOTH constructive
+ *  actions (it emits interact AND place — see LocalPlayer.update: the nice
+ *  thing runs first, and the block only goes down when the aim holds nothing
+ *  to interact with) and the right trigger broke blocks (X stays as an extra
+ *  remove alias for muscle memory). Keyboard keeps E · R-Click · L-Click. */
 const BUTTON_MAP: Record<number, Action[]> = {
   0: ['jump'],      // A / Cross
   1: ['back'],      // B / Circle
-  2: ['remove'],    // X / Square  — break a block
+  2: ['remove'],    // X / Square  — break a block (extra alias of RT)
   3: ['palette'],   // Y / Triangle
   4: ['prevBlock'], // Left bumper
   5: ['nextBlock'], // Right bumper
-  6: ['interact'],  // Left trigger  — pet · open doors & chests · fish · turn stairs
-  7: ['place'],     // Right trigger — build (was LT until Nov 2026)
+  6: ['interact', 'place'], // Left trigger — build AND pet: the aim decides,
+                            // the nice thing (pet · doors · chests · rod) outranks the block
+  7: ['remove'],    // Right trigger — break a block
   8: ['menu'],      // Select/Share doubles as menu for kids? keep start only
   9: ['menu'],      // Start / Options
   12: ['up'],       // D-pad

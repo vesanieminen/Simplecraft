@@ -19,7 +19,9 @@ const LOOK_RATE = 2.6;
 export interface WorldHooks {
   tryPlace(lp: LocalPlayer, hit: RayHit): boolean;
   tryRemove(lp: LocalPlayer, hit: RayHit): void;
-  interact(lp: LocalPlayer): void;
+  /** do the nice thing (pet · door · chest · rod · bucket). Returns true when
+   *  the aim held something to interact with — which outranks building. */
+  interact(lp: LocalPlayer): boolean;
   events: StepEvents;
 }
 
@@ -48,6 +50,15 @@ export class LocalPlayer {
   private ghost: THREE.Mesh;
   private ghostBlock = -1;
   private buildCooldown = 0;
+  /**
+   * L2/LT on a pad is the nice thing AND the build (Nov 2026 remap,
+   * src/input/gamepad.ts). While the trigger is busy with something nice —
+   * the aim held an animal, a door, a chest, a fishing line — it does not
+   * also build: petting once would brick a block behind the pet, and holding
+   * the trigger on an opened door would wall the house up. Latches until the
+   * trigger releases, so the next press re-asks the aim.
+   */
+  private interactHold = false;
   private cameraDist = 4.8;
   private camPos = new THREE.Vector3();
   /** camera punch after an explosion nearby */
@@ -147,15 +158,25 @@ export class LocalPlayer {
     this.buildCooldown = Math.max(0, this.buildCooldown - dt);
 
     if (!worldMenuBlock) {
+      // The nice thing FIRST: L2/LT emits interact *and* place (gamepad.ts),
+      // and an animal · door · chest · step · fishing line in the aim
+      // outranks building — the block only goes down when the interact hook
+      // found nothing to do, and not again until the trigger releases (see
+      // interactHold). Keyboard frames keep their separate keys — E pets,
+      // R-Click builds — exactly as they always were, latch not involved.
+      if (frame.pressed.has('interact') && !this.entity.flying) {
+        this.interactHold = hooks.interact(this) && frame.kind !== 'keyboard';
+      }
+      if (!frame.held.has('interact')) this.interactHold = false;
+
       const placePressed = frame.pressed.has('place');
       const removePressed = frame.pressed.has('remove');
       const repeat = (frame.held.has('place') || frame.held.has('remove')) && this.buildCooldown <= 0;
-      if ((placePressed || removePressed || repeat) && this.buildCooldown <= 0) {
+      if (!this.interactHold && (placePressed || removePressed || repeat) && this.buildCooldown <= 0) {
         this.buildCooldown = 0.28;
         if (frame.held.has('place') && this.target) hooks.tryPlace(this, this.target);
         else if (frame.held.has('remove') && this.removeTarget) hooks.tryRemove(this, this.removeTarget);
       }
-      if (frame.pressed.has('interact') && !this.entity.flying) hooks.interact(this);
       if (frame.pressed.has('nextBlock')) this.cycle(1);
       if (frame.pressed.has('prevBlock')) this.cycle(-1);
     }
