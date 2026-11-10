@@ -195,7 +195,7 @@ vec3 elOne( vec3 elP, vec3 elC, float elR, vec3 elN ) {
   float elD2 = dot( elD, elD );
   if ( elD2 > elR2 ) return vec3( 0.0 );
   float elAtt = 1.0 - elD2 / elR2;
-  elAtt *= elAtt;
+  elAtt *= elAtt * elAtt; // (1 − d²/r²)³: hot at the flame, textured beyond
   vec3 elL = elD * inversesqrt( max( elD2, 1e-4 ) );
   return elC * ( elAtt * ( dot( elN, elL ) * 0.5 + 0.5 ) );
 }

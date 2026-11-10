@@ -157,14 +157,16 @@ await page.evaluate(() => {
 await shoot('foam');
 
 // the README hero: the midnight meadow with the torch lane burning — what
-// night feels like with this branch.
+// night feels like with this branch. The wide angle (not the tight wall):
+// pools on the grass, the cool dark beyond their reach, the lone torch by
+// the path and the chest's amber glow all in one frame.
 await page.evaluate(() => {
   const g = (window as any).__lbw.game;
   g.setDayMode('night');
   const st = (window as any).__stage;
   const { cx, cz, G } = st;
-  (window as any).__cam.eye = [cx + 8.0, G + 2.9, cz + 4.6];
-  (window as any).__cam.look = [cx + 2.2, G + 1.8, cz - 0.4];
+  (window as any).__cam.eye = [cx + 9.5, G + 4.2, cz + 6.5];
+  (window as any).__cam.look = [cx - 1.0, G + 1.2, cz - 0.5];
 });
 await page.waitForTimeout(4200);
 await page.screenshot({ path: 'docs/screenshots/lights.jpg', type: 'jpeg', quality: 92 });

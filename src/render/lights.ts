@@ -55,11 +55,11 @@ interface KindDef {
 
 const KINDS: Record<number, KindDef> = {
   // a torch: warm, generous, the whole reason this file exists
-  [TORCH]: { color: [1.42, 0.78, 0.30], radius: 7.6, lift: TORCH_POST_H + 0.15, weight: 1.0, name: 'torch' },
+  [TORCH]: { color: [0.88, 0.48, 0.18], radius: 7.2, lift: TORCH_POST_H + 0.15, weight: 1.0, name: 'torch' },
   // the glow block: a steady lamp, a shade cooler than the torch's fire
-  [GLOW]: { color: [1.00, 0.85, 0.52], radius: 6.8, lift: 0.5, weight: 0.8, name: 'glow' },
+  [GLOW]: { color: [0.62, 0.52, 0.32], radius: 6.4, lift: 0.5, weight: 0.8, name: 'glow' },
   // an opened chest: a modest golden pulse where the treasure lies
-  [CHEST_OPEN]: { color: [0.86, 0.60, 0.24], radius: 4.4, lift: CHEST_HEIGHT - 0.25, weight: 0.7, name: 'chest' },
+  [CHEST_OPEN]: { color: [0.56, 0.38, 0.15], radius: 4.2, lift: CHEST_HEIGHT - 0.25, weight: 0.7, name: 'chest' },
 };
 
 /** stars are lights too, just polite ones — low reach, low weight */
@@ -99,7 +99,7 @@ export class LightKeeper {
       depthWrite: false,
       // the flame is authored light, not painted wood: tints stay linear
       // here (NoColorSpace on the texture) and ACES rolls its tip off sweetly
-      color: new THREE.Color(1.0, 0.78, 0.42),
+      color: new THREE.Color(1.0, 0.62, 0.26),
       fog: false,
     });
   }
@@ -187,7 +187,7 @@ export class LightKeeper {
       const spr = this.flames.get(i) ?? this.addFlame(i);
       const seed = hash01(i) * 31.4;
       const w = Math.sin(t * 8.1 + seed) + 0.5 * Math.sin(t * 17.3 + seed * 1.7);
-      spr.scale.set(0.62 * (1 - 0.07 * w), 0.95 * (1 + 0.15 * w), 1);
+      spr.scale.set(0.5 * (1 - 0.07 * w), 0.78 * (1 + 0.15 * w), 1);
       spr.position.set(
         x + 0.5 + 0.035 * Math.sin(t * 11.2 + seed),
         y + TORCH_POST_H + 0.30 + 0.05 * Math.sin(t * 9.4 + seed * 2.3),
