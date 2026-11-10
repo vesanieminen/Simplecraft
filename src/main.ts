@@ -28,6 +28,8 @@ async function boot(): Promise<void> {
       /** the block atlas, so a test can tell which artwork a face really used */
       atlas: { cells: number; side: number; lid: number; bottom: number; inside: number; treasure: number; ladder: number };
       waterSurfaceAt: (x: number, y: number, z: number) => number;
+      /** is this wet cell caught mid-fall (a waterfall's stream), not settled? */
+      waterFallingAt: (x: number, y: number, z: number) => boolean;
       weatherNow: (kind: string) => number;
       setDayMode: (mode: string) => void;
       dayPhase: () => number;
@@ -59,6 +61,9 @@ async function boot(): Promise<void> {
     /** how tall water draws in a cell: 1 full, or the height of a shallow flow */
     waterSurfaceAt: (x: number, y: number, z: number) =>
       waterSurfaceHeight((window as unknown as { __lbw: { game: Game } }).__lbw.game.world, x, y, z),
+    /** is this wet cell water on its way down (a stream) rather than settled? */
+    waterFallingAt: (x: number, y: number, z: number) =>
+      (window as unknown as { __lbw: { game: Game } }).__lbw.game.water.isPouring(x, y, z),
     /** force weather from the test console: 'rain' | 'snow' | 'off' */
     weatherNow: (kind: string) => {
       const g = (window as unknown as { __lbw: { game: Game } }).__lbw.game;
