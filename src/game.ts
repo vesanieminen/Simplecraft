@@ -128,10 +128,6 @@ export class Game {
   private lastBucketHint = -10;
   /** the camera the last frame rendered through — the sky sits on it */
   private renderCam: THREE.Camera | null = null;
-  /** the sky's shadow-casting sun, and a full-layers stand-in camera used to
-   *  render the ONE shared shadow pass each frame (see updateShadowPass) */
-  private sunLight!: THREE.DirectionalLight;
-  private shadowCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 10);
   private time = 0;
   private sparkleBlocks = new Set<number>();
   dynamite!: DynamiteManager;
@@ -195,14 +191,12 @@ export class Game {
     this.skyEnv.setDayMode(this.dayMode);
     if (this.weather.kind) this.skyEnv.setWeather(this.weather.kind, this.weather.intensity);
 
-    // shadows: ONE PCF-soft sun map for the whole game. The split-screen
-    // panes never render it themselves (autoUpdate is off) — updateShadowPass
-    // renders exactly one full-layers pass per frame, so no camera's avatar
-    // layer tricks can leak into the shared map.
+    // shadows: ONE PCF-soft sun map (the sky's DirectionalLight owns it),
+    // drawn into per frame by three's own render pass. Each split-screen pane
+    // re-renders it with its own layer view, so a first-person kid's screen
+    // shows exactly the shadows that screen can see — no shared state to leak.
+    // updateShadowFocus below just steers the follow box to the players.
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.shadowMap.autoUpdate = false;
-    this.shadowCam.layers.enableAll();
-    this.sunLight = this.skyEnv.getSunLight();
     this.applyShadowSettings();
     this.particles = new ParticleSystem(this.scene);
 
@@ -1311,14 +1305,13 @@ export class Game {
   }
 
   /**
-   * The one shadow pass per frame. The sky has already parked the sun light
-   * above the followed spot (focusShadow → lerp → texel snap), so this is
-   * just: move the follow box to the players (or the idle camera), bring the
-   * scene graph current, and render the map from a camera that enables every
-   * layer — every split-screen pane then samples the same map, and a
-   * first-person kid still throws a shadow into someone else's pane.
+   * Point the shadow follow box at this frame's players (or the idle camera
+   * while nobody has joined). The sky lerps it and snaps it to the map's
+   * texel grid, so walking never makes the shadows swim. The box is always
+   * followed — even while shadows are off — so flipping the switch back on
+   * never reveals a stale box far behind the kids.
    */
-  private updateShadowPass(): void {
+  private updateShadowFocus(): void {
     if (this.players.length > 0) {
       let x = 0, y = 0, z = 0;
       for (const p of this.players) {
@@ -1330,9 +1323,6 @@ export class Game {
       const c = this.renderCam ?? this.idleCamera;
       this.skyEnv.focusShadow(c.position.x, Math.max(4, c.position.y - 8), c.position.z);
     }
-    this.scene.updateMatrixWorld();
-    this.renderer.shadowMap.needsUpdate = true;
-    this.renderer.shadowMap.render([this.sunLight], this.scene, this.shadowCam);
   }
 
   /**
@@ -1844,9 +1834,8 @@ export class Game {
       cameras.push(this.idleCamera);
     }
     this.applyAvatarLayers(cameras);
-    // exactly one shared shadow pass before the panes (skipped when a
-    // grown-up switched shadows off — the panes never render it themselves)
-    if (this.shadowsEnabled) this.updateShadowPass();
+    // steer the sun's shadow follow box before any pane renders
+    this.updateShadowFocus();
     this.viewportMgr.render(this.renderer, this.scene, cameras);
 
     // HUD updates

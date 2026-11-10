@@ -4082,8 +4082,9 @@ test('rain falls on the meadow and the sun circles the sky', async ({ page }) =>
   expect(wet.kind).toBe('rain');
   expect(wet.hiss, 'the rain hiss reached the audio kit').toBe(true);
 
-  // the grown-up menu grew three rows under Waiting Players — the old rows
-  // stay exactly where every other test pins them
+  // the grown-up menu grew rows under Waiting Players — the old rows stay
+  // exactly where every other test pins them, and the Shadows row slots in
+  // right before Back (which moved 9 → 10)
   await tap(page, 'menu');
   await page.waitForSelector('.menu-list');
   await selectRow(page, 9); // Grown-Ups
@@ -4093,9 +4094,11 @@ test('rain falls on the meadow and the sun circles the sky', async ({ page }) =>
     [...document.querySelectorAll('.menu-item')].map((r) => r.textContent ?? ''));
   expect(labels[0]).toContain('Freeze');
   expect(labels[5], 'Waiting Players keeps row 5').toContain('Waiting Players');
-  expect(labels.some((l) => l.includes('Weather'))).toBe(true);
-  expect(labels.some((l) => l.includes('Day & Night'))).toBe(true);
-  expect(labels.some((l) => l.includes('Treasure Chests'))).toBe(true);
+  expect(labels[6], 'Weather keeps row 6').toContain('Weather');
+  expect(labels[7], 'Day & Night keeps row 7').toContain('Day & Night');
+  expect(labels[8], 'Treasure Chests keeps row 8').toContain('Treasure Chests');
+  expect(labels[9], 'Shadows takes row 9').toContain('Shadows');
+  expect(labels[10], 'Back slid to row 10').toContain('Back');
   await tap(page, 'back'); // close Grown-Ups
   await tap(page, 'back'); // close the player menu
 
@@ -4134,4 +4137,161 @@ test('rain falls on the meadow and the sun circles the sky', async ({ page }) =>
   await page.evaluate(() => (window as any).__lbw.setDayMode('night'));
   await frames(page, 30);
   expect(await blackPixels(page), 'midnight keeps real colour').toBeLessThan(600);
+});
+
+// ------------------------------------------------------- shadows + shaders
+
+/**
+ * Counts pixels that are clearly DARKER in the first screenshot than the
+ * second, decoded into a 2D canvas the same way blackPixels() works. With the
+ * two shots otherwise identical, those pixels ARE the cast shadows — same
+ * trick, opposite question.
+ */
+async function darkerPixels(page: Page, shotWithShadows: Buffer, shotPlain: Buffer): Promise<number> {
+  return page.evaluate(async (arg: { dark: string; light: string }) => {
+    const load = async (b64: string): Promise<{ d: Uint8ClampedArray; w: number; h: number }> => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${b64}`;
+      await img.decode();
+      const cv = document.createElement('canvas');
+      cv.width = img.width;
+      cv.height = img.height;
+      const ctx = cv.getContext('2d', { willReadFrequently: true })!;
+      ctx.drawImage(img, 0, 0);
+      return { d: ctx.getImageData(0, 0, cv.width, cv.height).data, w: img.width, h: img.height };
+    };
+    const A = await load(arg.dark);
+    const B = await load(arg.light);
+    // Only the ground band counts. Clouds drift between the two shots and
+    // every drifting puff would read as a "darker pixel"; cast shadows from
+    // parked low sun fall in the bottom half of the frame (the kid looks
+    // towards the sun, so the shadow runs down-screen at the camera).
+    const y0 = Math.floor(A.h * 0.62);
+    const y1 = Math.floor(A.h * 0.97);
+    let n = 0;
+    for (let y = y0; y < y1; y++) {
+      for (let x = 0; x < A.w; x++) {
+        const i = (y * A.w + x) * 4;
+        const ga = 0.299 * A.d[i] + 0.587 * A.d[i + 1] + 0.114 * A.d[i + 2];
+        const gb = 0.299 * B.d[i] + 0.587 * B.d[i + 1] + 0.114 * B.d[i + 2];
+        if (gb - ga >= 34) n++;
+      }
+    }
+    return n;
+  }, { dark: shotWithShadows.toString('base64'), light: shotPlain.toString('base64') });
+}
+
+test('the sun throws real blocky shadows, and row 9 of Grown-Ups flips them', async ({ page }) => {
+  test.slow();
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  page.on('console', (m) => {
+    if (m.type() === 'error' && !m.text().includes('AudioContext')) errors.push(m.text());
+  });
+  await boot(page);
+  await joinWithPad(page);
+
+  // defaults: a soft shadow map, at most 2048², with a tight follow box
+  const cfg = await page.evaluate(() => {
+    const g = (window as any).__lbw.game;
+    let sun: any = null;
+    g.scene.traverse((o: any) => { if (o.isDirectionalLight && o.castShadow) sun = o; });
+    return {
+      enabled: g.renderer.shadowMap.enabled as boolean,
+      soft: g.renderer.shadowMap.type as number,
+      mapSize: (sun?.shadow.mapSize.x ?? 0) as number,
+      span: (sun?.shadow.camera.right ?? 0) as number,
+      near: (sun?.shadow.camera.near ?? 0) as number,
+    };
+  });
+  expect(cfg.enabled, 'shadows default ON').toBe(true);
+  expect(cfg.soft, 'PCF-soft').toBe(2); // THREE.PCFSoftShadowMap
+  expect(cfg.mapSize).toBeGreaterThan(0);
+  expect(cfg.mapSize).toBeLessThanOrEqual(2048);
+  expect(cfg.span, 'tight frustum, not the whole world').toBeLessThanOrEqual(60);
+
+  // Park the day clock and look straight into the sun, so the shadow of
+  // anything we build runs down the screen towards the camera.
+  await page.evaluate(() => (window as any).__lbw.setDayMode('day'));
+  await page.waitForFunction(() => (window as any).__lbw.game.sunInfo().dir.y > 0.15, null, { timeout: 8000 });
+  await page.waitForFunction('window.__lbw.game.players[0].target !== null', null, { timeout: 15000 });
+  await page.evaluate(() => {
+    const g = (window as any).__lbw.game;
+    const d = g.sunInfo().dir;
+    g.players[0].entity.yaw = Math.atan2(d.x, d.z); // face the sun
+  });
+  await frames(page, 10);
+
+  // A stone tower in the cell the kid now aims at: five tall, unmistakable
+  // once the low parked sun throws its shadow across the meadow.
+  const tower = await page.evaluate((stone: number) => {
+    const g = (window as any).__lbw.game;
+    const t = g.players[0].target;
+    if (!t) return null;
+    const back = [0, 1, 2, 3, 4].map((k) => g.world.get(t.px, t.py + k, t.pz));
+    for (let k = 0; k < 5; k++) g.world.set(t.px, t.py + k, t.pz, stone);
+    const got = [0, 1, 2, 3, 4].every((k) => g.world.get(t.px, t.py + k, t.pz) === stone);
+    if (!got) return null;
+    return { x: t.px, y: t.py, z: t.pz, back };
+  }, (await page.evaluate(() => (window as any).__lbw.ids)).STONE);
+  expect(tower, 'the tower went into the aimed-at cell').not.toBeNull();
+
+  // let the remesh land, the camera lerp settle and the shadow map update
+  await frames(page, 25);
+  const shotOn = await page.screenshot();
+
+  // the grown-up row: Shadows on row 9, right before Back — tap it OFF
+  await openGrownUpsMenu(page);
+  await selectRow(page, 9);
+  expect(await page.evaluate(() => [...document.querySelectorAll('.menu-item')][9].textContent ?? ''))
+    .toContain('Shadows');
+  await tap(page, 'jump');
+  expect(await page.evaluate(() => (window as any).__lbw.game.shadowsEnabled)).toBe(false);
+  expect(await page.evaluate(() => (window as any).__lbw.game.renderer.shadowMap.enabled)).toBe(false);
+  await tap(page, 'back'); // leave Grown-Ups
+  await tap(page, 'back'); // leave the player menu
+  await frames(page, 25);
+  const shotOff = await page.screenshot();
+
+  // the difference between the two shots IS the shadow: thousands of pixels
+  // the sun only darkens when the map is on (tower, cliff, avatar, trees)
+  expect(await darkerPixels(page, shotOn, shotOff), 'a real shadow under the tower').toBeGreaterThan(1500);
+
+  // a reload remembers the grown-up's choice
+  await page.reload();
+  await page.waitForFunction('window.__lbw !== undefined', null, { timeout: 20000 });
+  expect(await page.evaluate(() => (window as any).__lbw.game.shadowsEnabled)).toBe(false);
+  expect(await page.evaluate(() => (window as any).__lbw.game.renderer.shadowMap.enabled)).toBe(false);
+
+  // put the world back the way the next tests found it
+  await page.evaluate((t: { x: number; y: number; z: number; back: number[] }) => {
+    const g = (window as any).__lbw.game;
+    t.back.forEach((id, k) => g.world.set(t.x, t.y + k, t.z, id));
+  }, tower!);
+  await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); });
+
+  // the water channel still draws exactly as before (same sheet, same lens)
+  const water = await page.evaluate(() => {
+    const g = (window as any).__lbw.game;
+    const S = g.world;
+    const { sx, sz } = (window as any).__lbw.dims;
+    for (let x = 4; x < sx - 4; x += 3) {
+      for (let z = 4; z < sz - 4; z += 3) {
+        const y = S.surfaceY(x, z);
+        for (let yy = y; yy <= y + 24; yy++) {
+          const id = S.get(x, yy, z);
+          if (id === (window as any).__lbw.ids.WATER || id === (window as any).__lbw.ids.WATER_FLOW) {
+            return { found: true, h: (window as any).__lbw.waterSurfaceAt(x, yy, z), hasMap: !!g.chunks.materials.water.map };
+          }
+        }
+      }
+    }
+    return { found: false, h: 0, hasMap: false };
+  });
+  expect(water.found, 'this world has water to draw').toBe(true);
+  expect(water.h, 'the water lens still measures').toBeGreaterThan(0);
+  expect(water.hasMap, 'the water sheet still tiles its wave texture').toBe(true);
+
+  // and none of this talked back to the console (shader compile errors land there)
+  expect(errors, `console/page errors: ${errors.join('\n')}`).toEqual([]);
 });

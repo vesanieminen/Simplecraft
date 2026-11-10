@@ -224,7 +224,7 @@ export interface SkyEnv {
   setWeather(kind: WeatherKind | null, intensity: number): void;
   /** the dome mesh — centred on the world middle, kept past every far plane */
   getDome(): THREE.Mesh;
-  /** the shadow-casting sun/moon light — the game renders one pass per frame */
+  /** the shadow-casting sun/moon light (tests & debug: map, bias, frustum) */
   getSunLight(): THREE.DirectionalLight;
   /** where the sun (or moon) is: direction, height, low-sun warmth, colour */
   sunInfo(): SunState;
@@ -310,11 +310,11 @@ export function createSky(scene: THREE.Scene): SkyEnv {
   scene.add(amb);
 
   // ---- shadows: the sun is the only caster, one map, tight frustum --------
-  // The light follows the players (Game.focusShadow → here), its elevation
-  // follows the clock, and the game renders the map ONE pass per frame from a
-  // full-layers camera (see Game.updateShadowPass) — so every split-screen
-  // pane shares the same map and no camera's layer tricks leak into it.
-  // Night keeps a moon shadow at 0.32 light — soft, never the void.
+  // The light hovers over the players (Game.updateShadowFocus → here) and its
+  // elevation follows the clock. three re-draws the map inside each pane's
+  // render pass, using that pane's camera layer view — so what a kid sees is
+  // exactly what that screen can cast, and no camera's avatar-layer tricks
+  // leak into another's picture. Night keeps a soft moon shadow (0.32 light).
   dir.castShadow = true;
   dir.shadow.mapSize.set(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
   dir.shadow.camera.left = -SHADOW_SPAN;
