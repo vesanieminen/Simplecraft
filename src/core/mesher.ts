@@ -7,10 +7,11 @@
 import * as THREE from 'three';
 import {
   ATLAS_CHEST_INSIDE, ATLAS_CHEST_LID, ATLAS_CHEST_OPEN_TOP, ATLAS_CELL_COUNT, ATLAS_DOOR, ATLAS_LADDER, ATLAS_PLANKS,
-  BlockId, blockDef,
+  ATLAS_TORCH, BlockId, blockDef,
   CHEST_INSET, CHEST_OPEN, chestOpenBoxes, isChestBlock, isCrossBlock, isDoorBlock,
-  isDoorClosedBlock, isFullCellBlock, isLadderBlock, isOpaqueBlock, isStairsBlock, isTranslucentBlock, isWaterId,
-  LadderFacing, ladderBoxes, PLANT_ATLAS_CELLS, SAND, StairFacing, stairBoxes, VoxelBox,
+  isDoorClosedBlock, isFullCellBlock, isLadderBlock, isOpaqueBlock, isStairsBlock, isTorchBlock,
+  isTranslucentBlock, isWaterId,
+  LadderFacing, ladderBoxes, PLANT_ATLAS_CELLS, SAND, StairFacing, stairBoxes, torchBoxes, VoxelBox,
 } from './blocks';
 import { CHUNK, idx as worldIdx, WORLD_SY, World } from './world';
 import { waterSurfaceHeight } from './water';
@@ -120,6 +121,16 @@ class GeomBuilder {
   normals: number[] = [];
   colors: number[] = [];
   uvs: number[] = [];
+  /**
+   * The water channel carries one extra per-vertex channel: how full the
+   * cell drew (`aFill`, 0..1). The foam in the water shader lives where that
+   * sits low — at the brim of a pool there is nothing shallow to foam.
+   */
+  private fills: number[] | null;
+
+  constructor(opts: { fill?: boolean } = {}) {
+    this.fills = opts.fill ? [] : null;
+  }
 
   quad(
     a: [number, number, number], b: [number, number, number],
@@ -127,6 +138,7 @@ class GeomBuilder {
     n: [number, number, number],
     tint: [number, number, number][], // per-corner rgb
     uv?: [number, number][], // optional per-corner (a,b,c,d) UVs
+    fill = 1, // this quad's `aFill` value (fill-channel builders only)
   ): void {
     // triangulate a,b,c,d (two triangles), flip diagonal for better AO
     const flip = this.aoFlip(tint);
@@ -135,6 +147,7 @@ class GeomBuilder {
       this.normals.push(n[0], n[1], n[2]);
       this.colors.push(tint[i][0], tint[i][1], tint[i][2]);
       if (uv) this.uvs.push(uv[i][0], uv[i][1]);
+      if (this.fills) this.fills.push(fill);
     };
     if (!flip) {
       push(a, 0); push(b, 1); push(c, 2);
@@ -158,6 +171,7 @@ class GeomBuilder {
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.normals, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(this.colors, 3));
     if (this.uvs.length) g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uvs, 2));
+    if (this.fills) g.setAttribute('aFill', new THREE.Float32BufferAttribute(this.fills, 1));
     g.computeBoundingSphere();
     return g;
   }
@@ -173,7 +187,7 @@ export function buildChunkGeometry(
   const cross = new GeomBuilder();
   const tex = new GeomBuilder();
   const texT = new GeomBuilder(); // painted glass: atlas art, see-through
-  const wet = new GeomBuilder(); // water: its own tiling sheet, drawn at water height
+  const wet = new GeomBuilder({ fill: true }); // water: its own tiling sheet, drawn at water height
 
   const x0 = cx * CHUNK, z0 = cz * CHUNK;
 
@@ -233,6 +247,14 @@ export function buildChunkGeometry(
           // buried in that wall is culled flush; the climb side shows the rungs.
           const facing = (world.ladderFacing.get(worldIdx(x, y, z)) ?? 0) as LadderFacing;
           addTexturedSubBox(tex, world, [x, y, z], ladderBoxes(x, y, z, facing), def.sideAtlasCell ?? ATLAS_LADDER,
+            { cullFlush: true });
+          continue;
+        }
+        if (isTorchBlock(id)) {
+          // A torch is a slim post dead centre of the cell; the flame over its
+          // head is a render-side billboard (render/lights.ts), never geometry
+          // here — so this stays one squat textured box.
+          addTexturedSubBox(tex, world, [x, y, z], torchBoxes(x, y, z), def.sideAtlasCell ?? ATLAS_TORCH,
             { cullFlush: true });
           continue;
         }
@@ -392,7 +414,7 @@ function addWaterCube(
     const pts = f.corners.map(([ax, ay, az]) => [
       ax ? x + 1 : x, ay ? y + ch[(ax ? 1 : 0) | (az ? 2 : 0)] : y, az ? z + 1 : z,
     ] as [number, number, number]);
-    g.quad(pts[0], pts[1], pts[2], pts[3], f.dir, tint, waterFaceUvs(f.dir, pts));
+    g.quad(pts[0], pts[1], pts[2], pts[3], f.dir, tint, waterFaceUvs(f.dir, pts), (ch[0] + ch[1] + ch[2] + ch[3]) / 4);
   }
 }
 
