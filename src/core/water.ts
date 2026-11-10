@@ -457,7 +457,12 @@ export class WaterFlow {
   private dropDistance(x: number, y: number, z: number, dx: number, dz: number): number {
     const sx = x + dx, sz = z + dz;
     if (!this.flowable(sx, y, sz)) return NO_WAY_DOWN; // a wall is not a direction
-    if (!this.supported(sx, y, sz)) return 0; // the next cell is the edge
+    // The next cell is the edge when it has no footing — OR when the water in
+    // it is mid-fall: a waterfall holds itself up, and treating that column as
+    // ground made the search walk ACROSS it, inflating the weight of the very
+    // direction the stream came down. Ties with sideways followed, the channel
+    // fanned out, and every stray cell poured its own fall — a waterfall curtain.
+    if (!this.supported(sx, y, sz) || this.pouring.has(idx(sx, y, sz))) return 0;
     const seen = new Set<number>([idx(sx, y, sz)]);
     let frontier = [idx(sx, y, sz)];
     for (let step = 1; step <= DROP_SEARCH && frontier.length; step++) {
@@ -467,7 +472,7 @@ export class WaterFlow {
         for (const [ax, az] of SIDES) {
           const nx = cx + ax, nz = cz + az;
           if (!this.flowable(nx, y, nz)) continue;
-          if (!this.supported(nx, y, nz)) return step; // found a way down this far out
+          if (!this.supported(nx, y, nz) || this.pouring.has(idx(nx, y, nz))) return step; // a way down this far out
           const k = idx(nx, y, nz);
           if (seen.has(k)) continue;
           seen.add(k);
