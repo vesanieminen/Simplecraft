@@ -7,10 +7,11 @@
  * gathers the nearest handful of emitters per frame, scores them by weight
  * and distance, and publishes their positions/colours/radii into
  * `chunks.shaders.setLights`. The materials never recompile — only numbers
- * move — and the flicker is woven from the kit's clock in the shader
- * (shaders.ts), so the CPU never touches an individual light's intensity
- * either. That's the whole M1 budget: a fixed loop of at most
- * MAX_WORLD_LIGHTS lights once per fragment, and a couple of dozen sprites.
+ * move — and the flicker is woven from the kit's clock in `setLights`
+ * itself: one sine pair per light per frame, so the fragment decode stays
+ * pure multiply-add. That's the whole M1 budget: at most `lightCompileMax`
+ * decodes once per fragment (eight on a real GPU, three on a software
+ * rasteriser), and a couple of dozen sprites.
  *
  * The visible side of a torch rides here too: each nearby torch gets a
  * small additive flame sprite that wobbles on the same clock the pools of
@@ -124,7 +125,13 @@ export class LightKeeper {
    * One pass per frame from the game loop (see game.ts): gather, score,
    * publish the uniform array, keep the flame sprites company with it.
    */
-  sync(cam: THREE.Camera, stars: readonly Star[], enabled: boolean): void {
+  /**
+   * `budget` caps how many lights the GPU is asked to shade — see Game's
+   * shadow-quality auto-detector: a software rasteriser runs the per-light
+   * fragment work for real, so there we keep the big emitters (torches,
+   * lamps, opened treasure) and send the faint star glows home.
+   */
+  sync(cam: THREE.Camera, stars: readonly Star[], enabled: boolean, budget: number): void {
     const camP = cam.position;
     const t = this.kit.time;
 
@@ -142,19 +149,22 @@ export class LightKeeper {
         pool.push(this.candidate(kind, lx, ly, lz, hash01(i), kind.weight / (1 + d2 * 0.012)));
       }
       // star pickups: faint golden companions, deliberately low-weight so a
-      // wandering star can never steal a torch's slot
-      for (const s of stars) {
-        if (!s.mesh.visible) continue;
-        const d2 = s.pos.distanceToSquared(camP);
-        if (d2 > CULL_R2) continue;
-        pool.push(this.candidate(
-          STAR_KIND, s.pos.x, s.pos.y, s.pos.z,
-          hash01(s.index * 17 + 5), STAR_KIND.weight / (1 + d2 * 0.05),
-        ));
+      // wandering star can never steal a torch's slot — and on a software
+      // rasteriser they skip the shader entirely (every loop is real work)
+      if (budget >= MAX_WORLD_LIGHTS) {
+        for (const s of stars) {
+          if (!s.mesh.visible) continue;
+          const d2 = s.pos.distanceToSquared(camP);
+          if (d2 > CULL_R2) continue;
+          pool.push(this.candidate(
+            STAR_KIND, s.pos.x, s.pos.y, s.pos.z,
+            hash01(s.index * 17 + 5), STAR_KIND.weight / (1 + d2 * 0.05),
+          ));
+        }
       }
       // ---- the eight that get to be lights tonight --------------------------
       pool.sort((a, b) => b.score - a.score);
-      if (pool.length > MAX_WORLD_LIGHTS) pool.length = MAX_WORLD_LIGHTS;
+      if (pool.length > budget) pool.length = budget;
     }
     this.last = pool;
     this.kit.setLights(pool);

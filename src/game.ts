@@ -38,7 +38,7 @@ import { AVATAR_COLORS, AVATAR_MODELS, modelDef, NICKNAMES } from './players/ava
 import { ChunkMeshManager } from './render/chunkMeshes';
 import { LightKeeper } from './render/lights';
 import { SandFalls } from './render/sandFalls';
-import { SunState } from './render/shaders';
+import { MAX_WORLD_LIGHTS, SunState } from './render/shaders';
 import { createSky, SHADOW_TEXEL, SKY_CLEAR, SKY_FAR, SkyEnv } from './render/sky';
 import { SplitLayout, ViewportManager } from './render/viewportManager';
 import { Hud } from './ui/hud';
@@ -239,6 +239,12 @@ export class Game {
     this.sunLight = this.skyEnv.getSunLight();
     this.shadowQuality = Game.detectShadowQuality(this.renderer);
     this.setShadowQuality(this.shadowQuality);
+    // Same detector decides the light decode's PROGRAM size: a software
+    // rasteriser runs the whole unrolled light chain even when the count is
+    // zero, so on CPU renderers the programs only ever decode three lights.
+    // Set before the first frame compiles anything — programs stay stable.
+    this.chunks.shaders.lightCompileMax =
+      this.shadowQuality === 'soft' ? MAX_WORLD_LIGHTS : 3;
     this.applyShadowSettings();
     this.particles = new ParticleSystem(this.scene);
 
@@ -1976,9 +1982,14 @@ export class Game {
     // with it — one uniform set, no program rebuilds, ever
     if (this.scene.fog) this.chunks.tickShaders(dt, this.skyEnv.sunInfo(), this.scene.fog.color);
     // the world's lamps: gather the nearest emitters around the camera being
-    // rendered and publish them into the kit's uniform arrays (numbers only —
-    // the materials never recompile, and the flicker rides the kit clock)
-    this.lights.sync(this.renderCam ?? this.idleCamera, this.starField.stars, this.lightsEnabled);
+    // rendered and publish them into the kit's uniforms (numbers only — the
+    // materials never recompile, and the flicker folds in on the CPU).
+    // Software GL gets a tighter budget: there, every published light is
+    // real fragment work for every pixel on the screen.
+    this.lights.sync(
+      this.renderCam ?? this.idleCamera, this.starField.stars, this.lightsEnabled,
+      this.shadowQuality === 'soft' ? MAX_WORLD_LIGHTS : 3,
+    );
     this.chunks.update(4);
 
     if (!this.frozen && this.players.length > 0) {

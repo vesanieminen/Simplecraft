@@ -478,6 +478,11 @@ export function createSky(scene: THREE.Scene, kit: ShaderKit): SkyEnv {
       sunWorldDir.copy(sunIsDown ? moon.position : sun.position)
         .applyAxisAngle(UP_Z, orbit.rotation.z)
         .normalize();
+      // The glare must follow the ball's TRUE height, not the shadow sun's:
+      // the floor below keeps frustums sane, but it would also peg the low
+      // factor at 1 at high noon — a full-screen additive wash all day (and
+      // a half-speed software rasteriser to go with it).
+      const ballY = sunWorldDir.y;
       if (sunWorldDir.y < 0.198) { // ≥ ~11°, keeps frustums sane
         sunWorldDir.y = 0.198;
         sunWorldDir.normalize();
@@ -491,13 +496,21 @@ export function createSky(scene: THREE.Scene, kit: ShaderKit): SkyEnv {
       // Horizon glare: a warm wash that swells around the sun as it dips
       // toward the horizon — the bare ball used to read as a sticker. It
       // breathes slightly and hides when the sky itself is hidden (marks).
-      const glareSwell = sunState.low * sunState.low;
-      glare.scale.setScalar(34 + 96 * sunState.low + Math.sin(kit.time * 0.7) * 3);
-      (glare.material as THREE.SpriteMaterial).opacity =
-        marks ? glareSwell * 0.5 * (1 - wet * 0.55) : 0;
+      // Both auras go INVISIBLE, not just transparent, when faded: a big
+      // additive quad is the most expensive pixel this sky paints, and a
+      // software rasteriser happily blends it at zero, forever.
+      const glareLow = sunIsDown ? 0
+        : THREE.MathUtils.clamp((0.5 - Math.max(ballY, 0)) / 0.3, 0, 1) * (1 - wet * 0.55);
+      const glareOpacity = marks ? glareLow * glareLow * 0.5 : 0;
+      glare.visible = glareOpacity > 0.004;
+      if (glare.visible) {
+        glare.scale.setScalar(34 + 96 * glareLow + Math.sin(kit.time * 0.7) * 3);
+        (glare.material as THREE.SpriteMaterial).opacity = glareOpacity;
+      }
       // The moon keeps a silver aura that deepens with the night.
-      (moonHalo.material as THREE.SpriteMaterial).opacity =
-        marks ? 0.10 + darkness * 0.16 : 0;
+      const haloOpacity = marks ? 0.10 + darkness * 0.16 : 0;
+      moonHalo.visible = haloOpacity > 0.004;
+      (moonHalo.material as THREE.SpriteMaterial).opacity = haloOpacity;
 
       // The shadow light hovers over the followed spot (Game points it at the
       // players). It lags the walk with a lerp, and snaps to the map's texel

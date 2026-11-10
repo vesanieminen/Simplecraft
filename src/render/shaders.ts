@@ -20,11 +20,14 @@
  *   animals and fish: the stuff that walks around inside a pool of firelight.
  * - `patchStarTwinkle` — the sky's star field breathes.
  *
- * Point lights are a fixed array of uniforms (position, colour, radius, a
- * flicker seed) filled per frame by render/lights.ts — the programs NEVER
- * rebuild when a torch is placed or the Grown-Ups switch flips, only uniform
- * values move. Flicker is derived from kit time in the shader, so the CPU
- * never churns per-light intensity either.
+ * Point lights are SCALAR uniforms (position, colour×flicker, radius — per
+ * light uL0P/uL0C/uL0R …) filled per frame by render/lights.ts: the programs
+ * NEVER rebuild when a torch is placed or the Grown-Ups switch flips, only
+ * uniform values move, and the flicker folds into the colour on the CPU.
+ * Scalars and a boot-time compile max, not arrays and a loop, because
+ * software rasterisers flatten every branch and run the whole decode even
+ * while the count is zero — on CI's renderer that was half the world's
+ * framerate for eight lights that did not exist. See ShaderKit.lightCompileMax.
  *
  * Distance haze itself is ordinary scene fog — see the FogExp2 in sky.ts.
  */
@@ -43,7 +46,7 @@ export interface SunState {
   tint: THREE.Color;
 }
 
-/** Hard cap on world point lights — one loop, eight iterations, never more. */
+/** Hard cap on world point lights — the ceiling; software GL compiles less. */
 export const MAX_WORLD_LIGHTS = 8;
 
 /** One live world light, as the kit receives it per frame (see lights.ts). */
@@ -53,7 +56,7 @@ export interface WorldLight {
   r: number; g: number; b: number;
   /** reach in blocks — the falloff is (1 − d²/r²)², so nothing beyond it */
   radius: number;
-  /** stable 0..1 phase for the shader-side flicker */
+  /** stable 0..1 phase for the CPU-side flicker (folded in by setLights) */
   seed: number;
 }
 
@@ -69,15 +72,27 @@ export class ShaderKit {
   private readonly uSunTint = { value: new THREE.Color(1, 0.96, 0.88) };
   private readonly uHaze = { value: new THREE.Color(0.75, 0.88, 0.96) };
   /**
-   * The point lights, in one uniform array each — mutated IN PLACE by
-   * `setLights` every frame (three re-flattens object arrays like these on
-   * every upload, which is exactly what we want). The programs see the SAME
+   * The point lights — one SET of SCALAR uniforms each (uL0P/uL0C/uL0R …),
+   * mutated IN PLACE by `setLights` every frame. The programs see the SAME
    * uniforms forever; a torch going out is just `uLightCount` shrinking.
+   * Scalars, not arrays, because SwiftShader (CI's renderer) spills a whole
+   * program out of the constant banks the moment it declares a dynamically
+   * indexed uniform array — every pixel of the world got ~2x slower while
+   * the light loop sat empty. The colour slots also carry the FLICKER,
+   * folded on the CPU: the fragment decode stays a pure FMA chain.
    */
-  private readonly uLightPos = { value: Array.from({ length: MAX_WORLD_LIGHTS }, () => new THREE.Vector3()) };
-  private readonly uLightColor = { value: Array.from({ length: MAX_WORLD_LIGHTS }, () => new THREE.Color()) };
-  private readonly uLightRange = { value: new Array<number>(MAX_WORLD_LIGHTS).fill(1) };
-  private readonly uLightSeed = { value: new Array<number>(MAX_WORLD_LIGHTS).fill(0) };
+  /**
+   * How many lights the PROGRAMS decode. Set once at boot (before the first
+   * frame compiles anything) — software renderers flatten every branch and
+   * run the whole decode even when the count is zero, so there the program
+   * itself is built smaller. 8 on real GPUs, less on a CPU rasteriser.
+   */
+  lightCompileMax = MAX_WORLD_LIGHTS;
+  private readonly uLights = Array.from({ length: MAX_WORLD_LIGHTS }, () => ({
+    pos: { value: new THREE.Vector3() },
+    color: { value: new THREE.Color() },
+    range: { value: 1 },
+  }));
   private readonly uLightCount = { value: 0 };
 
   /** advance the animation — once per frame from the game loop */
@@ -102,13 +117,19 @@ export class ShaderKit {
    * touching a single program.
    */
   setLights(lights: readonly WorldLight[]): void {
-    const n = Math.min(MAX_WORLD_LIGHTS, lights.length);
+    const n = Math.min(this.lightCompileMax, lights.length);
+    const t = this.uTime.value;
     for (let i = 0; i < n; i++) {
       const l = lights[i];
-      this.uLightPos.value[i].set(l.x, l.y, l.z);
-      this.uLightColor.value[i].setRGB(l.r, l.g, l.b);
-      this.uLightRange.value[i] = l.radius;
-      this.uLightSeed.value[i] = l.seed;
+      const slot = this.uLights[i];
+      slot.pos.value.set(l.x, l.y, l.z);
+      // the flicker: two detuned sines on a stable per-light phase. Here it
+      // costs ~16 transcendental calls a frame; in the fragment shader it
+      // was hundreds of millions a second on a software rasteriser.
+      const ph = l.seed * 37.13;
+      const fl = 0.88 + 0.08 * Math.sin(t * 9.3 + ph) + 0.04 * Math.sin(t * 23.7 + ph * 2.7);
+      slot.color.value.setRGB(l.r * fl, l.g * fl, l.b * fl);
+      slot.range.value = l.radius;
     }
     this.uLightCount.value = n;
   }
@@ -117,8 +138,8 @@ export class ShaderKit {
   lightsDebug(): { count: number; max: number; lights: { x: number; y: number; z: number; radius: number }[] } {
     const lights = [];
     for (let i = 0; i < this.uLightCount.value; i++) {
-      const p = this.uLightPos.value[i];
-      lights.push({ x: p.x, y: p.y, z: p.z, radius: this.uLightRange.value[i] });
+      const p = this.uLights[i].pos.value;
+      lights.push({ x: p.x, y: p.y, z: p.z, radius: this.uLights[i].range.value });
     }
     return { count: this.uLightCount.value, max: MAX_WORLD_LIGHTS, lights };
   }
@@ -131,50 +152,63 @@ export class ShaderKit {
     shader.uniforms.uLowSun = this.uLowSun;
     shader.uniforms.uSunTint = this.uSunTint;
     shader.uniforms.uHaze = this.uHaze;
-    shader.uniforms.uLightPos = this.uLightPos;
-    shader.uniforms.uLightColor = this.uLightColor;
-    shader.uniforms.uLightRange = this.uLightRange;
-    shader.uniforms.uLightSeed = this.uLightSeed;
     shader.uniforms.uLightCount = this.uLightCount;
+    for (let i = 0; i < this.uLights.length; i++) {
+      const slot = this.uLights[i];
+      shader.uniforms[`uL${i}P`] = slot.pos;
+      shader.uniforms[`uL${i}C`] = slot.color;
+      shader.uniforms[`uL${i}R`] = slot.range;
+    }
   }
 }
 
 /**
  * The point-light decode, shared by the terrain, water and dynamic-material
  * patches. Squared-distance falloff — (1 − d²/r²)², exactly zero past the
- * radius, so the cost past a torch's reach is one dot product per light.
- * Half-lambert so walls and floors both catch the pool, and a flicker woven
- * from two detuned sines of the kit's time — the CPU never touches it.
+ * radius, so the cost past a torch's reach is one dot product per light,
+ * half-lambert so walls and floors both catch the pool.
+ *
+ * SCALAR uniforms, hand-unrolled — deliberately no arrays, no loops: a
+ * dynamically indexed uniform array spills the whole program out of a
+ * software rasteriser's constant banks (measured: every pixel ~2x slower
+ * even while uLightCount is 0). uL*N already carries the flicker (setLights).
  */
-const LIGHTS_GLSL = /* glsl */ `
-#define EL_MAX_LIGHTS ${MAX_WORLD_LIGHTS}
-uniform vec3 uLightPos[EL_MAX_LIGHTS];
-uniform vec3 uLightColor[EL_MAX_LIGHTS];
-uniform float uLightRange[EL_MAX_LIGHTS];
-uniform float uLightSeed[EL_MAX_LIGHTS];
+function lightsGlslBody(max: number): string {
+  const decl: string[] = [];
+  const calls: string[] = [];
+  for (let i = 0; i < max; i++) {
+    decl.push(`uniform vec3 uL${i}P; uniform vec3 uL${i}C; uniform float uL${i}R;`);
+    calls.push(
+      i === 0
+        ? 'vec3 elSum = elOne( uL0P, uL0C, uL0R, nrm );'
+        : `if ( uLightCount > ${i} ) elSum += elOne( uL${i}P, uL${i}C, uL${i}R, nrm );`,
+    );
+  }
+  return `
+#define EL_MAX_LIGHTS ${max}
+${decl.join('\n')}
 uniform int uLightCount;
 
+vec3 elOne( vec3 elP, vec3 elC, float elR, vec3 elN ) {
+  vec3 elD = elP - vWorldPos;
+  float elR2 = elR * elR;
+  float elD2 = dot( elD, elD );
+  if ( elD2 > elR2 ) return vec3( 0.0 );
+  float elAtt = 1.0 - elD2 / elR2;
+  elAtt *= elAtt;
+  vec3 elL = elD * inversesqrt( max( elD2, 1e-4 ) );
+  return elC * ( elAtt * ( dot( elN, elL ) * 0.5 + 0.5 ) );
+}
+
 vec3 elPointLights( vec3 nrm ) {
-  vec3 elSum = vec3( 0.0 );
-  for ( int el = 0; el < EL_MAX_LIGHTS; el ++ ) {
-    if ( el >= uLightCount ) break;
-    vec3 elD = uLightPos[ el ] - vWorldPos;
-    float elR = uLightRange[ el ];
-    float elD2 = dot( elD, elD );
-    if ( elD2 > elR * elR ) continue;
-    float elAtt = 1.0 - elD2 / ( elR * elR );
-    elAtt *= elAtt;
-    vec3 elL = elD * inversesqrt( max( elD2, 1e-4 ) );
-    float elNdl = dot( nrm, elL ) * 0.5 + 0.5;
-    float elPh = uLightSeed[ el ] * 37.13;
-    float elFl = 0.88 + 0.08 * sin( uTime * 9.3 + elPh ) + 0.04 * sin( uTime * 23.7 + elPh * 2.7 );
-    elSum += uLightColor[ el ] * ( elAtt * elNdl * elFl );
-  }
+  if ( uLightCount < 1 ) return vec3( 0.0 );
+${calls.join('\n')}
   return elSum;
 }
 `;
+}
 
-const HEAD = /* glsl */ `
+const HEAD_BASE = /* glsl */ `
 uniform float uTime;
 uniform vec3 uSunDir;
 uniform float uSunUp;
@@ -183,8 +217,12 @@ uniform vec3 uSunTint;
 uniform vec3 uHaze;
 varying vec3 vWorldPos;
 varying vec3 vWorldNormal;
-${LIGHTS_GLSL}
 `;
+
+/** HEAD + the light decode sized to the kit's boot-time compile max */
+function headGlsl(kit: ShaderKit): string {
+  return HEAD_BASE + lightsGlslBody(kit.lightCompileMax);
+}
 
 /**
  * Three short crossing wave trains, and the analytic derivative of the same
@@ -247,7 +285,7 @@ function mustReplace(src: string, include: string, code: string, where: string):
 export function patchWaterSurface(mat: THREE.MeshLambertMaterial, kit: ShaderKit): void {
   mat.onBeforeCompile = (shader) => {
     kit.attach(shader);
-    shader.vertexShader = HEAD + WAVES + 'attribute float aFill;\nvarying float vFill;\n' + shader.vertexShader;
+    shader.vertexShader = headGlsl(kit) + WAVES + 'attribute float aFill;\nvarying float vFill;\n' + shader.vertexShader;
     shader.vertexShader = mustReplace(
       shader.vertexShader, '#include <begin_vertex>',
       'transformed.y += elWave( ( modelMatrix * vec4( transformed, 1.0 ) ).xz, uTime );\nvFill = aFill;',
@@ -255,7 +293,7 @@ export function patchWaterSurface(mat: THREE.MeshLambertMaterial, kit: ShaderKit
     shader.vertexShader = mustReplace(
       shader.vertexShader, '#include <beginnormal_vertex>', NORMAL_TRAIL, 'water world normal');
 
-    shader.fragmentShader = HEAD + WAVES + 'varying float vFill;\n' + shader.fragmentShader;
+    shader.fragmentShader = headGlsl(kit) + WAVES + 'varying float vFill;\n' + shader.fragmentShader;
     // top faces take the analytic wave normal (in view space, where three's
     // lighting lives); sides keep the blocky box normal untouched
     shader.fragmentShader = mustReplace(shader.fragmentShader, '#include <normal_fragment_begin>', `
@@ -301,13 +339,13 @@ reflectedLight.indirectDiffuse += vec3( 0.92, 0.97, 1.0 )
 export function patchTerrainFinish(mat: THREE.MeshLambertMaterial, kit: ShaderKit): void {
   mat.onBeforeCompile = (shader) => {
     kit.attach(shader);
-    shader.vertexShader = HEAD + shader.vertexShader;
+    shader.vertexShader = headGlsl(kit) + shader.vertexShader;
     shader.vertexShader = mustReplace(
       shader.vertexShader, '#include <begin_vertex>', VERTEX_TRAIL, 'terrain world pos');
     shader.vertexShader = mustReplace(
       shader.vertexShader, '#include <beginnormal_vertex>', NORMAL_TRAIL, 'terrain world normal');
 
-    shader.fragmentShader = HEAD + shader.fragmentShader;
+    shader.fragmentShader = headGlsl(kit) + shader.fragmentShader;
     shader.fragmentShader = mustReplace(shader.fragmentShader, '#include <lights_fragment_end>', `
 vec3 elTN = normalize( vWorldNormal );
 vec3 elTV = normalize( cameraPosition - vWorldPos );
@@ -331,13 +369,13 @@ reflectedLight.indirectDiffuse += uSunTint * elRim * uLowSun * 0.20
 export function patchDynamicLights(mat: THREE.MeshLambertMaterial, kit: ShaderKit): void {
   mat.onBeforeCompile = (shader) => {
     kit.attach(shader);
-    shader.vertexShader = HEAD + shader.vertexShader;
+    shader.vertexShader = headGlsl(kit) + shader.vertexShader;
     shader.vertexShader = mustReplace(
       shader.vertexShader, '#include <begin_vertex>', VERTEX_TRAIL, 'dynamic world pos');
     shader.vertexShader = mustReplace(
       shader.vertexShader, '#include <beginnormal_vertex>', NORMAL_TRAIL, 'dynamic world normal');
 
-    shader.fragmentShader = HEAD + shader.fragmentShader;
+    shader.fragmentShader = headGlsl(kit) + shader.fragmentShader;
     shader.fragmentShader = mustReplace(
       shader.fragmentShader, '#include <lights_fragment_end>',
       'reflectedLight.indirectDiffuse += elPointLights( normalize( vWorldNormal ) );',
