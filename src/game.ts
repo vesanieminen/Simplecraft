@@ -203,12 +203,14 @@ export class Game {
     this.skyEnv.setDayMode(this.dayMode);
     if (this.weather.kind) this.skyEnv.setWeather(this.weather.kind, this.weather.intensity);
 
-    // shadows: ONE PCF-soft sun map (the sky's DirectionalLight owns it),
-    // drawn into per frame by three's own render pass. Each split-screen pane
-    // re-renders it with its own layer view, so a first-person kid's screen
-    // shows exactly the shadows that screen can see — no shared state to leak.
+    // shadows: one sun map (the sky's DirectionalLight owns it). The game
+    // redraws it event-driven — only from the donor pane, and only when
+    // something that casts a shadow actually moved (see updateShadowFocus).
+    // HARD (basic) shadows on purpose: nine filtered taps per pixel melt
+    // software GPUs, and a crisp blocky edge is exactly this game's art
+    // (Minecraft's "fast" mode exists for the same reason).
     // updateShadowFocus below just steers the follow box to the players.
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.BasicShadowMap;
     this.sunLight = this.skyEnv.getSunLight();
     this.applyShadowSettings();
     this.particles = new ParticleSystem(this.scene);

@@ -4208,7 +4208,7 @@ test('the sun throws real blocky shadows, and row 9 of Grown-Ups flips them', as
     };
   });
   expect(cfg.enabled, 'shadows default ON').toBe(true);
-  expect(cfg.soft, 'PCF-soft').toBe(2); // THREE.PCFSoftShadowMap
+  expect(cfg.soft, 'hard PCF-free map — the blocky fast mode').toBe(0); // THREE.BasicShadowMap
   expect(cfg.mapSize).toBeGreaterThan(0);
   expect(cfg.mapSize).toBeLessThanOrEqual(2048);
   expect(cfg.span, 'tight frustum, not the whole world').toBeLessThanOrEqual(60);
