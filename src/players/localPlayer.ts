@@ -169,10 +169,15 @@ export class LocalPlayer {
       }
       if (!frame.held.has('interact')) this.interactHold = false;
 
+      // While a pad kid holds LT to come down in flight, LT means "down" and
+      // nothing else — otherwise every landing would lay a trail of blocks.
+      // (Keyboard keeps its own E key for descending and R-Click for build,
+      // exactly as before — frame.kind excludes it from the pad couplings.)
+      const descending = this.entity.flying && frame.kind !== 'keyboard' && frame.held.has('interact');
       const placePressed = frame.pressed.has('place');
       const removePressed = frame.pressed.has('remove');
       const repeat = (frame.held.has('place') || frame.held.has('remove')) && this.buildCooldown <= 0;
-      if (!this.interactHold && (placePressed || removePressed || repeat) && this.buildCooldown <= 0) {
+      if (!this.interactHold && !descending && (placePressed || removePressed || repeat) && this.buildCooldown <= 0) {
         this.buildCooldown = 0.28;
         if (frame.held.has('place') && this.target) hooks.tryPlace(this, this.target);
         else if (frame.held.has('remove') && this.removeTarget) hooks.tryRemove(this, this.removeTarget);

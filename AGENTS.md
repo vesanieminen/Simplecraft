@@ -150,11 +150,12 @@ event. Renaming a storage key orphans the family's existing saves.
   input abstraction, so they are a good regression net — but re-check the
   README's manual checklist with real pads after any input change (newly added
   Leave / Waiting-Players rows, the water-jump fix, the slab / real-stairs /
-  treasure-chest blocks, and **this branch's whole set**: the **LT = pet · RT =
-  build · X = break** trigger remap, the 🪣 bucket on both triggers, the new
-  Weather / Day & Night / Treasure-Chests / **Shadows** rows (Back is row 10
-  now) and the
-  crouch **pose**) still owe the couch a turn.
+  treasure-chest blocks, the crouch **pose**, and **this branch's whole set**:
+  the **LT = build+pet · RT = break** trigger remap (with the pet-outranks-
+  build latch, the fly-descent LT coupling, and X as a second break), the 🪣
+  bucket now living entirely on LT, the new Weather / Day & Night /
+  Treasure-Chests / **Shadows** rows (Back is row 10 now) and the D-pad ▾
+  satchel) still owe the couch a turn.
 - Ladders (`LADDER=40`, atlas cell `ATLAS_LADDER=28`→count 29, `drawLadder`):
   **not solid, not opaque** (you walk INTO the cell — never write a test that
   expects to stand on one), wood sound family, palette right after DOOR, icon
@@ -403,10 +404,21 @@ event. Renaming a storage key orphans the family's existing saves.
   re-equilibrate across the pool first, so the dry-out order is ±1 step and
   not assertable. e2e: 'the water bucket scoops a spring…' drives it through
   `__lbw.bucketAt(playerIdx, aim)` with exact RayHits.
-- Interaction is **LT / L2** (`BUTTON_MAP` 6→interact, 7→place, 2→remove;
-  keyboard E/R-Click/L-Click unchanged). `GAMEPAD_BUTTON_MAP` is exported and
-  mirrored on `__lbw.padMap` — the 'the triggers are the hands' test pins it.
-  Keyboard contract (R-Click builds, L-Click breaks, E interacts) still holds.
+- Interaction is **LT / L2, both hands** (`BUTTON_MAP` 6→`['interact','place']`,
+  7→remove, 2→remove alias; keyboard E/R-Click/L-Click unchanged). L2/LT emits
+  interact AND place: `LocalPlayer.update` runs the interact hook FIRST (it
+  returns true when the aim held fishing/door/chest/stairs/ladder/bucket/water
+  — or a real pet, `petNearest(...) !== null`) and only places when nothing
+  nice was found; `interactHold` latches placement off until the trigger
+  releases (holding LT on a door opens it, never bricks it in), and while
+  FLYING a held pad `interact` is the descent button only (`descending` skips
+  the build block). Both couplings are gated on `frame.kind !== 'keyboard'` —
+  the keyboard contract (R-Click builds, L-Click breaks, E interacts) is
+  exactly what it was. R2/RT breaks; X is kept as a second break button for
+  muscle memory. `GAMEPAD_BUTTON_MAP` is exported and mirrored on
+  `__lbw.padMap` — the 'the triggers are the hands' test pins it, and
+  'LT is both hands' e2e taps `interact`+`place` in one frame (that IS an LT
+  press on a virtual pad) to pin build/pet/priority/RT-break.
 - Crouch is a **pose, not a squash** (`players/avatar.ts`), and the rig has no
   knees — so the pose is three angles, worked out against the pivot geometry:
   `parts.body` (which pivots at the FEET) tips forward `CROUCH_LEAN`, which is

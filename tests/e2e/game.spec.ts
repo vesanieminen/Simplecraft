@@ -4262,16 +4262,97 @@ test('keyboard arrows only tilt the view — ArrowUp never jumps', async ({ page
   await page.evaluate(() => (window as any).__testPad.release('up'));
 });
 
-test('the triggers are the hands: L2 pets and opens, R2 builds, X breaks', async ({ page }) => {
+test('the triggers are the hands: L2 builds and pets, R2 breaks', async ({ page }) => {
   await boot(page);
-  // Nov 2026 remap: the triggers are the hands kids already hold the pad with.
-  // L2/LT is the nice button (pet · fish · open · pour), R2/RT builds (and
-  // pours), X/Square breaks. Keyboard keeps E · R-Click · L-Click.
+  // Nov 2026 remap round two: everything you PUT or DO lives on the comfy
+  // left trigger (build · pet · open · pour · reel — the nice thing wins when
+  // the aim holds both), the right trigger breaks. X is kept as an extra
+  // break alias for muscle memory. Keyboard keeps E · R-Click · L-Click.
   const map = await page.evaluate(() => (window as any).__lbw.padMap as Record<string, string[]>);
-  expect(map[6], 'L2 / LT').toContain('interact');
-  expect(map[7], 'R2 / RT').toContain('place');
-  expect(map[2], 'X / Square').toContain('remove');
+  expect(map[6], 'L2 / LT builds').toContain('place');
+  expect(map[6], 'L2 / LT pets').toContain('interact');
+  expect(map[7], 'R2 / RT breaks').toContain('remove');
+  expect(map[2], 'X / Square is an extra break alias').toContain('remove');
   expect(map[0], 'A / Cross still jumps').toContain('jump');
+});
+
+test('LT is both hands: it builds, it pets, the nice thing outranks the block, RT breaks', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  await clearRunway(page); // leaves the player facing +x, looking at the ground ahead
+
+  // a wandering animal would steal every LT press (petNearest is the interact
+  // hook's last word), so send the herd off until the test is done
+  await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    (window as any).__herdStash = game.animals.animals.splice(0);
+  });
+
+  // ---- L2/LT with nothing nice in the aim: the block goes down ----
+  await page.evaluate((b: number) => {
+    (window as any).__lbw.game.players[0].selected = b;
+  }, ids.STONE);
+  await page.waitForFunction('window.__lbw.game.players[0].target !== null', null, { timeout: 15000 });
+  const spot = await page.evaluate(() => {
+    const t = (window as any).__lbw.game.players[0].target;
+    return { cell: { x: t.px, y: t.py, z: t.pz } as Cell };
+  });
+  // one L2/LT press: the pad emits interact AND place in the same frame
+  await page.evaluate(() => (window as any).__testPad.tap('interact', 'place'));
+  await frames(page, 3);
+  expect(await blockAtCell(page, spot.cell), 'LT on free ground builds').toBe(ids.STONE);
+
+  // ---- L2/LT aimed with a bunny at the kid's feet: it pets, it does NOT build ----
+  await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    const e = game.players[0].entity;
+    (window as any).__pettedBunny = game.animals.spawn('bunny', e.pos.x + 1.5, e.pos.y, e.pos.z);
+  });
+  await frames(page, 2); // the bunny settles onto the meadow
+  const stack = await page.evaluate(() => {
+    const t = (window as any).__lbw.game.players[0].target; // now the stone block
+    return { cell: { x: t.px, y: t.py, z: t.pz } as Cell };
+  });
+  await page.evaluate(() => (window as any).__testPad.tap('interact', 'place'));
+  await frames(page, 3);
+  expect(await page.evaluate(() => (window as any).__pettedBunny.isHopping), 'LT pets the bunny').toBe(true);
+  expect(await blockAtCell(page, stack.cell), 'the pet outranks the build').toBe(0);
+
+  // ---- R2/RT breaks what LT built ----
+  await page.evaluate(() => (window as any).__testPad.set('remove', true));
+  await page.waitForFunction(
+    (c: Cell) => (window as any).__lbw.game.world.get(c.x, c.y, c.z) === 0,
+    spot.cell, { timeout: 8000 },
+  );
+  await page.evaluate(() => (window as any).__testPad.set('remove', false));
+
+  // ---- and the nice thing still outranks the block: aim at a step, L2/LT
+  // spins it instead of bricking a block onto it ----
+  const step = await placeSelected(page, ids.STAIRS);
+  await page.waitForFunction(
+    (sid: number) => {
+      const t = (window as any).__lbw.game.players[0].removeTarget;
+      return t !== null && t.block === sid;
+    },
+    ids.STAIRS, { timeout: 8000 },
+  );
+  const was = await stairFacingAt(page, step);
+  const modsBefore = await page.evaluate(() => (window as any).__lbw.game.world.mods.size);
+  await page.evaluate(() => (window as any).__testPad.tap('interact', 'place'));
+  await frames(page, 3);
+  expect(await stairFacingAt(page, step), 'LT turns the step').toBe(STAIR_TURN[was!]);
+  expect(
+    await page.evaluate(() => (window as any).__lbw.game.world.mods.size),
+    'the turn outranks the build — no block anywhere',
+  ).toBe(modsBefore);
+
+  await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    game.animals.animals.push(...(window as any).__herdStash); // the herd may come home
+  });
 });
 
 test('the water bucket scoops a spring, pours a new one, and a cut-off flood runs home', async ({ page }) => {
