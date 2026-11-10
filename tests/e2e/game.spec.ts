@@ -4331,6 +4331,12 @@ test('LT is both hands: it builds, it pets, the nice thing outranks the block, R
 
   // ---- and the nice thing still outranks the block: aim at a step, L2/LT
   // spins it instead of bricking a block onto it ----
+  await page.evaluate(() => {
+    // off the runway first — tryPlace refuses to brick a block into an animal
+    const bunny = (window as any).__pettedBunny;
+    const e = (window as any).__lbw.game.players[0].entity;
+    bunny.pos.set(e.pos.x - 5, e.pos.y, e.pos.z);
+  });
   const step = await placeSelected(page, ids.STAIRS);
   await page.waitForFunction(
     (sid: number) => {
