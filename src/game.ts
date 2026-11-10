@@ -118,6 +118,9 @@ export class Game {
    * pass at all and unshadowed materials — the older tablets' escape hatch.
    */
   shadowsEnabled = true;
+  /** Shadow filter quality, auto-set once at boot from the GPU: a real one
+   *  gets soft PCF on a 2048² map, software GL crisp single-tap on 1024². */
+  shadowQuality: 'soft' | 'fast' = 'soft';
   /** what falls from the sky and how hard — pure, testable (core/weather.ts) */
   readonly weather = new WeatherClock();
   /** which weather the rain hiss carries right now (null = quiet) */
@@ -215,12 +218,13 @@ export class Game {
     // shadows: one sun map (the sky's DirectionalLight owns it). The game
     // redraws it event-driven — only from the donor pane, and only when
     // something that casts a shadow actually moved (see updateShadowFocus).
-    // HARD (basic) shadows on purpose: nine filtered taps per pixel melt
-    // software GPUs, and a crisp blocky edge is exactly this game's art
-    // (Minecraft's "fast" mode exists for the same reason).
+    // Quality is auto-set from the GPU (see setShadowQuality): a real GPU
+    // gets the soft 2048² map, software GL (CI, old tablets) gets crisp
+    // single-tap shadows — nine filtered taps per pixel would melt it.
     // updateShadowFocus below just steers the follow box to the players.
-    this.renderer.shadowMap.type = THREE.BasicShadowMap;
     this.sunLight = this.skyEnv.getSunLight();
+    this.shadowQuality = Game.detectShadowQuality(this.renderer);
+    this.setShadowQuality(this.shadowQuality);
     this.applyShadowSettings();
     this.particles = new ParticleSystem(this.scene);
 
@@ -1312,16 +1316,58 @@ export class Game {
   }
 
   /** Apply the Grown-Ups "Shadows" switch; material programs recompile once. */
-  private applyShadowSettings(): void {
-    if (this.renderer.shadowMap.enabled === this.shadowsEnabled) return;
-    this.renderer.shadowMap.enabled = this.shadowsEnabled;
-    if (this.shadowsEnabled && this.sunLight) {
-      // flipping the switch back on: bake a fresh map right away
-      this.sunLight.shadow.needsUpdate = true;
-      this.shadowHeartbeat = Game.SHADOW_HEARTBEAT;
+  /**
+   * Which shadow filter this GPU can afford: soft PCF costs nine depth taps
+   * per shaded pixel — hundreds of ms on a software rasteriser (measured on
+   * CI's own runner), nothing on any real GPU. Only 'soft' on an unambiguous
+   * hardware renderer string; anything unknown or software-ish gets 'fast'.
+   */
+  static resolveShadowQuality(rendererName: string): 'soft' | 'fast' {
+    if (/swiftshader|llvmpipe|softpipe|basic render|software/i.test(rendererName)) return 'fast';
+    return /apple|metal|nvidia|geforce|quadro|rtx|gtx|radeon|ryzen|intel|uhd|arc |adreno|mali|powervr/i
+      .test(rendererName) ? 'soft' : 'fast';
+  }
+
+  /** the same call, reachable from tests/debug without a renderer */
+  shadowQualityFor(rendererName: string): 'soft' | 'fast' {
+    return Game.resolveShadowQuality(rendererName);
+  }
+
+  /** Read the GPU's own name and pick 'soft' or 'fast' to match. */
+  private static detectShadowQuality(renderer: THREE.WebGLRenderer): 'soft' | 'fast' {
+    const gl = renderer.getContext();
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const name = ext
+      ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) ?? '')
+      : String(gl.getParameter(gl.RENDERER) ?? '');
+    return Game.resolveShadowQuality(name);
+  }
+
+  /**
+   * Switch shadow filter quality: 'soft' = PCF-soft on a 2048² map (real
+   * GPUs — smooth edges, the filter is free on hardware), 'fast' = crisp
+   * single-tap on 1024² (software GL — nine taps per pixel is hundreds of
+   * ms there; blocky edges suit the art anyway). Every material is poked
+   * once: the filter is baked into the program cache key.
+   */
+  setShadowQuality(q: 'soft' | 'fast'): void {
+    this.shadowQuality = q;
+    this.renderer.shadowMap.type = q === 'soft' ? THREE.PCFSoftShadowMap : THREE.BasicShadowMap;
+    const size = q === 'soft' ? 2048 : 1024;
+    const sh = this.sunLight?.shadow;
+    if (sh && sh.mapSize.x !== size) {
+      sh.mapSize.set(size, size);
+      if (sh.map) {
+        sh.map.dispose();
+        sh.map = null;
+      }
     }
-    // three bakes shadow-ness into every program's cache key — poke every
-    // material once so each is recompiled without (or back with) the map
+    if (sh) sh.needsUpdate = true;
+    this.recompileShadowPrograms();
+  }
+
+  /** three bakes shadow state into every program's cache key: poke them all */
+  private recompileShadowPrograms(): void {
     const seen = new Set<THREE.Material>();
     this.scene.traverse((o) => {
       const m = (o as THREE.Mesh).material;
@@ -1333,6 +1379,17 @@ export class Game {
         }
       }
     });
+  }
+
+  private applyShadowSettings(): void {
+    if (this.renderer.shadowMap.enabled === this.shadowsEnabled) return;
+    this.renderer.shadowMap.enabled = this.shadowsEnabled;
+    if (this.shadowsEnabled && this.sunLight) {
+      // flipping the switch back on: bake a fresh map right away
+      this.sunLight.shadow.needsUpdate = true;
+      this.shadowHeartbeat = Game.SHADOW_HEARTBEAT;
+    }
+    this.recompileShadowPrograms();
   }
 
   /**

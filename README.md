@@ -426,8 +426,9 @@ whichever the family wants.
 
 Everything above also lights the world: **shadows** are on by default, so
 cliffs, walls, towers, animals and kids all shade the meadow — with a
-soft moon shadow through the night. Older tablets can turn them off on
-the 🌒 Shadows row.
+soft moon shadow through the night. The sharpness suits itself to the
+machine: smooth PCF shadows on any real graphics chip, crisp blocky ones
+on old tablets, and the 🌒 Shadows row turns them off entirely.
 
 ## Treasure chests — and the grown-up switch 🔒
 

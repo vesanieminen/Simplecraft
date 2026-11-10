@@ -4205,16 +4205,34 @@ test('the sun throws real blocky shadows, and row 9 of Grown-Ups flips them', as
     return {
       enabled: g.renderer.shadowMap.enabled as boolean,
       soft: g.renderer.shadowMap.type as number,
+      quality: g.shadowQuality as string,
       mapSize: (sun?.shadow.mapSize.x ?? 0) as number,
       span: (sun?.shadow.camera.right ?? 0) as number,
       near: (sun?.shadow.camera.near ?? 0) as number,
     };
   });
   expect(cfg.enabled, 'shadows default ON').toBe(true);
-  expect(cfg.soft, 'hard PCF-free map — the blocky fast mode').toBe(0); // THREE.BasicShadowMap
-  expect(cfg.mapSize).toBeGreaterThan(0);
+  // Quality auto-suits the GPU: software GL (this CI runner) gets the crisp
+  // single-tap 1024² map, a real GPU gets soft PCF on 2048² — the user's
+  // "make it look like before again" is exactly the 'soft' branch.
+  expect(['soft', 'fast']).toContain(cfg.quality);
+  expect(cfg.soft, 'filter matches quality').toBe(cfg.quality === 'soft' ? 2 : 0); // PCFSoft vs Basic
+  expect(cfg.mapSize, 'map matches quality').toBe(cfg.quality === 'soft' ? 2048 : 1024);
   expect(cfg.mapSize).toBeLessThanOrEqual(2048);
   expect(cfg.span, 'tight frustum, not the whole world').toBeLessThanOrEqual(60);
+
+  // the detector itself, pinned against real-world renderer strings
+  const det = await page.evaluate(() => {
+    const g = (window as any).__lbw.game;
+    return {
+      ci: g.shadowQualityFor('ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)'),
+      mac: g.shadowQualityFor('ANGLE (Apple, ANGLE Metal Renderer: Apple M1, Unspecified Version)'),
+      win: g.shadowQualityFor('ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)'),
+      unknown: g.shadowQualityFor('Some WebGL Thing 1.2'),
+    };
+  });
+  expect(det, 'software CI → fast, Apple/Intel → soft, unknown → fast').toEqual(
+    { ci: 'fast', mac: 'soft', win: 'soft', unknown: 'fast' });
 
   // Park the day clock and look straight into the sun, so the shadow of
   // anything we build runs down the screen towards the camera.

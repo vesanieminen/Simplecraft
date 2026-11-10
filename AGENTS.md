@@ -452,8 +452,10 @@ event. Renaming a storage key orphans the family's existing saves.
   driven: `SHADOW_HEARTBEAT` 1 s, `moving`/`focusMoved` triggers, and a 1 s
   `SHADOW_EDIT_WINDOW` after every voxel change so budgeted remeshes still land
   inside a bake — a game-time beat goes stale exactly when the world is busy.
-  Type is `BasicShadowMap`: nine PCF taps per pixel cost ~290 ms/frame on CI's
-  software GL and blew the dynamite test's frame budget. Shadows are gated by
+  Type is auto-set by `Game.setShadowQuality` — `PCFSoftShadowMap` on a 2048²
+  map for real GPUs, `BasicShadowMap` on 1024² for software GL (nine taps per
+  pixel cost hundreds of ms on CI's software rasteriser; the e2e pins the
+  detector against real renderer strings). Shadows are gated by
   the Grown-Ups 🌒 row (`shadowsEnabled`, persisted in `lbw-settings`);
   toggling must poke `needsUpdate` on every material (shadow-ness is baked
   into the program cache key). The e2e asserts the look by diffing screenshots
