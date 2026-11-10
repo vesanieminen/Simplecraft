@@ -30,6 +30,8 @@ async function boot(): Promise<void> {
       waterSurfaceAt: (x: number, y: number, z: number) => number;
       /** is this wet cell caught mid-fall (a waterfall's stream), not settled? */
       waterFallingAt: (x: number, y: number, z: number) => boolean;
+      /** how many flow steps the sim has taken — the e2e's clock, not wall time */
+      waterSteps: () => number;
       weatherNow: (kind: string) => number;
       setDayMode: (mode: string) => void;
       dayPhase: () => number;
@@ -64,6 +66,8 @@ async function boot(): Promise<void> {
     /** is this wet cell water on its way down (a stream) rather than settled? */
     waterFallingAt: (x: number, y: number, z: number) =>
       (window as unknown as { __lbw: { game: Game } }).__lbw.game.water.isPouring(x, y, z),
+    /** the flow sim's own clock: how many steps it has actually run */
+    waterSteps: () => (window as unknown as { __lbw: { game: Game } }).__lbw.game.water.steps,
     /** force weather from the test console: 'rain' | 'snow' | 'off' */
     weatherNow: (kind: string) => {
       const g = (window as unknown as { __lbw: { game: Game } }).__lbw.game;

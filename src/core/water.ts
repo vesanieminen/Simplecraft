@@ -109,6 +109,12 @@ export class WaterFlow {
   private cascade = 0;
   /** how many falls this step has chained straight through (see `FALL_CHAIN`) */
   private chaining = 0;
+  /**
+   * Flow steps taken since the world was loaded. The e2e measures how long a
+   * flood takes in *sim* steps rather than wall clock — headless Chromium runs
+   * game time at roughly half speed, so a `waitForTimeout` guess is meaningless.
+   */
+  steps = 0;
   private acc = 0;
 
   constructor(private world: World) {}
@@ -119,6 +125,7 @@ export class WaterFlow {
     this.pouring.clear();
     this.drops.clear();
     this.acc = 0;
+    this.steps = 0;
   }
 
   /**
@@ -130,7 +137,8 @@ export class WaterFlow {
     return this.pouring.has(idx(x, y, z));
   }
 
-  /** how much of a cell is water: -1 dry, 0 deep … MAX_WATER_LEVEL puddle */  private levelAt(x: number, y: number, z: number): number {
+  /** how much of a cell is water: -1 dry, 0 deep … MAX_WATER_LEVEL puddle */
+  private levelAt(x: number, y: number, z: number): number {
     const id = this.world.get(x, y, z);
     if (id === WATER) return 0;
     if (id === WATER_FLOW) return this.world.waterLevel.get(idx(x, y, z)) ?? MAX_WATER_LEVEL;
@@ -166,6 +174,7 @@ export class WaterFlow {
    */
   private step(): void {
     if (this.dirty.size === 0) return;
+    this.steps++;
     this.cascade = 0;
     this.chaining = 0;
     this.drops.clear(); // the terrain under the flood may have moved
