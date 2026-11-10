@@ -422,6 +422,13 @@ Both choices are saved on the tablet, and a parked sun parks instantly —
 bedtime stories at perpetual sunset, or a rainstorm that never stops,
 whichever the family wants.
 
+![The wall and the tower throw long blocky moon-shadows across the meadow at dusk](docs/screenshots/shadows.jpg)
+
+Everything above also lights the world: **shadows** are on by default, so
+cliffs, walls, towers, animals and kids all shade the meadow — with a
+soft moon shadow through the night. Older tablets can turn them off on
+the 🌒 Shadows row.
+
 ## Treasure chests — and the grown-up switch 🔒
 
 (See [Treasure chests](#treasure-chests-) above for the loot.) Because chests

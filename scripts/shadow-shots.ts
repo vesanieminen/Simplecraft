@@ -148,6 +148,20 @@ await page.evaluate(() => {
 });
 await shoot('morning', 3200);
 
+// the README hero for this feature: moonlit dusk with real cast shadows —
+// crisp blocky edges running ACROSS the frame (camera on the axis
+// perpendicular to the moon shadow), and the never-black night in one shot
+await page.evaluate(() => {
+  const st = (window as any).__stage;
+  const { cx, cz, G } = st;
+  (window as any).__lbw.game.setDayMode('night');
+  (window as any).__cam.eye = [cx - 8.5, G + 5.2, cz + 8.5];
+  (window as any).__cam.look = [cx + 2.5, G + 1.4, cz - 2.5];
+});
+await page.waitForTimeout(3600);
+await page.screenshot({ path: 'docs/screenshots/shadows.jpg', type: 'jpeg', quality: 92 });
+console.log('shot docs/screenshots/shadows.jpg');
+
 // the pond again under the high sun: glint + fresnel at full strength.
 // The high morning sun sits over (+x, +z), so the eye has to be on the
 // opposite (−x, −z) side of the pond to catch the mirror band across it.
