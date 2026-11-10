@@ -356,11 +356,19 @@ obeys the same rules the big game uses:
    into thin air: a cell spreads sideways only into a neighbour with ground (or
    settled water) below it.
 3. **Where it runs out of ground, it falls — straight down.** Not diagonally,
-   not a step at a time: the whole drop at once, and a fall *costs nothing* —
-   falling water keeps its full depth. So a hillside flood is a staircase of
-   waterfalls, and the pool at the bottom of a waterfall runs the full seven
-   blocks again from where the water lands.
-4. **Two sources feed a third.** Where a stream is squeezed between two
+   not a step at a time: the whole drop at once, in a single flow step, and the
+   block under a fall is filled at *full strength* — exactly like the big game,
+   where "a fluid can flow much farther if it flows downward occasionally".
+   So a hillside flood is a staircase of waterfalls that each land at full
+   force, and the pool at the bottom of a fall runs the full seven blocks
+   again from where the water lands.
+4. **It beelines for the drop.** Before spreading sideways, a cell looks (four
+   cells of flat walking) for the nearest way down, and only flows the
+   lowest-weight directions. Near a cliff that means water cuts one cell wide
+   straight to the edge and goes over — no shallow lake fanning out over every
+   shelf. On a flat floor, where nothing drops, it fans out symmetrically the
+   way you would expect a puddle to.
+5. **Two sources feed a third.** Where a stream is squeezed between two
    springs — beside and beside, or beside and above — it becomes a spring
    itself. Dig a scoop in a 2×2 pond and a third source grows to fill it,
    the same trick kids use for infinite water outside. (New springs are

@@ -1547,9 +1547,23 @@ test('water on a slope runs DOWN it: no blue plates hanging in the air, and ever
   // the flood has to climb DOWN the staircase: each step is a two-cell flat
   // ending in a drop, and each drop lands at full strength and runs again, so
   // the water keeps going step after step until it runs out of hillside.
+  // Wait for the LAST step before auditing — the sim creeps, and an audit
+  // taken mid-descent would count a flood that is simply still on its way.
   await page.waitForFunction((arg: { x: number; y: number; z: number; flow: number }) =>
     (window as any).__lbw.game.world.get(arg.x, arg.y, arg.z) === arg.flow,
-  { x: x0 + 7, y: gy - 2, z: fz, flow: ids.WATER_FLOW }, { timeout: 30000 });
+  { x: x1, y: gy - 5, z: fz, flow: ids.WATER_FLOW }, { timeout: 30000 });
+
+  // let the sim settle on its own terms — the flow's clock, not a guess
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    let last = -1, same = 0;
+    const t0 = performance.now();
+    const timer = setInterval(() => {
+      const n = (window as any).__lbw.game.world.waterLevel.size;
+      same = n === last ? same + 1 : 0;
+      last = n;
+      if (same >= 5 || performance.now() - t0 > 12000) { clearInterval(timer); resolve(); }
+    }, 100);
+  }));
 
   // and every wet cell must either be standing on something or be on its way
   // down: that is the whole complaint. The old sim let water spread sideways
