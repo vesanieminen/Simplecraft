@@ -136,9 +136,15 @@ export class Game {
   /** voxel-change counter; a new value means the baked map is stale */
   private shadowWorldEpoch = 0;
   private lastShadowWorldEpoch = -1;
-  /** redraw at least this often (game seconds), so the sun drift catches up */
-  private static readonly SHADOW_HEARTBEAT = 1.5;
+  /** redraw at least this often (WALL seconds), so the sun drift catches up */
+  private static readonly SHADOW_HEARTBEAT = 1.0;
+  /** keep baking this long (wall seconds) after the world edits, so chunks
+   *  that remesh under the per-frame budget cast shadows as soon as they land */
+  private static readonly SHADOW_EDIT_WINDOW = 1.0;
   private shadowHeartbeat = 0;
+  private shadowEditUntil = -1;
+  private realDt = 0.016;
+  private wallNow = 0;
   private lastShadowFocus = new THREE.Vector3(0, 1e3, 0);
   private time = 0;
   private sparkleBlocks = new Set<number>();
@@ -1332,7 +1338,7 @@ export class Game {
    * followed — even while shadows are off — so flipping the switch back on
    * never reveals a stale box far behind the kids.
    */
-  private updateShadowFocus(dt: number): void {
+  private updateShadowFocus(realDt: number): void {
     if (this.players.length > 0) {
       let x = 0, y = 0, z = 0;
       for (const p of this.players) {
@@ -1345,12 +1351,14 @@ export class Game {
       this.skyEnv.focusShadow(c.position.x, Math.max(4, c.position.y - 8), c.position.z);
     }
 
-    // When is a map redraw actually worth its cost (≈200 ms on CI's software
-    // GL)? Only when something that casts a shadow moved: a kid is moving
-    // (their own shadow must ride along, and the follow box crawls with them),
-    // voxels changed under the box, the follow box slid a full texel, or the
-    // slow sun-drift heartbeat came due. Welcome screens and idle menus —
-    // where most CI time is spent — then pay one redraw per heartbeat only.
+    // When is a map redraw actually worth its cost (tens of ms on CI's
+    // software GL)? Only when something that casts a shadow moved: a kid is
+    // moving (their own shadow must ride along, and the follow box crawls
+    // with them), voxels changed under the box (and for a beat after, since
+    // remeshing is budgeted over frames), the follow box slid a full texel,
+    // or the sun-drift heartbeat came due. All timers tick on WALL seconds —
+    // game time crawls when frames are slow, and a slow world is exactly
+    // when a stale shadow map stings most. Idle menus then bake ~1×/s only.
     let moving = false;
     for (const p of this.players) {
       const v = p.entity.vel;
@@ -1363,9 +1371,11 @@ export class Game {
       && this.skyEnv.shadowFocusPos().distanceToSquared(this.lastShadowFocus)
         > SHADOW_TEXEL * SHADOW_TEXEL;
     const worldChanged = this.shadowWorldEpoch !== this.lastShadowWorldEpoch;
-    this.shadowHeartbeat += dt;
+    if (worldChanged) this.shadowEditUntil = this.wallNow + Game.SHADOW_EDIT_WINDOW;
+    this.shadowHeartbeat += realDt;
     const due = this.shadowHeartbeat >= Game.SHADOW_HEARTBEAT;
-    const want = this.shadowsEnabled && (moving || focusMoved || worldChanged || due);
+    const want = this.shadowsEnabled
+      && (moving || focusMoved || worldChanged || due || this.wallNow < this.shadowEditUntil);
     if (want) {
       this.shadowHeartbeat = 0;
       this.lastShadowFocus.copy(this.skyEnv.shadowFocusPos());
@@ -1796,7 +1806,9 @@ export class Game {
 
   private loop = (now: number): void => {
     this.rafId = requestAnimationFrame(this.loop);
-    const dt = Math.min(0.05, (now - (this.lastNow ?? now)) / 1000);
+    this.realDt = (now - (this.lastNow ?? now)) / 1000;
+    this.wallNow = now / 1000;
+    const dt = Math.min(0.05, this.realDt);
     this.lastNow = now;
     this.time += dt;
 
@@ -1899,7 +1911,7 @@ export class Game {
     }
     this.applyAvatarLayers(cameras);
     // steer the sun's shadow follow box before any pane renders
-    this.updateShadowFocus(dt);
+    this.updateShadowFocus(this.realDt);
     // ONE shadow map redraw per frame at most, and only when something that
     // casts shadows actually moved (see updateShadowFocus): just the donor
     // pane's render call marks the map dirty, every other pane samples the

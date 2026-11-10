@@ -16,6 +16,7 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1400, height: 820 } });
 await page.addInitScript(() => { (window as any).__name = (fn: unknown) => fn; });
 page.on('pageerror', (e) => console.log('PAGEERROR:', String(e)));
+page.on('console', (m) => console.log('PAGE:', m.text()));
 
 await page.goto(`http://localhost:${port}/`);
 await page.waitForFunction('window.__lbw !== undefined', null, { timeout: 20000 });
@@ -77,7 +78,10 @@ await page.evaluate(() => {
   const st = (window as any).__stage;
   const { cx, cz, G } = st;
   // camera sits down-sun of the staging and looks up-sun
-  const aim = { eye: [cx - 8.5, G + 5.2, cz + 8.5], look: [cx + 2.5, G + 1.4, cz - 2.5] };
+  // parked 'day' puts the lit ball on the (−x, +z) horizon: stand on the
+  // opposite corner and look into the sun, so the wall/tower shadows run
+  // straight towards the camera
+  const aim = { eye: [cx + 11.5, G + 5.6, cz + 4.0], look: [cx - 2.0, G + 0.6, cz - 1.5] };
   (window as any).__cam = aim;
   const lp = game.players[0];
   const orig = lp.update.bind(lp);
@@ -111,8 +115,9 @@ await shoot('shadowsoff', 3200);
 await page.evaluate(() => {
   const st = (window as any).__stage;
   const { cx, cz, G } = st;
-  (window as any).__cam.eye = [cx - 11.5, G + 1.7, cz + 9.5];
-  (window as any).__cam.look = [cx - 4.5, G - 0.4, cz + 3.2];
+  // low across the pond, looking at the sun: glint band + wave normals
+  (window as any).__cam.eye = [cx - 0.5, G + 2.6, cz + 0.0];
+  (window as any).__cam.look = [cx - 5.5, G - 0.2, cz + 3.5];
 });
 await shoot('pond');
 
@@ -125,5 +130,22 @@ await page.evaluate(() => {
   (window as any).__cam.look = [cx + 2.5, G + 1.4, cz - 2.5];
 });
 await shoot('night', 3600);
+
+// morning: un-park the clock and fast-forward it by driving sky.update with
+// big dts (phase rides dt/DAY_SECONDS) to a bright ~0.15 — high enough sun
+// for a crisp, hard-edged shadow, low enough for a long one
+await page.evaluate(() => {
+  const g = (window as any).__lbw.game;
+  const st = (window as any).__stage;
+  const { cx, cz, G } = st;
+  g.setDayMode('auto');
+  const cam = g.players[0].camera;
+  // boot phase 0.35 + 22·(28/720) = 1.205 → 0.205: full-morning sunlight
+  for (let k = 0; k < 22; k++) (g as any).skyEnv.update(28, cam);
+  (window as any).__cam.eye = [cx - 11.5, G + 5.2, cz - 6.0];
+  (window as any).__cam.look = [cx + 3.0, G + 0.8, cz + 3.0];
+  console.log('phase now', (window as any).__lbw.dayPhase().toFixed(3));
+});
+await shoot('morning', 3200);
 
 await browser.close();
