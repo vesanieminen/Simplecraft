@@ -416,6 +416,7 @@ Grown-ups control the sky (*Start → 🧑 Grown-Ups*):
 |---|---|
 | **🌦️ Weather** | Sometimes (a few minutes of dry, maybe a short shower) · Never · Always rain · Always snow |
 | **☀️ Day & Night** | Day and night (the sun circles ~12 real minutes) · Always day · Always night · No sun or moon |
+| **🌒 Shadows** | On · Off — the sun and moon throw blocky shadows; Off is the gentle choice for old tablets |
 
 Both choices are saved on the tablet, and a parked sun parks instantly —
 bedtime stories at perpetual sunset, or a rainstorm that never stops,
