@@ -210,6 +210,17 @@ export class Animal {
     shadow.position.y = 0.02;
     g.add(shadow);
 
+    // real sun shadows: the critter shades the ground and gets shaded by trees.
+    // The blob decal under its feet is a fake contact shadow, so it stays out.
+    g.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh) {
+        o.castShadow = true;
+        o.receiveShadow = true;
+      }
+    });
+    shadow.castShadow = false;
+    shadow.receiveShadow = false;
+
     this.group = g;
     this.group.position.copy(this.pos);
     this.timer = Math.random() * 3;

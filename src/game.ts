@@ -37,7 +37,8 @@ import { PlayerEntity } from './players/playerEntity';
 import { AVATAR_COLORS, AVATAR_MODELS, modelDef, NICKNAMES } from './players/avatar';
 import { ChunkMeshManager } from './render/chunkMeshes';
 import { SandFalls } from './render/sandFalls';
-import { createSky, SKY_CLEAR, SKY_FAR, SkyEnv } from './render/sky';
+import { SunState } from './render/shaders';
+import { createSky, SHADOW_TEXEL, SKY_CLEAR, SKY_FAR, SkyEnv } from './render/sky';
 import { SplitLayout, ViewportManager } from './render/viewportManager';
 import { Hud } from './ui/hud';
 import {
@@ -112,6 +113,14 @@ export class Game {
   weatherMode: WeatherMode = 'auto';
   dayMode: DayMode = 'auto';
   chestsAllowed = true;
+  /**
+   * The Grown-Ups "Shadows" switch (default ON, persisted). Off = no shadow
+   * pass at all and unshadowed materials — the older tablets' escape hatch.
+   */
+  shadowsEnabled = true;
+  /** Shadow filter quality, auto-set once at boot from the GPU: a real one
+   *  gets soft PCF on a 2048² map, software GL crisp single-tap on 1024². */
+  shadowQuality: 'soft' | 'fast' = 'soft';
   /** what falls from the sky and how hard — pure, testable (core/weather.ts) */
   readonly weather = new WeatherClock();
   /** which weather the rain hiss carries right now (null = quiet) */
@@ -122,6 +131,27 @@ export class Game {
   private lastBucketHint = -10;
   /** the camera the last frame rendered through — the sky sits on it */
   private renderCam: THREE.Camera | null = null;
+  /** the sky's shadow-casting light — the game steers its map redraw (one
+   *  per frame, from the donor pane: see pickShadowDonor) */
+  private sunLight!: THREE.DirectionalLight;
+  /** True when this frame's pane renders should redraw the shadow map. */
+  private shadowWantRedraw = false;
+  /** voxel-change counter; a new value means the baked map is stale */
+  private shadowWorldEpoch = 0;
+  private lastShadowWorldEpoch = -1;
+  /** mesh-structure changes (chunk remeshes, avatars, animals): same deal */
+  private shadowMeshEpoch = 0;
+  private lastShadowMeshEpoch = -1;
+  /** redraw at least this often (WALL seconds), so the sun drift catches up */
+  private static readonly SHADOW_HEARTBEAT = 1.0;
+  /** keep baking this long (wall seconds) after the world edits, so chunks
+   *  that remesh under the per-frame budget cast shadows as soon as they land */
+  private static readonly SHADOW_EDIT_WINDOW = 1.0;
+  private shadowHeartbeat = 0;
+  private shadowEditUntil = -1;
+  private realDt = 0.016;
+  private wallNow = 0;
+  private lastShadowFocus = new THREE.Vector3(0, 1e3, 0);
   private time = 0;
   private sparkleBlocks = new Set<number>();
   dynamite!: DynamiteManager;
@@ -184,6 +214,18 @@ export class Game {
     // the saved sky settings (if any) decide what the first frame looks like
     this.skyEnv.setDayMode(this.dayMode);
     if (this.weather.kind) this.skyEnv.setWeather(this.weather.kind, this.weather.intensity);
+
+    // shadows: one sun map (the sky's DirectionalLight owns it). The game
+    // redraws it event-driven — only from the donor pane, and only when
+    // something that casts a shadow actually moved (see updateShadowFocus).
+    // Quality is auto-set from the GPU (see setShadowQuality): a real GPU
+    // gets the soft 2048² map, software GL (CI, old tablets) gets crisp
+    // single-tap shadows — nine filtered taps per pixel would melt it.
+    // updateShadowFocus below just steers the follow box to the players.
+    this.sunLight = this.skyEnv.getSunLight();
+    this.shadowQuality = Game.detectShadowQuality(this.renderer);
+    this.setShadowQuality(this.shadowQuality);
+    this.applyShadowSettings();
     this.particles = new ParticleSystem(this.scene);
 
     // sparkle blocks placed by players emit drifting sparkles
@@ -236,6 +278,7 @@ export class Game {
     this.world.onCellChanged = (x, y, z) => {
       this.sand.notify(x, y, z);
       this.water.notify(x, y, z);
+      this.shadowWorldEpoch++; // the baked shadow map just went stale
     };
 
     // ---- input ----
@@ -507,6 +550,7 @@ export class Game {
         toggleCamera: () => { p.firstPerson = !p.firstPerson; },
         cycleCostume: () => {
           const m = p.entity.cycleModel();
+          this.shadowMeshEpoch++; // the baked map holds the old costume's shape
           const def = modelDef(m);
           this.ui.toast(`${p.entity.name} is now a ${def.name}! ${def.icon}`);
         },
@@ -567,6 +611,15 @@ export class Game {
               this.ui.toast(this.chestsAllowed
                 ? 'Treasure chests unlocked — a few may hide in the next world'
                 : 'Treasure chests hidden', 2600);
+            },
+            shadows: () => (this.shadowsEnabled ? 'On' : 'Off'),
+            toggleShadows: () => {
+              this.shadowsEnabled = !this.shadowsEnabled;
+              this.applyShadowSettings();
+              this.saveSettings();
+              this.ui.toast(this.shadowsEnabled
+                ? 'Sun shadows on — long golden afternoons 🌤️'
+                : 'Sun shadows off — a bit faster on older tablets', 2600);
             },
           },
           );
@@ -1257,6 +1310,158 @@ export class Game {
     this.skyEnv.setDayMode(mode);
   }
 
+  /** where the sun (or moon) is right now — direction, height, warmth, colour */
+  sunInfo(): SunState {
+    return this.skyEnv.sunInfo();
+  }
+
+  /** Apply the Grown-Ups "Shadows" switch; material programs recompile once. */
+  /**
+   * Which shadow filter this GPU can afford: soft PCF costs nine depth taps
+   * per shaded pixel — hundreds of ms on a software rasteriser (measured on
+   * CI's own runner), nothing on any real GPU. Only 'soft' on an unambiguous
+   * hardware renderer string; anything unknown or software-ish gets 'fast'.
+   */
+  static resolveShadowQuality(rendererName: string): 'soft' | 'fast' {
+    if (/swiftshader|llvmpipe|softpipe|basic render|software/i.test(rendererName)) return 'fast';
+    return /apple|metal|nvidia|geforce|quadro|rtx|gtx|radeon|ryzen|intel|uhd|arc |adreno|mali|powervr/i
+      .test(rendererName) ? 'soft' : 'fast';
+  }
+
+  /** the same call, reachable from tests/debug without a renderer */
+  shadowQualityFor(rendererName: string): 'soft' | 'fast' {
+    return Game.resolveShadowQuality(rendererName);
+  }
+
+  /** Read the GPU's own name and pick 'soft' or 'fast' to match. */
+  private static detectShadowQuality(renderer: THREE.WebGLRenderer): 'soft' | 'fast' {
+    const gl = renderer.getContext();
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    const name = ext
+      ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) ?? '')
+      : String(gl.getParameter(gl.RENDERER) ?? '');
+    return Game.resolveShadowQuality(name);
+  }
+
+  /**
+   * Switch shadow filter quality: 'soft' = PCF-soft on a 2048² map (real
+   * GPUs — smooth edges, the filter is free on hardware), 'fast' = crisp
+   * single-tap on 1024² (software GL — nine taps per pixel is hundreds of
+   * ms there; blocky edges suit the art anyway). Every material is poked
+   * once: the filter is baked into the program cache key.
+   */
+  setShadowQuality(q: 'soft' | 'fast'): void {
+    this.shadowQuality = q;
+    this.renderer.shadowMap.type = q === 'soft' ? THREE.PCFSoftShadowMap : THREE.BasicShadowMap;
+    const size = q === 'soft' ? 2048 : 1024;
+    const sh = this.sunLight?.shadow;
+    if (sh && sh.mapSize.x !== size) {
+      sh.mapSize.set(size, size);
+      if (sh.map) {
+        sh.map.dispose();
+        sh.map = null;
+      }
+    }
+    if (sh) sh.needsUpdate = true;
+    this.recompileShadowPrograms();
+  }
+
+  /** three bakes shadow state into every program's cache key: poke them all */
+  private recompileShadowPrograms(): void {
+    const seen = new Set<THREE.Material>();
+    this.scene.traverse((o) => {
+      const m = (o as THREE.Mesh).material;
+      if (!m) return;
+      for (const one of Array.isArray(m) ? m : [m]) {
+        if (!seen.has(one)) {
+          seen.add(one);
+          one.needsUpdate = true;
+        }
+      }
+    });
+  }
+
+  private applyShadowSettings(): void {
+    if (this.renderer.shadowMap.enabled === this.shadowsEnabled) return;
+    this.renderer.shadowMap.enabled = this.shadowsEnabled;
+    if (this.shadowsEnabled && this.sunLight) {
+      // flipping the switch back on: bake a fresh map right away
+      this.sunLight.shadow.needsUpdate = true;
+      this.shadowHeartbeat = Game.SHADOW_HEARTBEAT;
+    }
+    this.recompileShadowPrograms();
+  }
+
+  /**
+   * Point the shadow follow box at this frame's players (or the idle camera
+   * while nobody has joined). The sky lerps it and snaps it to the map's
+   * texel grid, so walking never makes the shadows swim. The box is always
+   * followed — even while shadows are off — so flipping the switch back on
+   * never reveals a stale box far behind the kids.
+   */
+  private updateShadowFocus(realDt: number): void {
+    if (this.players.length > 0) {
+      let x = 0, y = 0, z = 0;
+      for (const p of this.players) {
+        x += p.entity.pos.x; y += p.entity.pos.y; z += p.entity.pos.z;
+      }
+      const n = this.players.length;
+      this.skyEnv.focusShadow(x / n, y / n, z / n);
+    } else {
+      const c = this.renderCam ?? this.idleCamera;
+      this.skyEnv.focusShadow(c.position.x, Math.max(4, c.position.y - 8), c.position.z);
+    }
+
+    // When is a map redraw actually worth its cost (tens of ms on CI's
+    // software GL)? Only when something that casts a shadow moved: a kid is
+    // moving (their own shadow must ride along, and the follow box crawls
+    // with them), voxels changed under the box (and for a beat after, since
+    // remeshing is budgeted over frames), the follow box slid a full texel,
+    // or the sun-drift heartbeat came due. All timers tick on WALL seconds —
+    // game time crawls when frames are slow, and a slow world is exactly
+    // when a stale shadow map stings most. Idle menus then bake ~1×/s only.
+    let moving = false;
+    for (const p of this.players) {
+      const v = p.entity.vel;
+      if (v.x * v.x + v.y * v.y + v.z * v.z > 0.16) {
+        moving = true;
+        break;
+      }
+    }
+    const focusMoved = this.players.length > 0
+      && this.skyEnv.shadowFocusPos().distanceToSquared(this.lastShadowFocus)
+        > SHADOW_TEXEL * SHADOW_TEXEL;
+    const worldChanged =
+      this.shadowWorldEpoch !== this.lastShadowWorldEpoch ||
+      this.shadowMeshEpoch !== this.lastShadowMeshEpoch;
+    if (worldChanged) this.shadowEditUntil = this.wallNow + Game.SHADOW_EDIT_WINDOW;
+    this.shadowHeartbeat += realDt;
+    const due = this.shadowHeartbeat >= Game.SHADOW_HEARTBEAT;
+    const want = this.shadowsEnabled
+      && (moving || focusMoved || worldChanged || due || this.wallNow < this.shadowEditUntil);
+    if (want) {
+      this.shadowHeartbeat = 0;
+      this.lastShadowFocus.copy(this.skyEnv.shadowFocusPos());
+      this.lastShadowWorldEpoch = this.shadowWorldEpoch;
+    }
+    this.shadowWantRedraw = want;
+  }
+
+  /**
+   * Which pane's render call redraws the sun's shadow map this frame: the
+   * first camera whose layer view takes in every avatar (third-person panes
+   * and the welcome/join cameras always do). Before the map exists at all it
+   * is pane 0 by necessity — someone has to bake it first.
+   */
+  private pickShadowDonor(cameras: THREE.Camera[]): number {
+    if (!this.sunLight.shadow.map) return 0; // nothing baked yet: pane 0 bakes
+    for (let i = 0; i < cameras.length; i++) {
+      const lp = this.players.find((p) => p.camera === cameras[i]);
+      if (!lp || lp.showOwnBody) return i;
+    }
+    return 0;
+  }
+
   /**
    * Start (or stop) falling weather right away — the grown-up menu cycles the
    * mode through the clock, and this is the immediate door the tests use.
@@ -1349,6 +1554,7 @@ export class Game {
       if (!raw) return;
       const s = JSON.parse(raw) as {
         layout?: string; muted?: boolean; chests?: boolean; weather?: string; day?: string;
+        shadows?: boolean;
       };
       if (s.layout === 'auto' || s.layout === 'horizontal' || s.layout === 'vertical' || s.layout === 'grid2x2') {
         this.layout = s.layout;
@@ -1360,6 +1566,7 @@ export class Game {
         this.weather.setMode(s.weather);
       }
       if (s.day === 'auto' || s.day === 'day' || s.day === 'night' || s.day === 'none') this.dayMode = s.day;
+      if (typeof s.shadows === 'boolean') this.shadowsEnabled = s.shadows;
     } catch { /* corrupted settings: defaults win */ }
   }
 
@@ -1368,6 +1575,7 @@ export class Game {
       localStorage.setItem(this.settingsKey, JSON.stringify({
         layout: this.layout, muted: this.audio.muted,
         chests: this.chestsAllowed, weather: this.weatherMode, day: this.dayMode,
+        shadows: this.shadowsEnabled,
       }));
     } catch { /* storage unavailable */ }
   }
@@ -1661,7 +1869,9 @@ export class Game {
 
   private loop = (now: number): void => {
     this.rafId = requestAnimationFrame(this.loop);
-    const dt = Math.min(0.05, (now - (this.lastNow ?? now)) / 1000);
+    this.realDt = (now - (this.lastNow ?? now)) / 1000;
+    this.wallNow = now / 1000;
+    const dt = Math.min(0.05, this.realDt);
     this.lastNow = now;
     this.time += dt;
 
@@ -1720,6 +1930,9 @@ export class Game {
     // water drift: the tiling wave sheet slides a touch every frame so a pond
     // never freezes into a still painting
     this.chunks.tickWater(dt);
+    // ...and the shader kit's shared uniforms (time, sun, haze colour) move
+    // with it — one uniform set, no program rebuilds, ever
+    if (this.scene.fog) this.chunks.tickShaders(dt, this.skyEnv.sunInfo(), this.scene.fog.color);
     this.chunks.update(4);
 
     if (!this.frozen && this.players.length > 0) {
@@ -1760,7 +1973,18 @@ export class Game {
       cameras.push(this.idleCamera);
     }
     this.applyAvatarLayers(cameras);
-    this.viewportMgr.render(this.renderer, this.scene, cameras);
+    // steer the sun's shadow follow box before any pane renders
+    this.updateShadowFocus(this.realDt);
+    // ONE shadow map redraw per frame at most, and only when something that
+    // casts shadows actually moved (see updateShadowFocus): just the donor
+    // pane's render call marks the map dirty, every other pane samples the
+    // map it just baked (at most one frame stale). A first-person kid's own
+    // body is the one thing a donor-less frame can skip — nobody sees
+    // through that camera anyway.
+    const donor = this.shadowsEnabled ? this.pickShadowDonor(cameras) : -1;
+    this.viewportMgr.render(this.renderer, this.scene, cameras, (i) => {
+      if (i === donor && this.shadowWantRedraw) this.sunLight.shadow.needsUpdate = true;
+    });
 
     // HUD updates
     for (let i = 0; i < this.players.length; i++) {

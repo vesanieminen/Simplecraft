@@ -27,8 +27,17 @@ export class ViewportManager {
     for (const cam of []) void cam;
   }
 
-  /** render every local player's camera into its own pane */
-  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, cameras: THREE.Camera[]): void {
+  /**
+   * render every local player's camera into its own pane. `onPane` fires
+   * right before each pane's render call — the game uses it to mark the sun's
+   * shadow map for exactly one redraw (the donor pane), not one per pane.
+   */
+  render(
+    renderer: THREE.WebGLRenderer,
+    scene: THREE.Scene,
+    cameras: THREE.Camera[],
+    onPane?: (i: number) => void,
+  ): void {
     const n = cameras.length;
     if (n === 0) return;
     renderer.autoClear = false;
@@ -46,6 +55,7 @@ export class ViewportManager {
       renderer.setScissor(r.x, this.height - r.y - r.h, r.w, r.h);
       renderer.setScissorTest(true);
       renderer.clear(true, true, true);
+      onPane?.(i);
       renderer.render(scene, cam);
     }
     renderer.setScissorTest(false);

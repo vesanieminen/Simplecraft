@@ -152,7 +152,8 @@ event. Renaming a storage key orphans the family's existing saves.
   Leave / Waiting-Players rows, the water-jump fix, the slab / real-stairs /
   treasure-chest blocks, and **this branch's whole set**: the **LT = pet · RT =
   build · X = break** trigger remap, the 🪣 bucket on both triggers, the new
-  Weather / Day & Night / Treasure-Chests rows (Back is row 9 now) and the
+  Weather / Day & Night / Treasure-Chests / **Shadows** rows (Back is row 10
+  now) and the
   crouch **pose**) still owe the couch a turn.
 - Ladders (`LADDER=40`, atlas cell `ATLAS_LADDER=28`→count 29, `drawLadder`):
   **not solid, not opaque** (you walk INTO the cell — never write a test that
@@ -366,9 +367,9 @@ event. Renaming a storage key orphans the family's existing saves.
   Grown-Ups row **🧰 Treasure Chests** (`chests`/`toggleChests`) hides the
   palette entry *and* refuses placement (`chestsAllowed` in `lbw-settings`);
   hidden worlds still contain terrain chests. The new GrownUps rows
-  (Weather 6, Day & Night 7, Treasure Chests 8) sit **after** Waiting Players
-  so row pins 0–5 hold; **Back is now index 9** — `selectRow(6)` would hit
-  Weather. Chests still never appear in `FAVORITES`.
+  (Weather 6, Day & Night 7, Treasure Chests 8, **Shadows 9**) sit **after**
+  Waiting Players so row pins 0–5 hold; **Back is now index 10** —
+  `selectRow(6)` would hit Weather. Chests still never appear in `FAVORITES`.
 - An opened chest opens **only at the top** (Nov 2026 user complaint: the old
   one painted an open lid down its SIDES). `CHEST_OPEN` keeps CHEST's
   `sideAtlasCell`/`bottomAtlasCell` and both use `CHEST_HEIGHT` — from the
@@ -457,6 +458,34 @@ event. Renaming a storage key orphans the family's existing saves.
   stop via `rainLoopStop()`), thunder only on heavy rain every ≥9 s; both log
   `weather:rain…/weather:thunder` into `AudioKit.recent` (that ring must not
   overflow the 'sounds carry the material' test — it samples 25).
+- **Shadows & shader polish**: `src/render/shaders.ts` owns the GLSL kit
+  (`ShaderKit` + `patchWaterSurface` / `patchTerrainFinish`) — `onBeforeCompile`
+  on the three shared chunk materials with uniforms **shared by reference**, so
+  animation is a per-frame `chunks.tickShaders(dt, sunInfo(), fogColor)` and
+  never a program rebuild. `customProgramCacheKey` keeps the variants distinct.
+  The shadow caster is the sky's `DirectionalLight` (`getSunLight()`); its
+  direction **must stay the visible ball's direction** (`skyEnv.sunBallDir()`),
+  which is what the e2e pins — an earlier hand-written azimuth disagreed with
+  the drawn sun and the user noticed. `sunInfo().dir` is that vector with the
+  elevation floored (~11°) so the ortho frustum can hold the shadow.
+  Traps: `dir.shadow.autoUpdate = false` (three would re-bake once **per
+  pane**), and the map is marked dirty only for a "donor" pane —
+  `viewportMgr.render(…, onPane)` — because `shadowMap.render()` cannot be
+  called outside `renderer.render()` (three's `currentRenderState` is null
+  there and it throws mid-frame, blanking the world). Redraws are **wall-clock**
+  driven: `SHADOW_HEARTBEAT` 1 s, `moving`/`focusMoved` triggers, and a 1 s
+  `SHADOW_EDIT_WINDOW` after every voxel change so budgeted remeshes still land
+  inside a bake — a game-time beat goes stale exactly when the world is busy.
+  Type is auto-set by `Game.setShadowQuality` — `PCFSoftShadowMap` on a 2048²
+  map for real GPUs, `BasicShadowMap` on 1024² for software GL (nine taps per
+  pixel cost hundreds of ms on CI's software rasteriser; the e2e pins the
+  detector against real renderer strings). Shadows are gated by
+  the Grown-Ups 🌒 row (`shadowsEnabled`, persisted in `lbw-settings`);
+  toggling must poke `needsUpdate` on every material (shadow-ness is baked
+  into the program cache key). The e2e asserts the look by diffing screenshots
+  of the same frame with the row flipped — chunk remeshing is budgeted, so the
+  census waits 25 frames and stays inside one `test()` (a reload would reset
+  the parked clock). `scripts/shadow-shots.ts` shoots the eyeball set.
 - ⚠️ **This worktree has twice silently reverted working-tree files mid-session**
   (game.ts, sky.ts, main.ts, tests…): commit early, commit often, and re-check
   `git status`/`git log` after any mysterious failure.

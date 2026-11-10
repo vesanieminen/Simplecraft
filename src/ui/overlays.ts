@@ -462,6 +462,9 @@ export interface GrownUpActions {
   /** whether kids may place treasure chests from the palette */
   chests: () => string;
   toggleChests: () => void;
+  /** the sun's shadow map (on/off) — Grown-Ups escape hatch for older tablets */
+  shadows: () => string;
+  toggleShadows: () => void;
 }
 
 export class GrownUpsMenu extends Overlay {
@@ -517,6 +520,12 @@ export class GrownUpsMenu extends Overlay {
         label: 'Treasure Chests',
         val: () => actions.chests(),
         fn: () => { actions.toggleChests(); },
+      },
+      {
+        icon: '🌒',
+        label: 'Shadows',
+        val: () => actions.shadows(),
+        fn: () => { actions.toggleShadows(); },
       },
       { icon: '◀️', label: 'Back', fn: () => this.close() },
     ];

@@ -424,10 +424,19 @@ Grown-ups control the sky (*Start → 🧑 Grown-Ups*):
 |---|---|
 | **🌦️ Weather** | Sometimes (a few minutes of dry, maybe a short shower) · Never · Always rain · Always snow |
 | **☀️ Day & Night** | Day and night (the sun circles ~12 real minutes) · Always day · Always night · No sun or moon |
+| **🌒 Shadows** | On · Off — the sun and moon throw blocky shadows; Off is the gentle choice for old tablets |
 
 Both choices are saved on the tablet, and a parked sun parks instantly —
 bedtime stories at perpetual sunset, or a rainstorm that never stops,
 whichever the family wants.
+
+![The wall and the tower throw long blocky moon-shadows across the meadow at dusk](docs/screenshots/shadows.jpg)
+
+Everything above also lights the world: **shadows** are on by default, so
+cliffs, walls, towers, animals and kids all shade the meadow — with a
+soft moon shadow through the night. The sharpness suits itself to the
+machine: smooth PCF shadows on any real graphics chip, crisp blocky ones
+on old tablets, and the 🌒 Shadows row turns them off entirely.
 
 ## Treasure chests — and the grown-up switch 🔒
 
