@@ -4,17 +4,20 @@
  *   rm -rf /tmp/opencode/lbw-shot-world
  *   NODE_ENV=development PORT=3100 LBW_DATA_DIR=/tmp/opencode/lbw-shot-world npx tsx server/index.ts &
  *   npx tsx scripts/water-slope-shot.ts [out-prefix]
+ * The server port follows PORT (default 3100) so several of these can run at
+ * once against their own world directories.
  */
 import { chromium } from '@playwright/test';
 
 const out = process.argv[2] ?? '/tmp/opencode/waterslope';
+const port = process.env.PORT ?? '3100';
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 await page.addInitScript(() => { (window as any).__name = (fn: unknown) => fn; });
 page.on('pageerror', (e) => console.log('PAGEERROR:', String(e)));
 
-await page.goto('http://localhost:3100/?seed=4242&world=0');
+await page.goto(`http://localhost:${port}/?seed=4242&world=0`);
 await page.waitForFunction('window.__lbw !== undefined', null, { timeout: 20000 });
 await page.evaluate(() => {
   const pad = (window as any).__lbw.addVirtualPad('xbox');

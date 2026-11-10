@@ -6,12 +6,20 @@
  *    step shallower per cell. `MAX_WATER_LEVEL` (7) is that reach — the tidy
  *    ring a flood stops at, not a runaway bound.
  *  • Surface heights are the nine steps of the big game: a source (and a
- *    level-0 plunge) stands 8/9, and travelling water loses exactly one ninth
- *    per cell of reach — level 7 draws 1/9. Submerged cells and falling
+ *    full-strength plunge) stands 8/9, and travelling water loses exactly one
+ *    ninth per cell of reach — level 7 draws 1/9. Submerged cells and falling
  *    columns draw full. (`waterSurfaceHeight`)
- *  • A cell with nothing under it does not lean — it falls STRAIGHT DOWN and
- *    keeps its depth, so a waterfall lands full-strength and its pool runs the
- *    full seven again from the base. A source over a hole stays put and pours.
+ *  • A cell with nothing under it does not lean — it falls STRAIGHT DOWN, the
+ *    whole drop in one step, and a fall costs nothing: the drop lands at FULL
+ *    STRENGTH, so a waterfall's pool runs the full seven again from where the
+ *    water lands and a stream that steps down a hillside travels much farther
+ *    than one that stays on the flat. A source over a hole stays put and pours.
+ *  • Sideways spread is steered by the big game's flow weights: before it
+ *    commits, a cell looks `DROP_SEARCH` cells of flat walking for a way down
+ *    in each direction and only flows the ways that reach a drop soonest. A
+ *    spring near an edge drains to it as a one-cell-wide stream instead of
+ *    fanning out over every shelf; on flat ground with no drop in reach it
+ *    spreads its seven cells symmetrically, as it always did.
  *  • Two sources FEED A THIRD: a flow cell with two source blocks beside it —
  *    or one beside and one above — has enough supply to become a source itself.
  *    That is the 2×2 scoop and the infinite-water farm.
@@ -23,12 +31,12 @@
  * The sim is event-driven through `World.onCellChanged`: only cells near a
  * change get re-evaluated, so the sea sits perfectly still until somebody
  * digs into it. Each step re-reads every dirty cell's depth from the best
- * supply it can see — a neighbour strictly deeper than itself, or water
- * falling in from above — and wakes its neighbours when that depth changes.
- * Because "strictly deeper" is the only thing that holds a cell up, a group of
- * flow cells can never agree to support each other: the moment the chain to a
- * source goes, the shallowest cell fails and the failure walks back down the
- * channel towards where the water came from.
+ * supply it can see — a neighbour strictly deeper than itself, or a stream
+ * falling into it from above — and wakes its neighbours when that depth
+ * changes. Because "strictly deeper" is the only thing that holds a cell up,
+ * a group of flow cells can never agree to support each other: the moment the
+ * chain to a source goes, the shallowest cell fails and the failure walks back
+ * down the channel towards where the water came from.
  */
 
 import { AIR, isCrossBlock, isWaterId, solidHeightOf, WATER, WATER_FLOW } from './blocks';
@@ -42,10 +50,13 @@ function unidx(i: number): [number, number, number] {
   return [x, rest - z * WORLD_SY, z];
 }
 
+/** the four directions water can run sideways */
+const SIDES = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const;
+
 /**
  * How far travelling water reaches from its supply: a source is level 0, the
  * cells it touches are level 1 … the outermost ring is level 7, and level 8
- * never gets written. Falling water keeps its level, so the seven starts
+ * never gets written. A fall costs nothing (see `fall`), so the seven starts
  * again from where a waterfall lands — exactly as in the big game.
  */
 export const MAX_WATER_LEVEL = 7;
@@ -55,6 +66,12 @@ const STEP_SECONDS = 0.2;
 const STEP_BUDGET = 240;
 /** how many cells deep one step may propagate a drain (see `drain`) */
 const CASCADE_CELLS = 4;
+/** how far sideways a cell looks, in cells of flat walking, for a way down */
+const DROP_SEARCH = 4;
+/** the weight a direction carries when no drop is anywhere near (the big game's 1000) */
+const NO_WAY_DOWN = 1000;
+/** how many falls one step may chain straight through (a long staircase) */
+const FALL_CHAIN = 24;
 
 /**
  * How high the water in a cell is drawn, 0..1 of the cell — the nine steps of
@@ -83,8 +100,21 @@ export class WaterFlow {
    * `spread`). Cleared as soon as a cell comes to rest on solid ground.
    */
   private pouring = new Set<number>();
+  /**
+   * How far the way-down search found a drop to walk to, per cell, for the
+   * step in hand — terrain only moves between steps, so one cache per step.
+   */
+  private drops = new Map<number, number[]>();
   /** how deep into a drain cascade this step currently is (see `drain`) */
   private cascade = 0;
+  /** how many falls this step has chained straight through (see `FALL_CHAIN`) */
+  private chaining = 0;
+  /**
+   * Flow steps taken since the world was loaded. The e2e measures how long a
+   * flood takes in *sim* steps rather than wall clock — headless Chromium runs
+   * game time at roughly half speed, so a `waitForTimeout` guess is meaningless.
+   */
+  steps = 0;
   private acc = 0;
 
   constructor(private world: World) {}
@@ -93,7 +123,18 @@ export class WaterFlow {
   reset(): void {
     this.dirty.clear();
     this.pouring.clear();
+    this.drops.clear();
     this.acc = 0;
+    this.steps = 0;
+  }
+
+  /**
+   * Is this wet cell caught in a drop — water that is on its way down, so it
+   * draws as a full cell and never leans sideways? The e2e uses it to tell a
+   * waterfall's stream (fine) from water that piled up and stood there (not).
+   */
+  isPouring(x: number, y: number, z: number): boolean {
+    return this.pouring.has(idx(x, y, z));
   }
 
   /** how much of a cell is water: -1 dry, 0 deep … MAX_WATER_LEVEL puddle */
@@ -133,7 +174,10 @@ export class WaterFlow {
    */
   private step(): void {
     if (this.dirty.size === 0) return;
+    this.steps++;
     this.cascade = 0;
+    this.chaining = 0;
+    this.drops.clear(); // the terrain under the flood may have moved
     const batch: number[] = [];
     for (const i of this.dirty) {
       batch.push(i);
@@ -149,6 +193,7 @@ export class WaterFlow {
    *   which is how a falling column knows it may keep falling through it.
    */
   private setFlow(x: number, y: number, z: number, level: number): boolean {
+    if (!this.world.inBounds(x, y, z)) return false; // never write phantoms off the map's edge
     const i = idx(x, y, z);
     const cur = this.world.get(x, y, z);
     if (cur === WATER) return false; // a source is always deeper than any flow
@@ -178,7 +223,7 @@ export class WaterFlow {
     // dry line visibly travels rather than teleporting.
     if (this.cascade >= CASCADE_CELLS) return;
     this.cascade++;
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+    for (const [dx, dz] of SIDES) {
       const nx = x + dx, nz = z + dz;
       if (this.world.get(nx, y, nz) === WATER_FLOW) this.evaluate(idx(nx, y, nz));
     }
@@ -209,13 +254,16 @@ export class WaterFlow {
     // Best supply: a horizontally adjacent cell that is DEEPER than us (only a
     // strictly deeper neighbour can hold water up — that is what stops a pond
     // from propping itself up when its spring goes away, and what makes a
-    // cut-off flood collapse from the shallow end inward), or water falling in
-    // from above, which keeps its depth.
+    // cut-off flood collapse from the shallow end inward), or a stream falling
+    // in from above. A fall lands at full strength, so the cell it drops into
+    // is held up at depth 0: that is the "depth value 0" of the big game's
+    // block below a flow, and the reason a waterfall's pool starts its seven
+    // cells over again instead of trickling out two cells past the cliff foot.
     const cur = this.world.waterLevel.get(i) ?? MAX_WATER_LEVEL;
     let best = MAX_WATER_LEVEL + 1;
     const above = this.levelAt(x, y + 1, z);
-    if (above >= 0) best = Math.min(best, above); // falling water keeps its depth
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+    if (above >= 0) best = Math.min(best, this.pouring.has(idx(x, y + 1, z)) ? 0 : above);
+    for (const [dx, dz] of SIDES) {
       const l = this.levelAt(x + dx, y, z + dz);
       if (l >= 0 && l < cur) best = Math.min(best, l + 1);
     }
@@ -242,7 +290,7 @@ export class WaterFlow {
   private makesSource(x: number, y: number, z: number): boolean {
     if (!this.supported(x, y, z)) return false;
     let side = 0;
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+    for (const [dx, dz] of SIDES) {
       if (this.world.get(x + dx, y, z + dz) === WATER) side++;
     }
     if (side >= 2) return true;
@@ -263,22 +311,28 @@ export class WaterFlow {
     return isWaterId(below) || solidHeightOf(below) > 0;
   }
 
+  /** somewhere water could go: empty, a plant it can wash over, or its own channel */
+  private flowable(x: number, y: number, z: number): boolean {
+    if (!this.world.inBounds(x, y, z)) return false;
+    const id = this.world.get(x, y, z);
+    return isWaterId(id) || id === AIR || isCrossBlock(id);
+  }
+
   /**
-   * Where water goes from a cell `level` deep. Two rules, and they are the
+   * Where water goes from a cell `level` deep. Three rules, and they are the
    * whole shape language:
    *
-   *   1. a cell with something under it spreads SIDEWAYS, one step shallower
-   *      (to a cap of seven cells from the supply), and only into neighbours
-   *      that have something under them too;
-   *   2. a cell with nothing under it does not lean — it falls STRAIGHT DOWN,
-   *      keeping its depth, so the pool at the bottom runs the full reach
-   *      again from where the water landed.
-   *
-   * That is the 90° the old version got wrong. It let a sheet spread into thin
-   * air beside every step of a hillside and hang there, so a flood on a slope
-   * drew as a diagonal stack of blue plates. Now a hillside gets a waterfall:
-   * the water runs along each flat until it runs out of ground, drops the whole
-   * way to the next flat, and runs from there.
+   *   1. a cell with nothing under it falls STRAIGHT DOWN, the whole drop in
+   *      one step, and lands at full strength — the pool runs the full reach
+   *      again from where the water lands;
+   *   2. a cell still caught in a drop goes down and nowhere else, which is
+   *      what keeps a waterfall one cell wide instead of a curtain;
+   *   3. everything else spreads SIDEWAYS, one step shallower (to a cap of
+   *      seven cells from the supply), and only towards the nearest way down
+   *      (see `flowWeights`) — so a hillside gets a narrow stream down the
+   *      fall rather than a shallow lake over every shelf. Reach only ever
+   *      holds water back on the flat: a thin cell perched beside a drop
+   *      still goes over it, because down outranks distance.
    */
   private spread(x: number, y: number, z: number, level: number): void {
     const i = idx(x, y, z);
@@ -292,37 +346,141 @@ export class WaterFlow {
     if (!this.supported(x, y, z) || this.pouring.has(i)) {
       // A source over a hole never moves: it stays full and pours from its
       // underside, the way a spring poured into a dug shaft does.
-      this.fall(x, this.world.get(x, y, z) === WATER ? y - 1 : y, z, level);
+      const landed = this.fall(x, this.world.get(x, y, z) === WATER ? y - 1 : y, z, level);
+      this.cascadeFall(x, landed, z);
       return;
     }
-    if (level >= MAX_WATER_LEVEL) return; // seven cells out is the reach, full stop
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+    const weights = this.flowWeights(x, y, z);
+    const best = Math.min(...weights);
+    for (let d = 0; d < SIDES.length; d++) {
+      if (weights[d] > best) continue; // the big game only flows the lowest-weight ways
+      const [dx, dz] = SIDES[d];
       const tx = x + dx, tz = z + dz;
-      if (this.supported(tx, y, tz)) this.setFlow(tx, y, tz, level + 1);
-      else this.fall(tx, y, tz, level + 1); // out of ground: over the edge, straight down
+      if (this.supported(tx, y, tz)) {
+        if (level >= MAX_WATER_LEVEL) continue; // reach, not terrain, ends a flood on the flat
+        this.setFlow(tx, y, tz, level + 1);
+      } else {
+        // out of ground: over the edge, straight down, and it runs again from
+        // wherever it comes to rest — the "great angle" the eye expects. The
+        // big game checks down before reach, so even the thin last cell of a
+        // reach pours off a cliff it happens to be sitting next to.
+        const landed = this.fall(tx, y, tz, level + 1);
+        this.cascadeFall(tx, landed, tz);
+      }
     }
   }
 
   /**
-   * A drop: fill a column from `y` down to wherever it finally finds ground,
-   * one falling cell per block so the waterfall draws as one continuous ribbon
-   * instead of a dotted line. Cells left in mid-air are marked as falling (see
-   * `spread`); the one that lands is not, so that is where a stream starts to
-   * spread out again.
+   * Let a fall that just landed start spreading in the SAME step, so a long
+   * staircase drains top to bottom in a couple of steps instead of one step
+   * per step. Bounded by `FALL_CHAIN`; anything deeper is already dirty and
+   * goes on the next step.
    */
-  private fall(x: number, y: number, z: number, level: number): void {
-    let fy = y;
-    while (fy > 1) {
-      if (!this.setFlow(x, fy, z, level)) break; // a wall, or a deeper source
+  private cascadeFall(x: number, y: number, z: number): void {
+    if (y <= 0 || this.chaining >= FALL_CHAIN) return;
+    if (this.pouring.has(idx(x, y, z))) return; // still mid-drop: nothing to spread
+    this.chaining++;
+    this.spread(x, y, z, this.levelAt(x, y, z));
+    this.chaining--;
+  }
+
+  /**
+   * A drop: fill a column from `start` down to wherever it finally finds
+   * ground, one falling cell per block so the waterfall draws as one
+   * continuous ribbon instead of a dotted line. Everything below the first
+   * cell lands at FULL strength (the big game gives the block under a flow a
+   * depth of 0), which is why a pool at the foot of a fall spreads its whole
+   * seven cells even when the stream that fed it was a thin trickle, and why
+   * a fall never leaves a tall stack of shallow water standing where the
+   * ground gave out. Cells left in mid-air are marked as falling (see
+   * `spread`); the one that lands is not, so that is where a stream starts to
+   * spread out again. A drop that meets water hands its strength to that
+   * surface, which is what stops a waterfall pouring into a pond from just
+   * stacking a column over it.
+   * @returns the cell the drop came to rest in, 0 when it hit rock
+   */
+  private fall(x: number, start: number, z: number, level: number): number {
+    let fy = start;
+    while (fy > 0) {
+      if (!this.world.inBounds(x, fy, z)) return 0;
+      const cur = this.world.get(x, fy, z);
+      if (isWaterId(cur) && fy !== start) {
+        // the stream ran into water: the surface it met takes the full supply
+        const j = idx(x, fy, z);
+        if (cur === WATER_FLOW && this.world.flowLevelAt(x, fy, z) > 0) {
+          this.world.waterLevel.set(j, 0);
+          this.world.touchAt(x, z);
+          this.dirty.add(j);
+          this.notify(x, fy, z);
+        }
+        return fy;
+      }
+      if (!this.setFlow(x, fy, z, fy === start ? level : 0)) return 0; // solid: the drop ends here
       const j = idx(x, fy, z);
-      if (this.standsOnGround(x, fy, z)) this.pouring.delete(j);
-      else this.pouring.add(j);
+      if (this.standsOnGround(x, fy, z)) {
+        this.pouring.delete(j); // the foot of the fall: this is where it runs sideways again
+        return fy;
+      }
+      this.pouring.add(j);
       fy--;
     }
+    return 0;
   }
 
   /** solid ground directly under this cell — water's idea of a footing */
   private standsOnGround(x: number, y: number, z: number): boolean {
     return solidHeightOf(this.world.get(x, y - 1, z)) > 0;
+  }
+
+  /**
+   * The big game's flow weights: every direction a cell could flow to starts
+   * at `NO_WAY_DOWN`, and the ones that can reach a drop by walking no more
+   * than `DROP_SEARCH` cells of flat ground take the distance to it. `spread`
+   * then only flows the lowest-weight ways, so water beelines for the edge —
+   * one cell wide — and only fans out over flat floors where nothing drops.
+   */
+  private flowWeights(x: number, y: number, z: number): number[] {
+    const key = idx(x, y, z);
+    const seen = this.drops.get(key);
+    if (seen) return seen;
+    const weights = SIDES.map(([dx, dz]) => this.dropDistance(x, y, z, dx, dz));
+    this.drops.set(key, weights);
+    return weights;
+  }
+
+  /**
+   * How far the cell this water would flow into is from a way down: 0 when
+   * that very cell has no ground under it (the edge), n when the drop is n
+   * cells of flat walking beyond it, `NO_WAY_DOWN` when nothing gives out
+   * within `DROP_SEARCH`.
+   */
+  private dropDistance(x: number, y: number, z: number, dx: number, dz: number): number {
+    const sx = x + dx, sz = z + dz;
+    if (!this.flowable(sx, y, sz)) return NO_WAY_DOWN; // a wall is not a direction
+    // The next cell is the edge when it has no footing — OR when the water in
+    // it is mid-fall: a waterfall holds itself up, and treating that column as
+    // ground made the search walk ACROSS it, inflating the weight of the very
+    // direction the stream came down. Ties with sideways followed, the channel
+    // fanned out, and every stray cell poured its own fall — a waterfall curtain.
+    if (!this.supported(sx, y, sz) || this.pouring.has(idx(sx, y, sz))) return 0;
+    const seen = new Set<number>([idx(sx, y, sz)]);
+    let frontier = [idx(sx, y, sz)];
+    for (let step = 1; step <= DROP_SEARCH && frontier.length; step++) {
+      const next: number[] = [];
+      for (const j of frontier) {
+        const [cx, , cz] = unidx(j);
+        for (const [ax, az] of SIDES) {
+          const nx = cx + ax, nz = cz + az;
+          if (!this.flowable(nx, y, nz)) continue;
+          if (!this.supported(nx, y, nz) || this.pouring.has(idx(nx, y, nz))) return step; // a way down this far out
+          const k = idx(nx, y, nz);
+          if (seen.has(k)) continue;
+          seen.add(k);
+          next.push(k);
+        }
+      }
+      frontier = next;
+    }
+    return NO_WAY_DOWN;
   }
 }

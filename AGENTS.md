@@ -241,30 +241,48 @@ event. Renaming a storage key orphans the family's existing saves.
   travelling water; its depth lives in `world.waterLevel` (flat index → level),
   saved as **version 4** `waterLevels` (server merges it like the other maps).
   The sim is a dirty set driven by the same `World.onCellChanged` hook as sand.
-  **The model is Minecraft parity (Nov 2026 rewrite), four rules:** (1) a
-  spring reaches **exactly seven cells** — `MAX_WATER_LEVEL` is 7, sideways
-  spread costs +1 level per cell and level 7 cells stop; (2) water spreads
-  sideways only into a cell with **something under it** (`supported`: solid or
-  settled water) — it never leans out into thin air; (3) where it runs out of
-  ground it **falls straight down keeping its depth** — a cell with no footing,
-  or one a drop put in mid-air (`pouring` set, cleared when a cell comes to
-  rest on ground), feeds only the column below it and NEVER spreads sideways;
-  a WATER source over a hole never moves, it pours from `y − 1` (full-strength
-  column, pool runs 7 again from the base). Letting mid-air cells spread was
-  the old bug: one spring at the top of a hill backed the whole slope up and
-  drew it as a diagonal stack of blue plates. (4) **Two sources feed a third**
+  **The model is Minecraft parity (Nov 2026, twice — the second pass fixed the
+  falls), five rules:** (1) a spring reaches **exactly seven cells** —
+  `MAX_WATER_LEVEL` is 7, sideways spread costs +1 level per cell and level 7
+  cells stop; (2) water spreads sideways only into a cell with **something
+  under it** (`supported`: solid or settled water) — it never leans out into
+  thin air; (3) where it runs out of ground it **falls straight down, the whole
+  drop in ONE step, and lands at FULL strength**: `fall()` writes the start
+  cell at the feeder's level and every cell below it at level 0 (the big game
+  fills the block under a flow at depth 0 — "a fluid can flow much farther if
+  it flows downward occasionally"), stops at water (upgrading that surface to
+  0; the `fy !== start` guard keeps the stream's own top cell from
+  self-upgrading), returns the landing cell, and `cascadeFall()` re-spreads
+  from there in the same step (≤`FALL_CHAIN`=24, so a staircase drains top to
+  bottom in a couple of steps). Mid-drop cells ride the `pouring` set: they
+  feed only the column below and NEVER spread sideways; `pouring` clears only
+  on **solid** footing (`standsOnGround`) — clearing on `supported` fans a
+  waterfall into a curtain. A WATER source over a hole never moves, it pours
+  from `y − 1`. (4) **Spread beelines for the drop** (the big game's flow
+  weights): `flowWeights`/`dropDistance` BFS each direction ≤`DROP_SEARCH`=4
+  cells of flat walking for a way down (`NO_WAY_DOWN`=1000) and `spread`
+  flows only the lowest-weight directions — one-cell streams near an edge,
+  symmetric fans on flat floors. The down-check runs **before** reach, so even
+  a thin last cell beside a drop goes over. Trap that made a waterfall
+  curtain: the fall's own column counts as footing (`supported` accepts
+  water), so `dropDistance` must also treat `pouring` cells as the edge or
+  the weight of the down direction inflates, ties with sideways, and every
+  fanned cell pours its own fall. (5) **Two sources feed a third**
   (`makesSource`, checked in `evaluate` before the supply math): a flow cell
   with ≥2 horizontal `WATER` neighbours, or ≥1 plus a `WATER` above, standing
   on ground/settled water, converts to `WATER` (level entry deleted). Traps:
   those new springs are eternal **and unbreakable** like the sea (bucket them
   away in tests, or overwrite with `world.set`), and digging a corner off the
   shore really does leave a spring behind — Java does the same. Held up only
-  by a **strictly deeper** side neighbour or by water falling in from above,
-  so a cut-off flood cannot prop itself up: the shallow end fails first and
-  `drain` cascades the news (≤`CASCADE_CELLS`=4 per step), which is the dry
-  line walking back up the channel. **Bedrock divergence, deliberate:** Java
-  water never drains on its own; ours does (the user picked it, and the bucket
-  depends on "pull the spring, the flood runs home").
+  by a **strictly deeper** side neighbour or by water falling in from above
+  (`pouring` above supplies level 0), so a cut-off flood cannot prop itself
+  up: the shallow end fails first and `drain` cascades the news
+  (≤`CASCADE_CELLS`=4 per step), which is the dry line walking back up the
+  channel. **Bounds:** `World.get` out-of-bounds is AIR while `set` no-ops —
+  `setFlow`/`fall` guard with `inBounds` or drops at the map's edge write
+  phantom `pouring`/dirty entries forever. **Bedrock divergence, deliberate:**
+  Java water never drains on its own; ours does (the user picked it, and the
+  bucket depends on "pull the spring, the flood runs home").
   `world.set` deletes the level entry; improving an existing flow
   cell's depth needs `world.touchAt` (same id, so `set` early-returns). Levels
   0..7 are the whole scale — `world.applySave` clamps waterLevels to `v <= 7`,
@@ -275,11 +293,17 @@ event. Renaming a storage key orphans the family's existing saves.
   still. **Tests:** terrain ponds and the sea are eternal
   *flowing* sources on this branch — any e2e course near spawn must ring its
   site with a full-height stone caisson and scrub every wet cell inside, since
-  falling water keeps its depth and one wet cell left above a wall re-rains
+  falling water lands full-strength and one wet cell left above a wall re-rains
   on the course forever (the sand and water-flow tests do exactly this, and
   their dry-waits dump wet-cell maps on failure for the next CI sleuth). The
-  slope test asserts the invariant the eye checks: every wet cell has ground or
-  water under it, or is a falling cell with water above it.
+  sim's own clock is the test clock — `WaterFlow.steps` (`__lbw.waterSteps`)
+  and `isPouring` (`__lbw.waterFallingAt`); headless Chromium runs game time
+  at ~half wall clock, so never `waitForTimeout` for a flood, and audit only
+  after the descent settles. The slope test asserts the flood **runs down the
+  whole staircase** (the old expectation that the seven-cell reach ends it
+  partway down was wrong and deliberately changed); the cliff test measures
+  the descent in steps and demands one stream, a full seven-cell pool, and
+  nothing standing tall.
 - Fish (`core/fish.ts`, `Game.fish`) live in every column of water: five
   kinds, **minnow + sunfish school** (a `School` anchor wanders through valid
   water and the flock follows via anchor-seek + slowly circling offsets +

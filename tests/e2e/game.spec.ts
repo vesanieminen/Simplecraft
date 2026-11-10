@@ -1401,14 +1401,16 @@ test('water flows: a dug channel floods from the source, reaches exactly seven, 
   // a dry cell draws nothing at all
   expect(await surfaceAt(fx + 12, gy), 'dry cell draws nothing').toBe(0);
 
-  // falling water keeps its depth: cut a shaft and the plunge is as deep as the channel above it
+  // falling water lands at FULL strength: the big game fills the block under a
+  // flow at depth 0, so a plunge into a dug shaft is not "as deep as the channel
+  // above it" — it is deeper than that, and starts its own reach down there.
   await page.evaluate((arg: { x: number; gy: number; fz: number; air: number }) => {
     (window as any).__lbw.game.world.set(arg.x, arg.gy - 1, arg.fz, arg.air);
   }, { x: fx + 7, gy, fz, air: ids.AIR });
   await page.waitForFunction((arg: { x: number; gy: number; fz: number; flow: number }) =>
     (window as any).__lbw.game.world.get(arg.x, arg.gy - 1, arg.fz) === arg.flow,
   { x: fx + 7, gy, fz, flow: ids.WATER_FLOW }, { timeout: 10000 });
-  expect((await cellAt(fx + 7, gy - 1)).lvl).toBe(5);
+  expect((await cellAt(fx + 7, gy - 1)).lvl, 'a fall lands at full strength').toBe(0);
 
   // travelling water (with its depths) rides in the save
   const saved = await page.evaluate((arg: { x3: number; fz: number; gy: number }) => {
@@ -1498,7 +1500,7 @@ test('water flows: a dug channel floods from the source, reaches exactly seven, 
   await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); });
 });
 
-test('water on a slope runs DOWN it: no blue plates hanging in the air, and the seven-block reach still ends the flood', async ({ page }) => {
+test('water on a slope runs DOWN it: no blue plates hanging in the air, and every step drains into the next', async ({ page }) => {
   test.slow();
   await boot(page);
   await joinWithPad(page);
@@ -1512,9 +1514,12 @@ test('water on a slope runs DOWN it: no blue plates hanging in the air, and the 
   // branch every pond flows, so a course only trusts water it poured itself).
   // The site is snapshotted first and put back exactly at the end — this course
   // digs DOWN and walls itself in, and a walled pit by spawn strands the next
-  // test's kid where it cannot walk.
+  // test's kid where it cannot walk. The box spans the FULL world height: the
+  // ring walls go to SY, and a snapshot that stopped below their tops left the
+  // un-snapshotted stone standing as a 63-high pillar by spawn (surf=63 — the
+  // next test's gy, then every course coord, reads off the pillar's roof).
   const x0 = fx + 2, x1 = fx + 14;
-  const box = { x0: x0 - 2, x1: x1 + 2, z0: fz - 2, z1: fz + 2, y0: gy - 14, y1: gy + 14 };
+  const box = { x0: x0 - 2, x1: x1 + 2, z0: fz - 2, z1: fz + 2, y0: 0, y1: 63 };
   const before = await page.evaluate((b: typeof box) => {
     const S = (window as any).__lbw.game.world;
     const out: number[] = [];
@@ -1543,49 +1548,86 @@ test('water on a slope runs DOWN it: no blue plates hanging in the air, and the 
   }, { x0, x1, z0: fz, z1: fz, gy, air: ids.AIR, stone: ids.STONE, water: ids.WATER });
 
   // the flood has to climb DOWN the staircase: each step is a two-cell flat
-  // ending in a drop, and water falls keeping its depth. The reach is spent a
-  // level per cell, so the seventh cell out — the far edge of step four — is
-  // where the stream runs out of supply, exactly as in the big game.
+  // ending in a drop, and each drop lands at full strength and runs again, so
+  // the water keeps going step after step until it runs out of hillside.
+  // Wait for the LAST step before auditing — the sim creeps, and an audit
+  // taken mid-descent would count a flood that is simply still on its way.
   await page.waitForFunction((arg: { x: number; y: number; z: number; flow: number }) =>
     (window as any).__lbw.game.world.get(arg.x, arg.y, arg.z) === arg.flow,
-  { x: x0 + 7, y: gy - 2, z: fz, flow: ids.WATER_FLOW }, { timeout: 30000 });
+  { x: x1, y: gy - 5, z: fz, flow: ids.WATER_FLOW }, { timeout: 30000 });
+
+  // let the sim settle on its own terms — the flow's clock, not a guess
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    let last = -1, same = 0;
+    const t0 = performance.now();
+    const timer = setInterval(() => {
+      const n = (window as any).__lbw.game.world.waterLevel.size;
+      same = n === last ? same + 1 : 0;
+      last = n;
+      if (same >= 5 || performance.now() - t0 > 12000) { clearInterval(timer); resolve(); }
+    }, 100);
+  }));
 
   // and every wet cell must either be standing on something or be on its way
   // down: that is the whole complaint. The old sim let water spread sideways
   // from mid-air, so a hillside flood drew as a diagonal stack of blue plates
   // with nothing under them.
   const audit = await page.evaluate((arg: {
-    x0: number; x1: number; z0: number; z1: number; y0: number; y1: number;
+    x0: number; x1: number; z0: number; z1: number; y0: number; y1: number; bottomFrom: number;
   }) => {
-    const w = (window as any).__lbw.game.world;
+    const g = (window as any).__lbw.game;
+    const w = g.world;
     const { AIR, WATER, WATER_FLOW } = (window as any).__lbw.ids;
     const wet = (x: number, y: number, z: number) => {
       const id = w.get(x, y, z);
       return id === WATER || id === WATER_FLOW;
     };
-    const out = { wetCells: 0, hanging: [] as string[], falling: 0, beyond: [] as string[] };
+    const out = {
+      wetCells: 0, hanging: [] as string[], falling: 0, stepsWet: [] as string[],
+      reachedBottom: false, deepestSettled: 0, deepAt: [] as string[],
+    };
     for (let x = arg.x0; x <= arg.x1; x++) for (let z = arg.z0; z <= arg.z1; z++) {
       for (let y = arg.y1; y >= arg.y0; y--) {
         if (!wet(x, y, z)) continue;
         out.wetCells++;
-        if (x > arg.x0 + 8) out.beyond.push(`${x},${y},${z}`); // window x0 = x0-1; reach ends at x0+7
+        if (x >= arg.bottomFrom) {
+          out.reachedBottom = true;
+          if (out.stepsWet.length < 12) out.stepsWet.push(`${x},${y},${z}`);
+        }
         const below = w.get(x, y - 1, z);
         if (below !== AIR && !wet(x, y - 1, z)) continue; // solid footing
         if (wet(x, y - 1, z)) continue; // standing on settled water
-        if (wet(x, y + 1, z)) { out.falling++; continue; } // a waterfall cell: falling
+        if (wet(x, y + 1, z) || g.water.isPouring(x, y, z)) { out.falling++; continue; } // a waterfall cell
         out.hanging.push(`${x},${y},${z}`);
       }
+      // how high does SETTLED water stand here? A waterfall's own stream does
+      // not count: it is a fall, drawn full, and it drains the moment the
+      // spring goes. Water that simply piled up and stayed is the complaint.
+      let y = arg.y0;
+      while (y <= arg.y1 && !wet(x, y, z)) y++;
+      let settled = 0;
+      while (y <= arg.y1 && wet(x, y, z)) {
+        if (!g.water.isPouring(x, y, z)) settled++; else break;
+        y++;
+      }
+      if (settled > out.deepestSettled) { out.deepestSettled = settled; out.deepAt = [`${x},${z}`]; }
     }
     return out;
-  }, { x0: x0 - 1, x1: x1 + 1, z0: fz - 1, z1: fz + 1, y0: gy - 8, y1: gy + 3 });
+  }, { x0: x0 - 1, x1: x1 + 1, z0: fz - 1, z1: fz + 1, y0: gy - 8, y1: gy + 3, bottomFrom: x1 });
 
   expect(audit.wetCells, 'the staircase got wet').toBeGreaterThan(12);
   expect(audit.hanging, `water hanging in the air at ${audit.hanging.join(' ')}`).toEqual([]);
-  // and the seven-block reach ends the flood even though the staircase keeps
-  // going down for twice as long: the lower steps stay as dry as the day they
-  // were carved. (In the big game it is reach, not terrain, that ends a
-  // stream — a slope only buys you free depth while the water is FALLING.)
-  expect(audit.beyond, `water past the reach at ${audit.beyond.join(' ')}`).toEqual([]);
+  // and the flood RUNS DOWN the whole staircase. This is the expectation the
+  // Nov 2026 rewrite got wrong: it asserted the seven-cell reach ended the
+  // flood partway down the hillside, but the big game's rule is the opposite —
+  // "a fluid can flow much farther if it flows downward occasionally", because
+  // the block under a flow is filled at full strength (see core/water.ts). So a
+  // spring at the top wets the staircase all the way to its last step, and what
+  // stays narrow is the STREAM, not the flood: every drop is one cell wide.
+  expect(audit.reachedBottom, `nothing wet near the bottom step: ${audit.stepsWet.join(' ')}`).toBe(true);
+  // nothing piles up either: the deepest settled puddle on a step is a couple
+  // of cells, while a single drop of falling water is as tall as the cliff
+  expect(audit.deepestSettled, `settled water piled up to ${audit.deepestSettled} cells at ${audit.deepAt.join(' ')}`).toBeLessThanOrEqual(2);
 
   // scoop the spring and the whole slope dries: no cell on the hill can hold
   // water up once the chain back to the water is cut
@@ -1616,6 +1658,264 @@ test('water on a slope runs DOWN it: no blue plates hanging in the air, and the 
   }, { b: box, cells: before });
   await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); });
 });
+
+test('water down a cliff: it runs down at once as one stream, pools the full seven at the bottom, and leaves nothing standing tall', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  const site = await clearRunway(page);
+  const { fx, fz, gy } = site;
+  // A NaN anywhere here silently no-ops every world.set (inBounds rejects
+  // NaN) and every audit loop runs zero times — every assertion then "passes"
+  // while nothing was measured. Fail loud instead.
+  expect(Number.isFinite(fx) && Number.isFinite(fz) && Number.isFinite(gy),
+    `clearRunway site is not finite: ${JSON.stringify(site)}`).toBe(true);
+
+  // A broad shelf ending in a six-cell cliff, inside a full-height stone
+  // caisson with a sealed floor (see the flow test: on this branch every terrain
+  // pond flows, so a course only trusts the water it poured itself). The shelf
+  // is nine cells deep in z on purpose — whether the flood runs to the edge in a
+  // narrow channel or lakes out over every shelf is exactly what the eye, and
+  // this test, is looking at. Snapshot the box first, put it back byte for byte
+  // at the end (this course digs six cells down beside spawn).
+  const lip = fx + 4; // the last shelf column
+  const drop = fx + 5; // the column the water falls down
+  const shelfY = gy + 1; // water stands here on the shelf
+  const floorY = gy - 5; // ...and here at the foot of the cliff
+  const box = { x0: fx - 3, x1: fx + 18, z0: fz - 5, z1: fz + 5, y0: 0, y1: 63 };
+  const before = await page.evaluate((b: typeof box) => {
+    const S = (window as any).__lbw.game.world;
+    const out: number[] = [];
+    for (let x = b.x0; x <= b.x1; x++) for (let y = b.y0; y <= b.y1; y++) for (let z = b.z0; z <= b.z1; z++) out.push(S.get(x, y, z));
+    return out;
+  }, box);
+  await page.evaluate((arg: {
+    x0: number; x1: number; z0: number; z1: number; lip: number; gy: number; fz: number;
+    air: number; stone: number; water: number;
+  }) => {
+    const S = (window as any).__lbw.game.world;
+    const SY: number = (window as any).__lbw.dims.sy;
+    for (let x = arg.x0; x <= arg.x1; x++) {
+      for (let z = arg.z0; z <= arg.z1; z++) {
+        const wall = x === arg.x0 || x === arg.x1 || z === arg.z0 || z === arg.z1;
+        const top = x <= arg.lip ? arg.gy : arg.gy - 6; // the shelf, then the cliff foot
+        // Only write cells that differ: a flat meadow already matches most of
+        // this pattern, and 15k redundant writes are a render storm on a
+        // software GL — enough to stall the page's animation clock (seen in CI).
+        for (let y = 1; y < SY; y++) {
+          const want = wall || y <= top ? arg.stone : arg.air;
+          if (S.get(x, y, z) !== want) S.set(x, y, z, want);
+        }
+      }
+    }
+  }, { ...box, lip, gy, fz, air: ids.AIR, stone: ids.STONE, water: ids.WATER });
+
+  // Sand near spawn is loose terrain: carving a six-cell pit beside it makes
+  // it cascade into the pit (by design!), where it settles and plugs the
+  // waterfall before a spring is even placed. Scrub the pattern until the sand
+  // calms down with the box clean, THEN place the spring — and prove the drop
+  // column is empty before asking water to run down it.
+  const scrub = () => page.evaluate((arg: {
+    x0: number; x1: number; z0: number; z1: number; lip: number; gy: number;
+    air: number; stone: number;
+  }) => {
+    const S = (window as any).__lbw.game.world;
+    const SY: number = (window as any).__lbw.dims.sy;
+    let sand = 0;
+    for (let x = arg.x0; x <= arg.x1; x++) {
+      for (let z = arg.z0; z <= arg.z1; z++) {
+        const wall = x === arg.x0 || x === arg.x1 || z === arg.z0 || z === arg.z1;
+        const top = x <= arg.lip ? arg.gy : arg.gy - 6;
+        for (let y = 1; y < SY; y++) {
+          const want = wall || y <= top ? arg.stone : arg.air;
+          if (S.get(x, y, z) !== want) {
+            sand++;
+            S.set(x, y, z, want);
+          }
+        }
+      }
+    }
+    return sand;
+  }, { ...box, lip, gy, air: ids.AIR, stone: ids.STONE });
+  await page.waitForFunction(() => (window as any).__lbw.game.sandFalls.count === 0, null, { timeout: 10000 });
+  for (let i = 0; i < 3; i++) {
+    const disturbed = await scrub();
+    await page.waitForFunction(() => (window as any).__lbw.game.sandFalls.count === 0, null, { timeout: 10000 });
+    if (disturbed === 0) break;
+  }
+  const column = await page.evaluate((arg: { x: number; y0: number; y1: number; z: number; air: number }) => {
+    const S = (window as any).__lbw.game.world;
+    for (let y = arg.y0; y <= arg.y1; y++) if (S.get(arg.x, y, arg.z) !== arg.air) return y;
+    return 0;
+  }, { x: drop, y0: floorY, y1: shelfY, z: fz, air: ids.AIR });
+  expect(column, 'the drop column is not clear air').toBe(0);
+
+  // a spring four cells back from the edge — last, so nothing scrubs it away
+  await page.evaluate((arg: { x: number; y: number; z: number; water: number }) => {
+    const g = (window as any).__lbw.game;
+    // frame/sim counter: if the loop itself stops ticking, "steps: 0" is a
+    // stalled page, not a stalled sim — and only the counter can tell them apart
+    const w = (window as any);
+    w.__probe = { loop: 0, upd: 0, notify: 0, ts: [], dt: 0, setAfter: '?', coords: '?' };
+    const nowRef = { now: 0 };
+    const oldUpd = g.water.update.bind(g.water);
+    g.water.update = (dt: number) => {
+      w.__probe.upd++;
+      if (dt === 0) w.__probe.dt++;
+      if (w.__probe.ts.length < 4) w.__probe.ts.push(Math.round(nowRef.now));
+      oldUpd(dt);
+    };
+    const oldNotify = g.water.notify.bind(g.water);
+    g.water.notify = (...a: number[]) => { w.__probe.notify++; oldNotify(...a); };
+    const oldLoop = g.loop as (n: number) => void;
+    g.loop = (now: number) => {
+      nowRef.now = now;
+      w.__probe.loop++;
+      oldLoop(now);
+    };
+    g.world.set(arg.x, arg.y, arg.z, arg.water);
+    w.__probe.setAfter = `${g.world.get(arg.x, arg.y, arg.z)}/${g.water.dirty.size}`;
+    const e = g.players[0]?.entity;
+    w.__probe.coords = `x=${arg.x} y=${arg.y} z=${arg.z} sy=${(window as any).__lbw.dims.sy} pos=${e ? `${e.pos.x.toFixed(1)},${e.pos.y.toFixed(1)},${e.pos.z.toFixed(1)}` : '-'} surf=${g.world.surfaceY(Math.max(0, Math.min(127, arg.x)), Math.max(0, Math.min(127, arg.z)))}`;
+  }, { x: lip - 3, y: gy + 1, z: fz, water: ids.WATER });
+
+  // (1) RAPID FALLS. Measured in the sim's own steps: headless Chromium runs
+  // game time at roughly half wall clock, so a `waitForTimeout` guess means
+  // nothing here. A fall writes its whole drop in one step and the cell it
+  // lands on runs again in that same step, so six cells down is one or two.
+  const descent = await page.evaluate((arg: { x: number; top: number; floor: number; z: number; water: number; flow: number }) =>
+    new Promise<{ steps: number; ms: number }>((resolve, reject) => {
+      const g = (window as any).__lbw.game;
+      const w = g.world;
+      const wet = (y: number) => { const id = w.get(arg.x, y, arg.z); return id === arg.water || id === arg.flow; };
+      const t0 = performance.now();
+      let atLip = -1, steps0 = 0;
+      const timer = setInterval(() => {
+        // deadline FIRST: water that never even reaches the top of the drop
+        // must fail fast and loud, not spin until the test's own timeout eats
+        // the CI log with nothing but "timeout exceeded".
+        if (performance.now() - t0 > 20000) {
+          clearInterval(timer);
+          // dump the state that explains the stall (AGENTS.md: leave the map
+          // for the next CI sleuth — this course runs in a shared shard world)
+          const wetHere: string[] = [];
+          for (let x = arg.x - 8; x <= arg.x + 14; x++) for (let y = arg.floor - 3; y <= arg.top + 3; y++) {
+            for (let z = arg.z - 5; z <= arg.z + 5; z++) {
+              const id = w.get(x, y, z);
+              if (id === arg.water || id === arg.flow) wetHere.push(`${x},${y},${z}:${id}`);
+            }
+          }
+          const p = (window as any).__probe ?? { loop: '?', upd: '?', notify: '?' };
+          const state = `frozen=${g.frozen} acc=${g.water.acc?.toFixed?.(2)} steps=${g.water.steps} dirty=${g.water.dirty?.size} loop=${p.loop} upd=${p.upd} notify=${p.notify} dt0=${p.dt} ts=${p.ts.join('/')} setAfter=${p.setAfter} ${p.coords}`;
+          reject(new Error(`${atLip < 0 ? 'the water never reached the top of the drop' : 'the water reached the top but never the foot'} (${state}) wet cells: ${wetHere.slice(0, 40).join(' ') || 'nothing'}`));
+          return;
+        }
+        if (atLip < 0) {
+          if (wet(arg.top)) { atLip = performance.now(); steps0 = g.water.steps; }
+        } else if (wet(arg.floor)) {
+          clearInterval(timer);
+          resolve({ steps: g.water.steps - steps0, ms: performance.now() - atLip });
+        }
+      }, 40);
+    }), { x: drop, top: shelfY, floor: floorY, z: fz, water: ids.WATER, flow: ids.WATER_FLOW });
+  expect(descent.steps, `a six-cell drop took ${descent.steps} flow steps (${descent.ms.toFixed(0)} ms)`).toBeLessThanOrEqual(2);
+
+  // (2) THE POOL. The water lands at full strength, so it runs its whole
+  // seven-cell reach along the floor below the fall.
+  await page.waitForFunction((arg: { x: number; y: number; z: number; water: number; flow: number }) => {
+    const id = (window as any).__lbw.game.world.get(arg.x, arg.y, arg.z);
+    return id === arg.water || id === arg.flow;
+  }, { x: drop + 7, y: floorY, z: fz, water: ids.WATER, flow: ids.WATER_FLOW }, { timeout: 30000 });
+
+  // then let the sim settle on its own terms — the flow's clock, not a guess
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    let last = -1, same = 0;
+    const t0 = performance.now();
+    const timer = setInterval(() => {
+      const n = (window as any).__lbw.game.world.waterLevel.size;
+      same = n === last ? same + 1 : 0;
+      last = n;
+      if (same >= 5 || performance.now() - t0 > 12000) { clearInterval(timer); resolve(); }
+    }, 100);
+  }));
+
+  const audit = await page.evaluate((arg: {
+    x0: number; x1: number; z0: number; z1: number; y0: number; y1: number;
+    lip: number; drop: number; shelfY: number; floorY: number; gy: number;
+  }) => {
+    const g = (window as any).__lbw.game;
+    const w = g.world;
+    const { AIR, WATER, WATER_FLOW } = (window as any).__lbw.ids;
+    const wet = (x: number, y: number, z: number) => { const id = w.get(x, y, z); return id === WATER || id === WATER_FLOW; };
+    const falling = (x: number, y: number, z: number) => g.water.isPouring(x, y, z);
+    const out = {
+      hanging: [] as string[], tallestSettled: 0, tallAt: [] as string[],
+      poolRun: 0, poolZ: 0, poolLevels: [] as number[], shelfZ: 0, dryBehind: 0, wideStream: [] as string[],
+    };
+    for (let x = arg.x0; x <= arg.x1; x++) for (let z = arg.z0; z <= arg.z1; z++) {
+      for (let y = arg.y1; y >= arg.y0; y--) {
+        if (!wet(x, y, z)) continue;
+        // (a) nothing may hang: no footing, nothing above it falling in
+        const footing = (w.get(x, y - 1, z) !== AIR && !wet(x, y - 1, z)) || wet(x, y - 1, z);
+        if (!footing && !wet(x, y + 1, z) && !falling(x, y, z)) out.hanging.push(`${x},${y},${z}`);
+      }
+      // (b) no settled stack: how high does water that is NOT falling stand here?
+      let y = arg.y0;
+      while (y <= arg.y1 && !wet(x, y, z)) y++;
+      let settled = 0;
+      while (y <= arg.y1 && wet(x, y, z)) {
+        if (falling(x, y, z)) break;
+        settled++; y++;
+      }
+      if (settled > out.tallestSettled) { out.tallestSettled = settled; out.tallAt = [`${x},${z}`]; }
+    }
+    // (c) the pool below the fall: its reach along the floor, and its spread
+    for (let x = arg.drop; x <= arg.x1; x++) {
+      const zc = arg.z0 + 5; // the box's middle row
+      if (!wet(x, arg.floorY, zc)) break;
+      out.poolRun++;
+      out.poolLevels.push(w.get(x, arg.floorY, zc) === WATER ? 0 : w.flowLevelAt(x, arg.floorY, zc));
+    }
+    for (let z = arg.z0 + 1; z < arg.z1; z++) if (wet(arg.drop, arg.floorY, z)) out.poolZ++;
+    // (d) the shape of the flood up top: a channel to the edge, not a lake, and
+    // the fall itself one cell wide all the way down
+    for (let z = arg.z0 + 1; z < arg.z1; z++) if (wet(arg.lip, arg.shelfY, z)) out.shelfZ++;
+    for (let x = arg.x0 + 1; x < arg.lip - 3; x++) if (wet(x, arg.shelfY, arg.z0 + 5)) out.dryBehind++;
+    for (let y = arg.floorY + 1; y <= arg.shelfY; y++) {
+      let n = 0;
+      for (let z = arg.z0 + 1; z < arg.z1; z++) if (wet(arg.drop, y, z)) n++;
+      if (n !== 1) out.wideStream.push(`y${y}:${n}`);
+    }
+    return out;
+  }, { ...box, lip, drop, shelfY, floorY, gy });
+
+  expect(audit.hanging, `water hanging in the air at ${audit.hanging.join(' ')}`).toEqual([]);
+  expect(audit.poolRun, `the pool below the fall only reached ${audit.poolRun} cells at ${JSON.stringify(audit.poolLevels)}`)
+    .toBeGreaterThanOrEqual(8); // the landing cell plus the full seven-cell reach
+  expect(audit.poolLevels.slice(0, 4), 'the pool starts full and shallows one ninth a cell')
+    .toEqual([0, 1, 2, 3]);
+  expect(audit.tallestSettled, `settled water stood ${audit.tallestSettled} cells tall at ${audit.tallAt.join(' ')}`)
+    .toBeLessThanOrEqual(1);
+  expect(audit.wideStream, `the fall is not one cell wide everywhere: ${audit.wideStream.join(' ')}`).toEqual([]);
+  expect(audit.shelfZ, `the shelf flood is ${audit.shelfZ} cells wide at the edge — it should run in a channel`)
+    .toBeLessThanOrEqual(2);
+  expect(audit.dryBehind, `water fanned ${audit.dryBehind} cells backwards away from the drop`).toBe(0);
+  expect(audit.poolZ, `the pool spread only ${audit.poolZ} cells across — a landing pool should fan out`).toBeGreaterThanOrEqual(5);
+
+  // Put the meadow back exactly as it was, whole site box and in the order it
+  // was captured (see the slope test: a walled pit beside spawn strands the
+  // next test's kid), and bank the refill before the next page boots.
+  await page.evaluate((arg: { b: typeof box; cells: number[] }) => {
+    const S = (window as any).__lbw.game.world;
+    const { b } = arg;
+    let i = 0;
+    for (let x = b.x0; x <= b.x1; x++) for (let y = b.y0; y <= b.y1; y++) for (let z = b.z0; z <= b.z1; z++) S.set(x, y, z, arg.cells[i++]);
+  }, { b: box, cells: before });
+  await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); });
+});
+
 /** opens Grown-Up Settings, switches Freeze, and closes the menu again */
 async function setFreeze(page: Page, on: boolean): Promise<void> {
   await tap(page, 'menu');
