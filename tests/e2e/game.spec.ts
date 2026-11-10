@@ -4476,8 +4476,8 @@ test('rain falls on the meadow and the sun circles the sky', async ({ page }) =>
   expect(wet.hiss, 'the rain hiss reached the audio kit').toBe(true);
 
   // the grown-up menu grew rows under Waiting Players — the old rows stay
-  // exactly where every other test pins them, and the Shadows row slots in
-  // right before Back (which moved 9 → 10)
+  // exactly where every other test pins them, and the sky switches slot in
+  // right before Back (which slid 9 → 10 for Shadows, then 10 → 11 for Lights)
   await tap(page, 'menu');
   await page.waitForSelector('.menu-list');
   await selectRow(page, 9); // Grown-Ups
@@ -4490,8 +4490,9 @@ test('rain falls on the meadow and the sun circles the sky', async ({ page }) =>
   expect(labels[6], 'Weather keeps row 6').toContain('Weather');
   expect(labels[7], 'Day & Night keeps row 7').toContain('Day & Night');
   expect(labels[8], 'Treasure Chests keeps row 8').toContain('Treasure Chests');
-  expect(labels[9], 'Shadows takes row 9').toContain('Shadows');
-  expect(labels[10], 'Back slid to row 10').toContain('Back');
+  expect(labels[9], 'Shadows keeps row 9').toContain('Shadows');
+  expect(labels[10], 'Lights takes row 10').toContain('Lights');
+  expect(labels[11], 'Back slid to row 11').toContain('Back');
   await tap(page, 'back'); // close Grown-Ups
   await tap(page, 'back'); // close the player menu
 
@@ -4720,5 +4721,173 @@ test('the sun throws real blocky shadows, and row 9 of Grown-Ups flips them', as
   expect(water.hasMap, 'the water sheet still tiles its wave texture').toBe(true);
 
   // and none of this talked back to the console (shader compile errors land there)
+  expect(errors, `console/page errors: ${errors.join('\n')}`).toEqual([]);
+});
+
+// ------------------------------------------------------ torches + light pools
+
+test('a torch throws a flickering pool of light into the dark, and row 10 flips the night back on', async ({ page }) => {
+  test.slow();
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  page.on('console', (m) => {
+    if (m.type() === 'error' && !m.text().includes('AudioContext')) errors.push(m.text());
+  });
+  await boot(page);
+  // This test does the pixel census with real screenshots, so it owns its
+  // viewport: SwiftShader renders this branch's shaders at a crawl at full
+  // size, and 640×360 keeps the census honest without eating the budget.
+  await page.setViewportSize({ width: 640, height: 360 });
+  await joinWithPad(page);
+  const ids = await page.evaluate(() => (window as any).__lbw.ids);
+  expect(Number.isInteger(ids.TORCH), 'the torch has a real block id').toBe(true);
+
+  // midnight, settled: the sun's light has fallen to its floor and the dome
+  // has painted itself blue — this is the dark the torch is about to fight
+  await page.evaluate(() => (window as any).__lbw.setDayMode('night'));
+  await page.waitForFunction(() => {
+    let dir = 9, hemi = 0;
+    (window as any).__lbw.game.scene.traverse((o: any) => {
+      if (o.isDirectionalLight) dir = o.intensity;
+      if (o.isHemisphereLight) hemi = o.intensity;
+    });
+    return dir < 0.4 && hemi >= 0.3;
+  }, null, { timeout: 12000 });
+  await frames(page, 15);
+  expect(await page.evaluate(() => (window as any).__lbw.lightsNow().lights
+    .some((l: any) => l.kind === 'torch')), 'no torches burning yet').toBe(false);
+  const shotDark = await page.screenshot();
+
+  // plant the torch in the cell the kid is aiming at — 3…8 blocks out, right
+  // where the camera will see its pool. world.set writes the voxel; the
+  // onCellChanged hook is what lights it.
+  await page.waitForFunction('window.__lbw.game.players[0].target !== null', null, { timeout: 15000 });
+  const site = await page.evaluate((torch: number) => {
+    const g = (window as any).__lbw.game;
+    const t = g.players[0].target!;
+    const was = g.world.get(t.px, t.py, t.pz);
+    g.world.set(t.px, t.py, t.pz, torch);
+    if (g.world.get(t.px, t.py, t.pz) !== torch) return null;
+    (window as any).__torchSite = { x: t.px, y: t.py, z: t.pz, was };
+    return { x: t.px, y: t.py, z: t.pz, was };
+  }, ids.TORCH);
+  expect(site, 'the torch voxel went into the aimed-at cell').not.toBeNull();
+  await frames(page, 4); // chunk remesh is budgeted — let the post draw
+
+  // the lens: the keeper found it, published it, and gave it a flame
+  const lit = await page.evaluate(() => (window as any).__lbw.lightsNow());
+  expect(lit.count, 'the torch is in the light uniforms').toBeGreaterThanOrEqual(1);
+  expect(lit.lights.some((l: any) => l.kind === 'torch'), 'published as a torch').toBe(true);
+  expect(lit.flames, 'the torch wears a flame sprite').toBeGreaterThanOrEqual(1);
+  expect(lit.emitters, 'the cell is remembered as an emitter').toBeGreaterThanOrEqual(1);
+
+  // flicker: the kit clock moves, and the flame sprite wobbles on it —
+  // two samples a beat apart must not carry the same scale
+  const w0 = await page.evaluate(() => {
+    const s = { t: (window as any).__lbw.shaderTime(), w: 0 };
+    (window as any).__lbw.game.scene.traverse((o: any) => {
+      if (o.isSprite && s.w === 0) s.w = o.scale.x + o.scale.y * 7;
+    });
+    return s;
+  });
+  await frames(page, 8);
+  const w1 = await page.evaluate((prev: { t: number; w: number }) => {
+    const s = { t: (window as any).__lbw.shaderTime(), w: 0, moved: false };
+    (window as any).__lbw.game.scene.traverse((o: any) => {
+      if (o.isSprite && !s.moved) { s.w = o.scale.x + o.scale.y * 7; s.moved = Math.abs(s.w - prev.w) > 1e-4; }
+    });
+    return s;
+  }, w0);
+  expect(w1.t, 'the shader clock runs').toBeGreaterThan(w0.t);
+  expect(w1.moved, 'the flame wobbles on that clock').toBe(true);
+
+  // the night where the torch stands is measurably brighter now. Same pixel
+  // census trick as the shadow test, opposite question — and like that test,
+  // only the ground band counts, so drifting clouds can never fake a win.
+  await frames(page, 15);
+  const shotLit = await page.screenshot();
+  const brighter = await page.evaluate(async (arg: { before: string; after: string }) => {
+    const load = async (b64: string) => {
+      const img = new Image();
+      img.src = `data:image/png;base64,${b64}`;
+      await img.decode();
+      const cv = document.createElement('canvas');
+      cv.width = img.width;
+      cv.height = img.height;
+      const ctx = cv.getContext('2d', { willReadFrequently: true })!;
+      ctx.drawImage(img, 0, 0);
+      return { d: ctx.getImageData(0, 0, cv.width, cv.height).data, w: img.width, h: img.height };
+    };
+    const A = await load(arg.before);
+    const B = await load(arg.after);
+    const lum = (p: number, d: Uint8ClampedArray) => d[p] * 0.299 + d[p + 1] * 0.587 + d[p + 2] * 0.114;
+    let n = 0;
+    const y0 = Math.floor(A.h * 0.45);
+    for (let y = y0; y < A.h; y++) {
+      for (let x = 0; x < A.w; x++) {
+        const p = (y * A.w + x) * 4;
+        if (lum(p, B.d) - lum(p, A.d) > 8) n++;
+      }
+    }
+    return n;
+  }, { before: shotDark.toString('base64'), after: shotLit.toString('base64') });
+  expect(brighter, 'the torch pool lights up hundreds of ground pixels').toBeGreaterThan(800);
+
+  // split screen: a second kid on a second pad renders a second pane of the
+  // same lit world — a pane whose shader variant blew up would log to console.
+  // (Then the kid goes home again: software GL crawls at two panes, and the
+  // menu walk below wants frames to land at a human rate.)
+  await joinWithPad(page);
+  await frames(page, 6);
+  expect(await page.evaluate(() => (window as any).__lbw.game.players.length), 'two kids').toBe(2);
+  expect(await page.evaluate(() => (window as any).__lbw.lightsNow().count), 'still lit in split').toBeGreaterThanOrEqual(1);
+  await page.evaluate(() => {
+    const g = (window as any).__lbw.game;
+    g.removePlayer(g.players[1]);
+    // the join helper left __testPad on the kid who just left — aim it home
+    const src = [...g.input.sources.values()]
+      .find((s: any) => s.kind === 'virtual' && g.sourceToPlayer.get(s.id) === g.players[0]);
+    (window as any).__testPad = src;
+  });
+  await frames(page, 3);
+
+  // the grown-up row: Lights on row 10, right before Back — tap it OFF.
+  // Off must mean count 0 and no flames, without a single recompile.
+  await openGrownUpsMenu(page);
+  await selectRow(page, 10);
+  expect(await page.evaluate(() => [...document.querySelectorAll('.menu-item')][10].textContent ?? ''))
+    .toContain('Lights');
+  await tap(page, 'jump');
+  expect(await page.evaluate(() => (window as any).__lbw.game.lightsEnabled)).toBe(false);
+  expect(await page.evaluate(() => (window as any).__lbw.lightsNow().count), 'lights off = count 0').toBe(0);
+  expect(await page.evaluate(() => (window as any).__lbw.lightsNow().flames), 'flames put away').toBe(0);
+  await tap(page, 'back'); // leave Grown-Ups
+  await tap(page, 'back'); // leave the player menu
+
+  // a reload remembers the grown-up's choice — and the torch voxel rode the
+  // save anyway: the keeper finds it again from world.mods, just unpublished
+  await page.reload();
+  await page.waitForFunction('window.__lbw !== undefined', null, { timeout: 20000 });
+  expect(await page.evaluate(() => (window as any).__lbw.game.lightsEnabled)).toBe(false);
+  expect(await page.evaluate(() => (window as any).__lbw.lightsNow().count), 'off after reload').toBe(0);
+  expect(await page.evaluate(() => (window as any).__lbw.lightsNow().emitters),
+    'the saved torch is remembered as an emitter again').toBeGreaterThanOrEqual(1);
+
+  // back ON via row 10 (settings persist on each toggle). The reload took the
+  // virtual pads with it, so wake a kid first — the settings ride regardless.
+  await joinWithPad(page);
+  await openGrownUpsMenu(page);
+  await selectRow(page, 10);
+  await tap(page, 'jump');
+  await page.waitForFunction(() => (window as any).__lbw.lightsNow().count >= 1, null, { timeout: 10000 });
+
+  // put the meadow back the way the next tests found it
+  await page.evaluate((s: { x: number; y: number; z: number; was: number }) => {
+    const g = (window as any).__lbw.game;
+    g.world.set(s.x, s.y, s.z, s.was);
+  }, site!);
+  await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); });
+
+  // and none of this talked back to the console (a bad GLSL patch would have)
   expect(errors, `console/page errors: ${errors.join('\n')}`).toEqual([]);
 });
