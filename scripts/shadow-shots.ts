@@ -148,4 +148,15 @@ await page.evaluate(() => {
 });
 await shoot('morning', 3200);
 
+// the pond again under the high sun: glint + fresnel at full strength.
+// The high morning sun sits over (+x, +z), so the eye has to be on the
+// opposite (−x, −z) side of the pond to catch the mirror band across it.
+await page.evaluate(() => {
+  const st = (window as any).__stage;
+  const { cx, cz, G } = st;
+  (window as any).__cam.eye = [cx - 11.0, G + 1.9, cz - 1.0];
+  (window as any).__cam.look = [cx - 3.8, G - 0.9, cz + 4.2];
+});
+await shoot('pond-morning', 2600);
+
 await browser.close();
