@@ -1238,12 +1238,12 @@ export class Game {
         this.audio.remove(soundFamilyOf(hit.block));
         void lp;
       },
-      interact: (lp: LocalPlayer): void => {
+      interact: (lp: LocalPlayer): boolean => {
         // A line already in the water outranks everything: the pet button
         // reels it in — that is what bites mean.
         if (this.fishing.active(lp.entity.id)) {
           this.reelIn(lp);
-          return;
+          return true;
         }
         // 🪣 A bucket in hand outranks the fishing cast: the LT button fills
         // the pail from a spring, or pours it out into the gap you look at.
@@ -1253,7 +1253,7 @@ export class Game {
           const wantsWater = !lp.bucketFull && hit.block === WATER;
           const wantsPour = lp.bucketFull && pourableAt(this.world, hit.px, hit.py, hit.pz);
           if (wantsWater || wantsPour) {
-            if (this.bucketAction(lp, hit)) return;
+            if (this.bucketAction(lp, hit)) return true;
           }
         }
         // doors and chests come first: the pet button is the family's "do
@@ -1262,28 +1262,30 @@ export class Game {
         const aim = lp.removeTarget;
         if (aim && isDoorBlock(aim.block) && aim.dist <= 4.5) {
           this.toggleDoor(lp, aim);
-          return;
+          return true;
         }
         if (aim && isChestBlock(aim.block) && aim.dist <= 4.5) {
           this.openChest(lp, aim);
-          return;
+          return true;
         }
         if (aim && isStairsBlock(aim.block) && aim.dist <= 4.5) {
           this.rotateStairs(aim);
-          return;
+          return true;
         }
         if (aim && isLadderBlock(aim.block) && aim.dist <= 4.5) {
           this.rotateLadder(aim);
-          return;
+          return true;
         }
         // Aimed at the water: the pet button casts a fishing line (the
         // generous crosshair already found that water within reach).
         const water = lp.target;
         if (water && isWaterId(water.block)) {
           this.fishing.cast(lp.entity.id, this.angler(lp), water.x, water.y, water.z);
-          return;
+          return true;
         }
-        this.animals.petNearest(lp.entity.pos.x, lp.entity.pos.y + 0.8, lp.entity.pos.z, 2.4);
+        // Only a real pet counts: if nothing nearby wanted a scratch, LT is
+        // just the build trigger and the block goes down (see LocalPlayer).
+        return this.animals.petNearest(lp.entity.pos.x, lp.entity.pos.y + 0.8, lp.entity.pos.z, 2.4) !== null;
       },
     };
   }
