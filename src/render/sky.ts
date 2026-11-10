@@ -20,6 +20,16 @@ export const DAY_SECONDS = 12 * 60;
 export function sunElevation(hour: number): number {
   return Math.sin(hour * Math.PI * 2);
 }
+/**
+ * Where the parked 'day'/'night' modes hold the clock. Both must sit where
+ * the orbit/elevation geometry and the palette STOPS tell the same story —
+ * the old 0.5/0.0 parks landed on the elevation sine's zero crossings, so a
+ * "night" sky was geometrically sunrise (sun ball on the horizon, all the
+ * low-sun washes blazing). 0.32: full daylight, sun high; 0.78: deep night,
+ * sun far below, moon riding high.
+ */
+const DAY_PARK = 0.32;
+const NIGHT_PARK = 0.78;
 
 export const SKY_RADIUS = 320;
 /** matches the fog, so the renderer can clear to it: nothing in this game should
@@ -432,7 +442,13 @@ export function createSky(scene: THREE.Scene, kit: ShaderKit): SkyEnv {
       wet += (wetTarget - wet) * Math.min(1, dt * 0.4);
 
       if (dayMode === 'auto') phase = (phase + dt / DAY_SECONDS) % 1;
-      const hour = dayMode === 'day' ? 0.5 : dayMode === 'night' ? 0.0 : phase;
+      // Parked phases live where the sky's two clocks AGREE: the palette
+      // (STOPS) and the sun/moon orbit (noon at 0.25, sin elevation). The
+      // old parks — 0.5 "day", 0.0 "night" — sat exactly on the elevation
+      // sine's zero crossings, so parked night was geometrically SUNRISE:
+      // the dark sun ball sat on the horizon (a black hole in the sky) and
+      // every low-sun effect (rim, glare) fired at full strength.
+      const hour = dayMode === 'day' ? DAY_PARK : dayMode === 'night' ? NIGHT_PARK : phase;
       curHour = hour;
       const elev = sunElevation(hour);
       mixStop(hour);
@@ -530,7 +546,7 @@ export function createSky(scene: THREE.Scene, kit: ShaderKit): SkyEnv {
       precip.update(dt, camera);
     },
     dayPhase(): number {
-      return dayMode === 'day' ? 0.5 : dayMode === 'night' ? 0.0 : phase;
+      return dayMode === 'day' ? DAY_PARK : dayMode === 'night' ? NIGHT_PARK : phase;
     },
     setDayMode(mode: DayMode): void {
       dayMode = mode;
