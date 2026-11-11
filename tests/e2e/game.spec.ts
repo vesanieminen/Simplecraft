@@ -1929,6 +1929,7 @@ async function setFreeze(page: Page, on: boolean): Promise<void> {
 }
 
 test('grown-up menu: freeze pauses the world, split screen cycles, reset clears edits', async ({ page }) => {
+  test.slow(); // CI runners get starved: these timed out at 45s mid-evaluate on loaded boxes
   test.slow();
   await boot(page);
   await joinWithPad(page);
@@ -2087,6 +2088,7 @@ async function rowIndexOf(page: Page, needle: string): Promise<number> {
 }
 
 test('My Worlds menu lists saved worlds, plays one back with builds intact, and deletes it', async ({ page }) => {
+  test.slow(); // CI runners get starved: these timed out at 45s mid-evaluate on loaded boxes
   test.slow();
   // three world boots in one test, and CI's software GL pays a shadow bake
   // per moving frame — 135 s was landing on the line more than once
@@ -2360,6 +2362,7 @@ function fuseRigs(page: Page): Promise<number> {
 }
 
 test('dynamite is in the palette, painted from an atlas, and lights when placed', async ({ page }) => {
+  test.slow(); // CI runners get starved: these timed out at 45s mid-evaluate on loaded boxes
   await boot(page);
   const atlas = await page.evaluate(() => ({
     hasMap: !!(window as any).__lbw.game.chunks.materials.textured.map,
@@ -3767,6 +3770,7 @@ test('first person hides your own body from YOUR view only — other players sti
 });
 
 test('the player menu fits inside a half-height stacked pane — no overflow', async ({ page }) => {
+  test.slow(); // CI runners get starved: these timed out at 45s mid-evaluate on loaded boxes
   await boot(page);
   await joinWithPad(page);
   await joinSecondPad(page);
