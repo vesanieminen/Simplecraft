@@ -4898,16 +4898,76 @@ test('the parked day keeps its candy palette — never a washed-out film frame',
   await joinWithPad(page);
 
   // PR #34 review: "the world looks washed out atm due to the lights". The
-  // guard against that regression: the parked-day ground band must keep its
-  // HSV saturation — measured on the identical noon frame, ACES@1.25 had
-  // flattened it from 0.311 (main) to 0.194, and the day-blend fix must not
-  // just recover that ground but pass it (0.326 with the lift).
+  // guard against that regression: full ACES at noon (uToneOff=0) flattens
+  // the meadow's pastels — on the identical noon frame, ground-band HSV
+  // saturation fell 0.311 (main) → 0.194, and the day-blend fix restored it
+  // past main (0.326+). But the meadow AROUND spawn is whatever the shard's
+  // quarry/caisson tests left behind, and shadowed stone actually reads MORE
+  // saturated under ACES than raw — a wall of blocks cannot outvote it. So
+  // the guard walks the kid out to a pristine grass column far from the
+  // scars and measures THE SUN-LIT MEADOW TOPS, the exact surface the user's
+  // complaint was about. Same frame, same spot: pin uToneOff=0 (the state
+  // the user saw) and the shipped look must beat its own flattening.
   await page.evaluate(() => (window as any).__lbw.setDayMode('day'));
   await page.waitForFunction(
     () => (window as any).__lbw.game.chunks.shaders.uToneOff.value > 0.9,
     null, { timeout: 15000 },
   );
   await frames(page, 20);
+
+  // find a flat 5×5 grass top at least 14 cells from the kid (outside the
+  // suite's build site) and park them on it. Position goes back (and into
+  // the save) before the test ends, so the tests that follow wake at spawn.
+  const home = await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    return { x: e.pos.x, y: e.pos.y, z: e.pos.z };
+  });
+  const spot = await page.evaluate(() => {
+    const g = (window as any).__lbw.game;
+    const ids = (window as any).__lbw.ids;
+    const { sx, sz } = (window as any).__lbw.dims;
+    const p = g.players[0].entity.pos;
+    for (let r = 14; r <= 44; r++) {
+      for (let a = 0; a < 24; a++) {
+        const x = Math.round(p.x + r * Math.cos((a / 24) * Math.PI * 2));
+        const z = Math.round(p.z + r * Math.sin((a / 24) * Math.PI * 2));
+        if (x < 8 || z < 8 || x >= sx - 8 || z >= sz - 8) continue;
+        const sy = g.world.surfaceY(x, z);
+        if (sy < 2) continue;
+        let flat = true;
+        for (let dx = -3; dx <= 3 && flat; dx++) {
+          for (let dz = -3; dz <= 3; dz++) {
+            const gy = g.world.surfaceY(x + dx, z + dz);
+            // flat grass AND open to the sun — a hill's shadow darkens the
+            // grass, and ACES's toe turns dark grass *more* saturated,
+            // which is exactly the contrast this guard measures away. The
+            // parked sun stands high, so only a +3 step can shade this spot.
+            if (g.world.get(x + dx, gy, z + dz) !== ids.GRASS || gy > sy + 2 || gy < sy - 2) { flat = false; break; }
+          }
+        }
+        if (flat) return { x, y: sy + 2, z };
+      }
+    }
+    return null;
+  });
+  expect(spot, 'a pristine meadow still exists beyond the suite\'s build site').not.toBeNull();
+  await page.evaluate((s: { x: number; y: number; z: number }) => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    e.pos.set(s.x + 0.5, s.y, s.z + 0.5);
+    e.vel.set(0, 0, 0);
+    // look further down: the band should be only the sun-lit grass within a
+    // few blocks — distant slopes read darker, and ACES's toe makes dark
+    // grass *more* saturated, which muddies the very contrast we measure.
+    e.pitch = -0.68;
+    // first person: the third-person avatar is a big saturated red slab in
+    // the middle of the band, and red is the one hue ACES barely blunts —
+    // it dilutes the ratio from both sides. Eyes only.
+    (window as any).__lbw.game.players[0].firstPerson = true;
+  }, spot!);
+  await page.waitForFunction('window.__lbw.game.players[0].entity.grounded === true', null, { timeout: 15000 });
+  // the far chunks around the new spot remesh on a per-frame budget — give
+  // the meadow generously long to settle before either shot
+  await frames(page, 120);
 
   // HSV saturation (chroma/max) over the ground band — the honest vivid
   // measure; HSL's S flatters pastels, which is exactly what ACES makes.
@@ -4921,7 +4981,7 @@ test('the parked day keeps its candy palette — never a washed-out film frame',
     ctx.drawImage(img, 0, 0);
     const d = ctx.getImageData(0, 0, cv.width, cv.height).data;
     let s = 0, n = 0;
-    for (let y = Math.floor(cv.height * 0.55); y < Math.floor(cv.height * 0.95); y++) {
+    for (let y = Math.floor(cv.height * 0.68); y < Math.floor(cv.height * 0.95); y++) {
       for (let x = 0; x < cv.width; x++) {
         const p = (y * cv.width + x) * 4;
         const mx = Math.max(d[p], d[p + 1], d[p + 2]), mn = Math.min(d[p], d[p + 1], d[p + 2]);
@@ -4936,8 +4996,8 @@ test('the parked day keeps its candy palette — never a washed-out film frame',
 
   // The regression, forced back on the same frame: freeze the kit's day ramp
   // and pin the blend at "full ACES at noon" — the state the user complained
-  // about. The shipped look must beat it by a clear margin, on the very same
-  // world (terrain scarring from earlier tests cancels out of the ratio).
+  // about. Locally on grass this measured ×1.6 (0.326 vs 0.196); the bar is
+  // lower to leave headroom for CI's different terrain and software GL.
   await page.evaluate(() => {
     const k = (window as any).__lbw.game.chunks.shaders;
     const orig = k.tick.bind(k);
@@ -4950,9 +5010,16 @@ test('the parked day keeps its candy palette — never a washed-out film frame',
   const washed = await hsv(await page.screenshot());
   expect(shipped, `parked day must beat its own full-ACES state (${shipped.toFixed(3)} vs ${washed.toFixed(3)})`)
     .toBeGreaterThan(washed * 1.25);
+  // Absolute floor too (guards against the whole palette going grey): the
+  // pristine meadow baseline is ≈0.31–0.33, the wash state was 0.194.
+  expect(shipped, 'parked-day meadow saturation floor').toBeGreaterThanOrEqual(0.26);
 
-  // Absolute floor too (guards against the whole palette going grey): main's
-  // noon baseline on a virgin world is ≈0.311; the suite's quarry near spawn
-  // drags the band down, so the floor is deliberately conservative.
-  expect(shipped, 'parked-day ground saturation floor').toBeGreaterThanOrEqual(0.25);
+  // the kid back at spawn, and in the save — later tests wake at spawn
+  await page.evaluate((h: { x: number; y: number; z: number }) => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    e.pos.set(h.x, h.y, h.z);
+    e.vel.set(0, 0, 0);
+  }, home);
+  await frames(page, 10);
+  await page.evaluate(async () => { await (window as any).__lbw.game.saveNow(); });
 });
