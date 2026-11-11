@@ -265,7 +265,10 @@ vec3 elOne( vec3 elP, vec3 elC, float elR, vec3 elN ) {
   float elAtt = 1.0 - elD2 / elR2;
   elAtt *= elAtt * elAtt; // (1 − d²/r²)³: hot at the flame, textured beyond
   vec3 elL = elD * inversesqrt( max( elD2, 1e-4 ) );
-  return elC * ( elAtt * ( dot( elN, elL ) * 0.5 + 0.5 ) );
+  // half-lambert, but tilted toward the flame: surfaces facing away keep a
+  // third of the pool (rooms and cave floors need it), surfaces facing the
+  // fire take all of it — a pool reads as light FROM the torch, not fog
+  return elC * ( elAtt * ( dot( elN, elL ) * 0.66 + 0.34 ) );
 }
 
 vec3 elPointLights( vec3 nrm ) {

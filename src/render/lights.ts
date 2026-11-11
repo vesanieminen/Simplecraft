@@ -54,16 +54,19 @@ interface KindDef {
 }
 
 const KINDS: Record<number, KindDef> = {
-  // a torch: warm, generous, the whole reason this file exists
-  [TORCH]: { color: [0.88, 0.48, 0.18], radius: 7.2, lift: TORCH_POST_H + 0.15, weight: 1.0, name: 'torch' },
+  // a torch: warm and generous, the whole reason this file exists — but the
+  // colour is the pool's PEAK, and it lands on top of whatever the sun or
+  // moon already paid, so keep the peak under 1: hot amber at the flame,
+  // textured stone two blocks out, and gone (not grey-fogged) at the edge
+  [TORCH]: { color: [0.50, 0.26, 0.09], radius: 6.2, lift: TORCH_POST_H + 0.15, weight: 1.0, name: 'torch' },
   // the glow block: a steady lamp, a shade cooler than the torch's fire
-  [GLOW]: { color: [0.62, 0.52, 0.32], radius: 6.4, lift: 0.5, weight: 0.8, name: 'glow' },
+  [GLOW]: { color: [0.46, 0.38, 0.22], radius: 5.8, lift: 0.5, weight: 0.8, name: 'glow' },
   // an opened chest: a modest golden pulse where the treasure lies
-  [CHEST_OPEN]: { color: [0.56, 0.38, 0.15], radius: 4.2, lift: CHEST_HEIGHT - 0.25, weight: 0.7, name: 'chest' },
+  [CHEST_OPEN]: { color: [0.42, 0.28, 0.11], radius: 3.8, lift: CHEST_HEIGHT - 0.25, weight: 0.7, name: 'chest' },
 };
 
 /** stars are lights too, just polite ones — low reach, low weight */
-const STAR_KIND: KindDef = { color: [0.62, 0.50, 0.22], radius: 3.4, lift: 0, weight: 0.35, name: 'star' };
+const STAR_KIND: KindDef = { color: [0.40, 0.32, 0.13], radius: 2.8, lift: 0, weight: 0.35, name: 'star' };
 
 /** candidates farther than this from the camera don't even get scored */
 const CULL_R2 = 52 * 52;
