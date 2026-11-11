@@ -216,9 +216,14 @@ export class Game {
     // whatever the sky does not cover should look like hazy sky, never the black
     // void behind the canvas (each split-screen pane is cleared to this)
     this.renderer.setClearColor(SKY_CLEAR, 1);
-    // ACES filmic: the whole look leans on it — torch pools roll off warm
-    // instead of clipping to white, the sun sets through film colours, and
-    // the night keeps its depth. Exposure is the master brightness.
+    // ACES filmic — but dialed by day, kept at full strength for the dark.
+    // At night it carries the whole mood: torch pools roll off warm instead
+    // of clipping, the sun sets through film colours, midnight keeps depth.
+    // In full daylight the ShaderKit's uToneOff blends the raw, saturated
+    // palette back in (measured: ACES at noon was flattening the meadow's
+    // colour by a third — "washed out"). Exposure masters the tone-mapped
+    // side only; the day palette runs raw, exactly as bright as the eye
+    // expects. See installSoftToneBlend in render/shaders.ts.
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.25;
     this.scene = new THREE.Scene();

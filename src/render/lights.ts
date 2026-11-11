@@ -234,9 +234,14 @@ export class LightKeeper {
   // ------------------------------------------------------------------ internals
 
   private candidate(kind: KindDef, x: number, y: number, z: number, seed: number, score: number): Candidate {
+    // Full daylight already lights everything a torch could reach — the
+    // keeper fades its pools to embers by day (flame sprite still burns)
+    // and to full strength at dusk, so noon torchlight can never stack on
+    // the sun and wash the meadow out. See ShaderKit.dayLight.
+    const day = this.kit.dayLight;
     return {
       x, y, z,
-      r: kind.color[0], g: kind.color[1], b: kind.color[2],
+      r: kind.color[0] * day, g: kind.color[1] * day, b: kind.color[2] * day,
       radius: kind.radius, seed, score, kind: kind.name,
     };
   }

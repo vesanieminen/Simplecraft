@@ -13,7 +13,7 @@
 import * as THREE from 'three';
 import { WORLD_SX, WORLD_SZ } from '../core/world';
 import { WeatherKind } from '../core/weather';
-import { patchStarTwinkle, ShaderKit, SunState } from './shaders';
+import { bindDayTone, patchStarTwinkle, ShaderKit, SunState } from './shaders';
 
 export const DAY_SECONDS = 12 * 60;
 /** the sun's elevation at a day-phase (0..1); > 0 means the sun is up */
@@ -76,11 +76,13 @@ class Clouds {
   private readonly speeds: number[] = [];
   private readonly spanX = WORLD_SX * 2.6;
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, kit: ShaderKit) {
     this.mat = new THREE.MeshBasicMaterial({
       map: blobTexture(), transparent: true, side: THREE.DoubleSide,
       depthWrite: false, fog: false, opacity: 0,
     });
+    // puffs ride the same day blend as the dome they float in front of
+    bindDayTone(this.mat, kit);
     const geo = new THREE.PlaneGeometry(1, 1);
     let seed = 20261108;
     const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
@@ -280,6 +282,9 @@ export function createSky(scene: THREE.Scene, kit: ShaderKit): SkyEnv {
     domeGeo,
     new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false }),
   );
+  // the dome IS the sky's palette — it must breathe with the day blend
+  // exactly like the meadow under it, or noon shows a film-washed blue bowl
+  bindDayTone(dome.material as THREE.Material, kit);
   sky.add(dome);
 
   // the sun and moon ride one pivot so they stay opposite each other all day
@@ -290,6 +295,9 @@ export function createSky(scene: THREE.Scene, kit: ShaderKit): SkyEnv {
       new THREE.SphereGeometry(r, 16, 12),
       new THREE.MeshBasicMaterial({ color, fog: false }),
     );
+    // the solid balls follow the day blend (raw white sun at noon, filmic
+    // moon at midnight); the additive glow shell keeps full ACES at any hour
+    bindDayTone(ball.material as THREE.Material, kit);
     const glow = new THREE.Mesh(
       new THREE.SphereGeometry(r * 1.8, 16, 12),
       new THREE.MeshBasicMaterial({
@@ -410,7 +418,7 @@ export function createSky(scene: THREE.Scene, kit: ShaderKit): SkyEnv {
     (domeGeo.attributes.color as THREE.BufferAttribute).needsUpdate = true;
   };
 
-  const clouds = new Clouds(scene);
+  const clouds = new Clouds(scene, kit);
   const precip = new Precipitation(scene);
 
   let dayMode: DayMode = 'auto';

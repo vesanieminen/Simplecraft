@@ -34,6 +34,43 @@
 
 import * as THREE from 'three';
 
+/**
+ * SOFTENED ACES — once, globally, before any program compiles.
+ *
+ * ACES is beautiful at midnight and brutal on this game's flat, saturated,
+ * near-linear voxel palette at noon: measured on one parked day frame, it
+ * took the meadow's HSV saturation from 0.311 (main) to 0.194 and the sky
+ * from 0.456 to 0.286 — "washed out", in the user's words. The fix is not
+ * to drop ACES but to dial its strength: `uToneOff` blends the raw linear
+ * colour back in, driven per frame from the sun's height (≈0.8 raw at high
+ * noon, 0 at dusk/night where the film curve is the whole mood). A uniform
+ * on a chunk we patch once at import — zero program rebuilds, forever.
+ *
+ * `uToneOff` is declared for EVERY material three compiles, but only the
+ * materials we hand the kit's shared uniform to ever move it — everything
+ * else sees 0.0, which is plain full-strength ACES, exactly what a material
+ * without the blend does today (additive sprites want that: the flame's tip
+ * rolls off sweet and stays safe at any hour).
+ */
+function installSoftToneBlend(): void {
+  const pars = THREE.ShaderChunk['tonemapping_pars_fragment'];
+  if (!pars.includes('uToneOff')) {
+    THREE.ShaderChunk['tonemapping_pars_fragment'] = pars + '\nuniform float uToneOff;\n';
+  }
+  const body = THREE.ShaderChunk['tonemapping_fragment'];
+  if (!body.includes('uToneOff')) {
+    const patched = body.replace(
+      'gl_FragColor.rgb = toneMapping( gl_FragColor.rgb );',
+      'gl_FragColor.rgb = mix( toneMapping( gl_FragColor.rgb ), gl_FragColor.rgb, uToneOff );',
+    );
+    if (patched === body) {
+      throw new Error('shaders: three renamed the tone-mapping chunk — the soft-ACES blend died');
+    }
+    THREE.ShaderChunk['tonemapping_fragment'] = patched;
+  }
+}
+installSoftToneBlend();
+
 /** The sun (or moon) as far as the shaders care. */
 export interface SunState {
   /** unit vector from the world toward the light */
@@ -94,6 +131,18 @@ export class ShaderKit {
     range: { value: 1 },
   }));
   private readonly uLightCount = { value: 0 };
+  /**
+   * The soft-ACES blend — see installSoftToneBlend. 0 = full filmic, 1 = raw
+   * linear palette. The kit drives it from the sun's height; anything that
+   * receives the shared uniform follows the day for free.
+   */
+  readonly uToneOff = { value: 0 };
+  /**
+   * How much the sun already lights the world right now, 0..1 — the light
+   * keeper reads this to fade point lights down in full daylight (a torch
+   * should read as a flame plus a small warm pool at noon, not a second sun).
+   */
+  dayLight = 1;
 
   /** advance the animation — once per frame from the game loop */
   tick(dt: number, sun: SunState, haze: THREE.Color): void {
@@ -104,6 +153,13 @@ export class ShaderKit {
     this.uLowSun.value = sun.low;
     this.uSunTint.value.copy(sun.tint);
     this.uHaze.value.copy(haze);
+    // The day curve: night and the golden hour keep full ACES (that's where
+    // the film roll-off earns its keep — torch pools, sunsets, the moon);
+    // full daylight pulls the raw, saturated palette back in, keeping a
+    // whisper of the curve so speculars still land instead of clipping.
+    const day = THREE.MathUtils.clamp((sun.up - 0.12) / 0.35, 0, 1);
+    this.uToneOff.value = day * day * (3 - 2 * day) * 0.82;
+    this.dayLight = 1 - (day * day * (3 - 2 * day)) * 0.85;
   }
 
   /** the shared animation clock the shaders read (wrapped seconds) */
@@ -153,6 +209,7 @@ export class ShaderKit {
     shader.uniforms.uSunTint = this.uSunTint;
     shader.uniforms.uHaze = this.uHaze;
     shader.uniforms.uLightCount = this.uLightCount;
+    shader.uniforms.uToneOff = this.uToneOff;
     for (let i = 0; i < this.uLights.length; i++) {
       const slot = this.uLights[i];
       shader.uniforms[`uL${i}P`] = slot.pos;
@@ -261,7 +318,7 @@ vWorldNormal = normalize( mat3( modelMatrix ) * objectNormal );
 /** gentle saturation lift — runs after fog, over the encoded colour */
 const LIFT = /* glsl */ `
 float elLuma = dot( gl_FragColor.rgb, vec3( 0.299, 0.587, 0.114 ) );
-gl_FragColor.rgb = mix( vec3( elLuma ), gl_FragColor.rgb, 1.06 );
+gl_FragColor.rgb = mix( vec3( elLuma ), gl_FragColor.rgb, 1.10 );
 `;
 
 /**
@@ -323,7 +380,7 @@ float elShallow = smoothstep( 0.8, 0.3, vFill );
 float elLap = 0.55 + 0.45 * sin( uTime * 2.6 + ( vWorldPos.x + vWorldPos.z ) * 4.1 )
                         * sin( uTime * 1.7 + vWorldPos.x * 5.3 - vWorldPos.z * 3.7 );
 reflectedLight.indirectDiffuse += vec3( 0.92, 0.97, 1.0 )
-  * ( elShallow * elLap * ( 0.30 + 0.55 * uSunUp ) + elCrest * 0.08 * uSunUp );`,
+  * ( elShallow * elLap * ( 0.13 + 0.24 * uSunUp ) + elCrest * 0.05 * uSunUp );`,
     'water glint + fresnel + lights + foam');
     shader.fragmentShader = mustReplace(
       shader.fragmentShader, '#include <fog_fragment>', LIFT, 'water saturation lift');
@@ -416,4 +473,18 @@ gl_FragColor.rgb *= elTwb;`,
       'star brightness twinkle');
   };
   mat.customProgramCacheKey = () => 'elocraft-stars';
+}
+
+/**
+ * Give a plain sky material (dome, clouds, sun/moon balls) the kit's day
+ * blend — and nothing else. Without it the dome would sit at full ACES all
+ * day while the meadow it paints went raw, which is exactly the pale-blue
+ * "washed out" sky the user saw. Sprites stay out on purpose: their additive
+ * glow wants the film roll-off at every hour.
+ */
+export function bindDayTone(mat: THREE.Material, kit: ShaderKit): void {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uToneOff = kit.uToneOff;
+  };
+  mat.customProgramCacheKey = () => 'elocraft-daytone';
 }
