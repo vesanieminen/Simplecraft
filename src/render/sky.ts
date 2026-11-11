@@ -13,13 +13,23 @@
 import * as THREE from 'three';
 import { WORLD_SX, WORLD_SZ } from '../core/world';
 import { WeatherKind } from '../core/weather';
-import { SunState } from './shaders';
+import { bindDayTone, patchStarTwinkle, ShaderKit, SunState } from './shaders';
 
 export const DAY_SECONDS = 12 * 60;
 /** the sun's elevation at a day-phase (0..1); > 0 means the sun is up */
 export function sunElevation(hour: number): number {
   return Math.sin(hour * Math.PI * 2);
 }
+/**
+ * Where the parked 'day'/'night' modes hold the clock. Both must sit where
+ * the orbit/elevation geometry and the palette STOPS tell the same story —
+ * the old 0.5/0.0 parks landed on the elevation sine's zero crossings, so a
+ * "night" sky was geometrically sunrise (sun ball on the horizon, all the
+ * low-sun washes blazing). 0.32: full daylight, sun high; 0.78: deep night,
+ * sun far below, moon riding high.
+ */
+const DAY_PARK = 0.32;
+const NIGHT_PARK = 0.78;
 
 export const SKY_RADIUS = 320;
 /** matches the fog, so the renderer can clear to it: nothing in this game should
@@ -47,6 +57,18 @@ function blobTexture(): THREE.CanvasTexture {
   return t;
 }
 
+/** A soft additive halo sprite — the moon's silver aura and the sun's low
+ *  horizon glare. Sprites billboard themselves for free and ride wherever
+ *  their parent ball goes, so the orbit drags them around the sky. */
+function glowSprite(scale: number, color: number, opacity: number): THREE.Sprite {
+  const spr = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: blobTexture(), color, transparent: true, opacity,
+    blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+  }));
+  spr.scale.setScalar(scale);
+  return spr;
+}
+
 /** A slow cloud field: puffy textured quads that drift and fade with the sky. */
 class Clouds {
   private readonly mat: THREE.MeshBasicMaterial;
@@ -54,11 +76,13 @@ class Clouds {
   private readonly speeds: number[] = [];
   private readonly spanX = WORLD_SX * 2.6;
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, kit: ShaderKit) {
     this.mat = new THREE.MeshBasicMaterial({
       map: blobTexture(), transparent: true, side: THREE.DoubleSide,
       depthWrite: false, fog: false, opacity: 0,
     });
+    // puffs ride the same day blend as the dome they float in front of
+    bindDayTone(this.mat, kit);
     const geo = new THREE.PlaneGeometry(1, 1);
     let seed = 20261108;
     const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
@@ -240,7 +264,7 @@ export interface SkyEnv {
   sunBallDir(): THREE.Vector3;
 }
 
-export function createSky(scene: THREE.Scene): SkyEnv {
+export function createSky(scene: THREE.Scene, kit: ShaderKit): SkyEnv {
   // The sky hangs around the middle of the world, not the coordinate origin: on a
   // 128-block map the origin is a CORNER, and a dome centred there reaches 450
   // blocks from a camera near spawn — past the far plane, which used to punch a
@@ -258,6 +282,9 @@ export function createSky(scene: THREE.Scene): SkyEnv {
     domeGeo,
     new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false }),
   );
+  // the dome IS the sky's palette — it must breathe with the day blend
+  // exactly like the meadow under it, or noon shows a film-washed blue bowl
+  bindDayTone(dome.material as THREE.Material, kit);
   sky.add(dome);
 
   // the sun and moon ride one pivot so they stay opposite each other all day
@@ -268,6 +295,9 @@ export function createSky(scene: THREE.Scene): SkyEnv {
       new THREE.SphereGeometry(r, 16, 12),
       new THREE.MeshBasicMaterial({ color, fog: false }),
     );
+    // the solid balls follow the day blend (raw white sun at noon, filmic
+    // moon at midnight); the additive glow shell keeps full ACES at any hour
+    bindDayTone(ball.material as THREE.Material, kit);
     const glow = new THREE.Mesh(
       new THREE.SphereGeometry(r * 1.8, 16, 12),
       new THREE.MeshBasicMaterial({
@@ -283,22 +313,34 @@ export function createSky(scene: THREE.Scene): SkyEnv {
   const moon = mkBall(7, 0xe6ecf8, 0xc7d8f2, 0.2);
   moon.position.set(0, -230, -120);
   orbit.add(sun, moon);
+  // the horizon glare: a wide warm wash around the low sun, and a silver
+  // aura around the moon. Both scale and breathe with the clock (update()),
+  // both are one sprite each — the cheapest "dramatic sky" money can buy.
+  const glare = glowSprite(40, 0xffc46a, 0);
+  sun.add(glare);
+  const moonHalo = glowSprite(44, 0xbcd2f0, 0.14);
+  moon.add(moonHalo);
 
-  // stars: a dome of points that fade in after dusk
+  // stars: a dome of points that fade in after dusk — and each one breathes
+  // on its own seed, patched through the kit so the sky is never a still photo
   const starN = 900;
   const starPos = new Float32Array(starN * 3);
+  const starSeed = new Float32Array(starN);
   for (let i = 0; i < starN; i++) {
     const v = new THREE.Vector3().randomDirection();
     if (v.y < 0.05) v.y = 0.05 + Math.random() * 0.9;
     v.normalize().multiplyScalar(SKY_RADIUS * 0.9);
     starPos.set([v.x, v.y, v.z], i * 3);
+    starSeed[i] = Math.random();
   }
   const starGeo = new THREE.BufferGeometry();
   starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+  starGeo.setAttribute('aStarSeed', new THREE.BufferAttribute(starSeed, 1));
   const starMat = new THREE.PointsMaterial({
     color: 0xffffff, size: 1.6, sizeAttenuation: false,
     transparent: true, opacity: 0, depthWrite: false, fog: false,
   });
+  patchStarTwinkle(starMat, kit);
   const stars = new THREE.Points(starGeo, starMat);
   stars.frustumCulled = false;
   stars.renderOrder = -2;
@@ -376,7 +418,7 @@ export function createSky(scene: THREE.Scene): SkyEnv {
     (domeGeo.attributes.color as THREE.BufferAttribute).needsUpdate = true;
   };
 
-  const clouds = new Clouds(scene);
+  const clouds = new Clouds(scene, kit);
   const precip = new Precipitation(scene);
 
   let dayMode: DayMode = 'auto';
@@ -390,7 +432,7 @@ export function createSky(scene: THREE.Scene): SkyEnv {
   const UP_Z = new THREE.Vector3(0, 0, 1);
   const sunWorldDir = new THREE.Vector3(0.4, 0.9, 0.5);
   let curHour = 0.35;
-  const sunState: SunState = { dir: sunWorldDir, up: 1, low: 0, tint: new THREE.Color(0xfff6e0) };
+  const sunState: SunState = { dir: sunWorldDir, up: 1, low: 0, day: 1, tint: new THREE.Color(0xfff6e0) };
   const shadowWant = new THREE.Vector3(WORLD_SX / 2, 12, WORLD_SZ / 2);
   const shadowFocus = shadowWant.clone();
   const shadowTmp = new THREE.Vector3();
@@ -408,7 +450,13 @@ export function createSky(scene: THREE.Scene): SkyEnv {
       wet += (wetTarget - wet) * Math.min(1, dt * 0.4);
 
       if (dayMode === 'auto') phase = (phase + dt / DAY_SECONDS) % 1;
-      const hour = dayMode === 'day' ? 0.5 : dayMode === 'night' ? 0.0 : phase;
+      // Parked phases live where the sky's two clocks AGREE: the palette
+      // (STOPS) and the sun/moon orbit (noon at 0.25, sin elevation). The
+      // old parks — 0.5 "day", 0.0 "night" — sat exactly on the elevation
+      // sine's zero crossings, so parked night was geometrically SUNRISE:
+      // the dark sun ball sat on the horizon (a black hole in the sky) and
+      // every low-sun effect (rim, glare) fired at full strength.
+      const hour = dayMode === 'day' ? DAY_PARK : dayMode === 'night' ? NIGHT_PARK : phase;
       curHour = hour;
       const elev = sunElevation(hour);
       mixStop(hour);
@@ -454,6 +502,11 @@ export function createSky(scene: THREE.Scene): SkyEnv {
       sunWorldDir.copy(sunIsDown ? moon.position : sun.position)
         .applyAxisAngle(UP_Z, orbit.rotation.z)
         .normalize();
+      // The glare must follow the ball's TRUE height, not the shadow sun's:
+      // the floor below keeps frustums sane, but it would also peg the low
+      // factor at 1 at high noon — a full-screen additive wash all day (and
+      // a half-speed software rasteriser to go with it).
+      const ballY = sunWorldDir.y;
       if (sunWorldDir.y < 0.198) { // ≥ ~11°, keeps frustums sane
         sunWorldDir.y = 0.198;
         sunWorldDir.normalize();
@@ -463,6 +516,29 @@ export function createSky(scene: THREE.Scene): SkyEnv {
       sunState.low = THREE.MathUtils.clamp((0.5 - sunWorldDir.y) / 0.3, 0, 1)
         * (1 - wet * 0.5) * (sunIsDown ? 0.2 : 1);
       sunState.tint.copy(dir.color);
+      // How much the sun (never the moon) already lights the world: the kit
+      // blends its ACES down and its point-light pools to embers by daylight.
+      sunState.day = THREE.MathUtils.clamp((elev + 0.04) / 0.34, 0, 1)
+        * (1 - wet * 0.45);
+
+      // Horizon glare: a warm wash that swells around the sun as it dips
+      // toward the horizon — the bare ball used to read as a sticker. It
+      // breathes slightly and hides when the sky itself is hidden (marks).
+      // Both auras go INVISIBLE, not just transparent, when faded: a big
+      // additive quad is the most expensive pixel this sky paints, and a
+      // software rasteriser happily blends it at zero, forever.
+      const glareLow = sunIsDown ? 0
+        : THREE.MathUtils.clamp((0.5 - Math.max(ballY, 0)) / 0.3, 0, 1) * (1 - wet * 0.55);
+      const glareOpacity = marks ? glareLow * glareLow * 0.5 : 0;
+      glare.visible = glareOpacity > 0.004;
+      if (glare.visible) {
+        glare.scale.setScalar(34 + 96 * glareLow + Math.sin(kit.time * 0.7) * 3);
+        (glare.material as THREE.SpriteMaterial).opacity = glareOpacity;
+      }
+      // The moon keeps a silver aura that deepens with the night.
+      const haloOpacity = marks ? 0.10 + darkness * 0.16 : 0;
+      moonHalo.visible = haloOpacity > 0.004;
+      (moonHalo.material as THREE.SpriteMaterial).opacity = haloOpacity;
 
       // The shadow light hovers over the followed spot (Game points it at the
       // players). It lags the walk with a lerp, and snaps to the map's texel
@@ -482,7 +558,7 @@ export function createSky(scene: THREE.Scene): SkyEnv {
       precip.update(dt, camera);
     },
     dayPhase(): number {
-      return dayMode === 'day' ? 0.5 : dayMode === 'night' ? 0.0 : phase;
+      return dayMode === 'day' ? DAY_PARK : dayMode === 'night' ? NIGHT_PARK : phase;
     },
     setDayMode(mode: DayMode): void {
       dayMode = mode;

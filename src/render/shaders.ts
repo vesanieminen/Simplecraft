@@ -3,25 +3,73 @@
  *
  * Everything here is GLSL injected into three.js's stock Lambert shaders via
  * `onBeforeCompile` — no external assets, and no program rebuilds while the
- * game runs: the animated parts (time, sun position, haze colour) live on one
- * ShaderKit whose uniforms are swapped every frame from the loop (the chunk
- * manager's tick is the hook, same as the water-sheet drift).
+ * game runs: the animated parts (time, sun position, haze colour, and the
+ * world's POINT LIGHTS) live on one ShaderKit whose uniforms are moved every
+ * frame from the loop (the chunk manager's tick is the hook, same as the
+ * water-sheet drift).
  *
  * - `patchWaterSurface` — the water channel gets small analytic waves that
  *   displace the sheet a hair and bend its normals (the derivative is the same
  *   function, so the light wobbles exactly where the sheet moves), a fresnel
- *   lift that picks up the sky's haze colour at grazing angles, and a sun
- *   glint that tracks the real sun. Corner-averaged heights, the tiling wave
- *   sheet and the material's depth-write semantics are all untouched — this
- *   only dresses the geometry the mesher already built.
- * - `patchTerrainFinish` — a warm rim where faces graze the view at low sun
- *   (golden-hour edges on cliffs), plus a gentle saturation lift after fog so
- *   the meadow reads candy-bright instead of dusty.
+ *   lift that picks up the sky's haze colour at grazing angles, a sun glint
+ *   that tracks the real sun, and shore FOAM that whitens where the
+ *   corner-averaged sheet sits low (the mesher's `aFill` channel).
+ * - `patchTerrainFinish` — a warm rim where faces graze the view at low sun,
+ *   a gentle saturation lift, and the torch-light decode on chunk materials.
+ * - `patchDynamicLights` — the same torch-light decode alone, for the avatars,
+ *   animals and fish: the stuff that walks around inside a pool of firelight.
+ * - `patchStarTwinkle` — the sky's star field breathes.
+ *
+ * Point lights are SCALAR uniforms (position, colour×flicker, radius — per
+ * light uL0P/uL0C/uL0R …) filled per frame by render/lights.ts: the programs
+ * NEVER rebuild when a torch is placed or the Grown-Ups switch flips, only
+ * uniform values move, and the flicker folds into the colour on the CPU.
+ * Scalars and a boot-time compile max, not arrays and a loop, because
+ * software rasterisers flatten every branch and run the whole decode even
+ * while the count is zero — on CI's renderer that was half the world's
+ * framerate for eight lights that did not exist. See ShaderKit.lightCompileMax.
  *
  * Distance haze itself is ordinary scene fog — see the FogExp2 in sky.ts.
  */
 
 import * as THREE from 'three';
+
+/**
+ * SOFTENED ACES — once, globally, before any program compiles.
+ *
+ * ACES is beautiful at midnight and brutal on this game's flat, saturated,
+ * near-linear voxel palette at noon: measured on one parked day frame, it
+ * took the meadow's HSV saturation from 0.311 (main) to 0.194 and the sky
+ * from 0.456 to 0.286 — "washed out", in the user's words. The fix is not
+ * to drop ACES but to dial its strength: `uToneOff` blends the raw linear
+ * colour back in, driven per frame from the sun's height (≈0.8 raw at high
+ * noon, 0 at dusk/night where the film curve is the whole mood). A uniform
+ * on a chunk we patch once at import — zero program rebuilds, forever.
+ *
+ * `uToneOff` is declared for EVERY material three compiles, but only the
+ * materials we hand the kit's shared uniform to ever move it — everything
+ * else sees 0.0, which is plain full-strength ACES, exactly what a material
+ * without the blend does today (additive sprites want that: the flame's tip
+ * rolls off sweet and stays safe at any hour).
+ */
+function installSoftToneBlend(): void {
+  const pars = THREE.ShaderChunk['tonemapping_pars_fragment'];
+  if (!pars.includes('uToneOff')) {
+    THREE.ShaderChunk['tonemapping_pars_fragment'] = pars + '\nuniform float uToneOff;\n';
+  }
+  const body = THREE.ShaderChunk['tonemapping_fragment'];
+  if (!body.includes('uToneOff')) {
+    const patched = body.replace(
+      'gl_FragColor.rgb = toneMapping( gl_FragColor.rgb );',
+      'gl_FragColor.rgb = mix( toneMapping( gl_FragColor.rgb ), gl_FragColor.rgb, uToneOff );',
+    );
+    if (patched === body) {
+      throw new Error('shaders: three renamed the tone-mapping chunk — the soft-ACES blend died');
+    }
+    THREE.ShaderChunk['tonemapping_fragment'] = patched;
+  }
+}
+installSoftToneBlend();
 
 /** The sun (or moon) as far as the shaders care. */
 export interface SunState {
@@ -33,6 +81,27 @@ export interface SunState {
   low: number;
   /** the light's own colour */
   tint: THREE.Color;
+  /**
+   * How much the SUN (not the moon — sunInfo flips to the moon at night)
+   * already lights the world, 0..1: 0 deep night, 1 full day. The kit rides
+   * this to blend ACES away in daylight and fade point-light pools to embers
+   * so noon torchlight never stacks into a wash.
+   */
+  day: number;
+}
+
+/** Hard cap on world point lights — the ceiling; software GL compiles less. */
+export const MAX_WORLD_LIGHTS = 8;
+
+/** One live world light, as the kit receives it per frame (see lights.ts). */
+export interface WorldLight {
+  x: number; y: number; z: number;
+  /** colour × intensity, plain linear values */
+  r: number; g: number; b: number;
+  /** reach in blocks — the falloff is (1 − d²/r²)², so nothing beyond it */
+  radius: number;
+  /** stable 0..1 phase for the CPU-side flicker (folded in by setLights) */
+  seed: number;
 }
 
 /**
@@ -46,6 +115,41 @@ export class ShaderKit {
   private readonly uLowSun = { value: 0 };
   private readonly uSunTint = { value: new THREE.Color(1, 0.96, 0.88) };
   private readonly uHaze = { value: new THREE.Color(0.75, 0.88, 0.96) };
+  /**
+   * The point lights — one SET of SCALAR uniforms each (uL0P/uL0C/uL0R …),
+   * mutated IN PLACE by `setLights` every frame. The programs see the SAME
+   * uniforms forever; a torch going out is just `uLightCount` shrinking.
+   * Scalars, not arrays, because SwiftShader (CI's renderer) spills a whole
+   * program out of the constant banks the moment it declares a dynamically
+   * indexed uniform array — every pixel of the world got ~2x slower while
+   * the light loop sat empty. The colour slots also carry the FLICKER,
+   * folded on the CPU: the fragment decode stays a pure FMA chain.
+   */
+  /**
+   * How many lights the PROGRAMS decode. Set once at boot (before the first
+   * frame compiles anything) — software renderers flatten every branch and
+   * run the whole decode even when the count is zero, so there the program
+   * itself is built smaller. 8 on real GPUs, less on a CPU rasteriser.
+   */
+  lightCompileMax = MAX_WORLD_LIGHTS;
+  private readonly uLights = Array.from({ length: MAX_WORLD_LIGHTS }, () => ({
+    pos: { value: new THREE.Vector3() },
+    color: { value: new THREE.Color() },
+    range: { value: 1 },
+  }));
+  private readonly uLightCount = { value: 0 };
+  /**
+   * The soft-ACES blend — see installSoftToneBlend. 0 = full filmic, 1 = raw
+   * linear palette. The kit drives it from the sun's height; anything that
+   * receives the shared uniform follows the day for free.
+   */
+  readonly uToneOff = { value: 0 };
+  /**
+   * How much the sun already lights the world right now, 0..1 — the light
+   * keeper reads this to fade point lights down in full daylight (a torch
+   * should read as a flame plus a small warm pool at noon, not a second sun).
+   */
+  dayLight = 1;
 
   /** advance the animation — once per frame from the game loop */
   tick(dt: number, sun: SunState, haze: THREE.Color): void {
@@ -56,6 +160,55 @@ export class ShaderKit {
     this.uLowSun.value = sun.low;
     this.uSunTint.value.copy(sun.tint);
     this.uHaze.value.copy(haze);
+    // The day curve, off the SUN's height (never moonlight — sunInfo flips
+    // to the moon after dusk): night, rain and the golden hour keep full
+    // ACES (that's where the film roll-off earns its keep — torch pools,
+    // sunsets, the moon); full daylight reverts the palette to raw, exactly
+    // the saturation the painted art was authored at — with the ShaderKit's
+    // post-fog lift riding on top, noon reads MORE vivid than the pre-ACES
+    // baseline ever did. The blend passes through every intermediate on the
+    // way down, so dusk dark-rooms into the curve with no seam.
+    const day = THREE.MathUtils.clamp(sun.day, 0, 1);
+    this.uToneOff.value = day * day * (3 - 2 * day);
+    this.dayLight = 1 - day * day * (3 - 2 * day) * 0.9;
+  }
+
+  /** the shared animation clock the shaders read (wrapped seconds) */
+  get time(): number {
+    return this.uTime.value;
+  }
+
+  /**
+   * Publish this frame's lights (nearest-first order is the caller's job —
+   * see render/lights.ts). Passing nothing switches every pool off without
+   * touching a single program.
+   */
+  setLights(lights: readonly WorldLight[]): void {
+    const n = Math.min(this.lightCompileMax, lights.length);
+    const t = this.uTime.value;
+    for (let i = 0; i < n; i++) {
+      const l = lights[i];
+      const slot = this.uLights[i];
+      slot.pos.value.set(l.x, l.y, l.z);
+      // the flicker: two detuned sines on a stable per-light phase. Here it
+      // costs ~16 transcendental calls a frame; in the fragment shader it
+      // was hundreds of millions a second on a software rasteriser.
+      const ph = l.seed * 37.13;
+      const fl = 0.88 + 0.08 * Math.sin(t * 9.3 + ph) + 0.04 * Math.sin(t * 23.7 + ph * 2.7);
+      slot.color.value.setRGB(l.r * fl, l.g * fl, l.b * fl);
+      slot.range.value = l.radius;
+    }
+    this.uLightCount.value = n;
+  }
+
+  /** e2e lens: what the shaders were told last frame */
+  lightsDebug(): { count: number; max: number; lights: { x: number; y: number; z: number; radius: number }[] } {
+    const lights = [];
+    for (let i = 0; i < this.uLightCount.value; i++) {
+      const p = this.uLights[i].pos.value;
+      lights.push({ x: p.x, y: p.y, z: p.z, radius: this.uLights[i].range.value });
+    }
+    return { count: this.uLightCount.value, max: MAX_WORLD_LIGHTS, lights };
   }
 
   /** hand the shared uniform objects to a patched program */
@@ -66,10 +219,67 @@ export class ShaderKit {
     shader.uniforms.uLowSun = this.uLowSun;
     shader.uniforms.uSunTint = this.uSunTint;
     shader.uniforms.uHaze = this.uHaze;
+    shader.uniforms.uLightCount = this.uLightCount;
+    shader.uniforms.uToneOff = this.uToneOff;
+    for (let i = 0; i < this.uLights.length; i++) {
+      const slot = this.uLights[i];
+      shader.uniforms[`uL${i}P`] = slot.pos;
+      shader.uniforms[`uL${i}C`] = slot.color;
+      shader.uniforms[`uL${i}R`] = slot.range;
+    }
   }
 }
 
-const HEAD = /* glsl */ `
+/**
+ * The point-light decode, shared by the terrain, water and dynamic-material
+ * patches. Squared-distance falloff — (1 − d²/r²)², exactly zero past the
+ * radius, so the cost past a torch's reach is one dot product per light,
+ * half-lambert so walls and floors both catch the pool.
+ *
+ * SCALAR uniforms, hand-unrolled — deliberately no arrays, no loops: a
+ * dynamically indexed uniform array spills the whole program out of a
+ * software rasteriser's constant banks (measured: every pixel ~2x slower
+ * even while uLightCount is 0). uL*N already carries the flicker (setLights).
+ */
+function lightsGlslBody(max: number): string {
+  const decl: string[] = [];
+  const calls: string[] = [];
+  for (let i = 0; i < max; i++) {
+    decl.push(`uniform vec3 uL${i}P; uniform vec3 uL${i}C; uniform float uL${i}R;`);
+    calls.push(
+      i === 0
+        ? 'vec3 elSum = elOne( uL0P, uL0C, uL0R, nrm );'
+        : `if ( uLightCount > ${i} ) elSum += elOne( uL${i}P, uL${i}C, uL${i}R, nrm );`,
+    );
+  }
+  return `
+#define EL_MAX_LIGHTS ${max}
+${decl.join('\n')}
+uniform int uLightCount;
+
+vec3 elOne( vec3 elP, vec3 elC, float elR, vec3 elN ) {
+  vec3 elD = elP - vWorldPos;
+  float elR2 = elR * elR;
+  float elD2 = dot( elD, elD );
+  if ( elD2 > elR2 ) return vec3( 0.0 );
+  float elAtt = 1.0 - elD2 / elR2;
+  elAtt *= elAtt * elAtt; // (1 − d²/r²)³: hot at the flame, textured beyond
+  vec3 elL = elD * inversesqrt( max( elD2, 1e-4 ) );
+  // half-lambert, but tilted toward the flame: surfaces facing away keep a
+  // third of the pool (rooms and cave floors need it), surfaces facing the
+  // fire take all of it — a pool reads as light FROM the torch, not fog
+  return elC * ( elAtt * ( dot( elN, elL ) * 0.66 + 0.34 ) );
+}
+
+vec3 elPointLights( vec3 nrm ) {
+  if ( uLightCount < 1 ) return vec3( 0.0 );
+${calls.join('\n')}
+  return elSum;
+}
+`;
+}
+
+const HEAD_BASE = /* glsl */ `
 uniform float uTime;
 uniform vec3 uSunDir;
 uniform float uSunUp;
@@ -79,6 +289,11 @@ uniform vec3 uHaze;
 varying vec3 vWorldPos;
 varying vec3 vWorldNormal;
 `;
+
+/** HEAD + the light decode sized to the kit's boot-time compile max */
+function headGlsl(kit: ShaderKit): string {
+  return HEAD_BASE + lightsGlslBody(kit.lightCompileMax);
+}
 
 /**
  * Three short crossing wave trains, and the analytic derivative of the same
@@ -117,7 +332,7 @@ vWorldNormal = normalize( mat3( modelMatrix ) * objectNormal );
 /** gentle saturation lift — runs after fog, over the encoded colour */
 const LIFT = /* glsl */ `
 float elLuma = dot( gl_FragColor.rgb, vec3( 0.299, 0.587, 0.114 ) );
-gl_FragColor.rgb = mix( vec3( elLuma ), gl_FragColor.rgb, 1.06 );
+gl_FragColor.rgb = mix( vec3( elLuma ), gl_FragColor.rgb, 1.12 );
 `;
 
 /**
@@ -133,22 +348,23 @@ function mustReplace(src: string, include: string, code: string, where: string):
 }
 
 /**
- * The water channel: waves, fresnel haze pickup and a sun glint on the
- * mesher's existing geometry. Lighting (hemi/directional/fog) still flows
- * through three's Lambert chain — the glint rides in as indirect diffuse.
+ * The water channel: waves, fresnel haze pickup, a sun glint and shore foam
+ * on the mesher's existing geometry. Lighting (hemi/directional/fog and the
+ * point lights) still flows through three's Lambert chain — the glint and the
+ * foam ride in as indirect diffuse.
  */
 export function patchWaterSurface(mat: THREE.MeshLambertMaterial, kit: ShaderKit): void {
   mat.onBeforeCompile = (shader) => {
     kit.attach(shader);
-    shader.vertexShader = HEAD + WAVES + shader.vertexShader;
+    shader.vertexShader = headGlsl(kit) + WAVES + 'attribute float aFill;\nvarying float vFill;\n' + shader.vertexShader;
     shader.vertexShader = mustReplace(
       shader.vertexShader, '#include <begin_vertex>',
-      'transformed.y += elWave( ( modelMatrix * vec4( transformed, 1.0 ) ).xz, uTime );',
+      'transformed.y += elWave( ( modelMatrix * vec4( transformed, 1.0 ) ).xz, uTime );\nvFill = aFill;',
       'water wave displacement');
     shader.vertexShader = mustReplace(
       shader.vertexShader, '#include <beginnormal_vertex>', NORMAL_TRAIL, 'water world normal');
 
-    shader.fragmentShader = HEAD + WAVES + shader.fragmentShader;
+    shader.fragmentShader = headGlsl(kit) + WAVES + 'varying float vFill;\n' + shader.fragmentShader;
     // top faces take the analytic wave normal (in view space, where three's
     // lighting lives); sides keep the blocky box normal untouched
     shader.fragmentShader = mustReplace(shader.fragmentShader, '#include <normal_fragment_begin>', `
@@ -158,7 +374,10 @@ vec3 elN = normalize( mix( vWorldNormal, elWN, elTop ) );
 vec3 elNView = ( viewMatrix * vec4( elN, 0.0 ) ).xyz;
 normal = normalize( mix( normal, elNView * sign( dot( normal, elNView ) + 1e-5 ), elTop ) );`,
     'water wave normal');
-    // glint + fresnel in world space, sharing the same wave normal
+    // glint + fresnel + torch light + foam in world space, sharing the wave
+    // normal. The foam reads the mesher's aFill: where the corner-averaged
+    // sheet sits low — a spread soak, the thin seventh cell of a reach — the
+    // shore froths; a brimming pool stays mirror-clean.
     shader.fragmentShader = mustReplace(shader.fragmentShader, '#include <lights_fragment_end>', `
 vec3 elVN = normalize( mix( vWorldNormal, elWaveNormal( vWorldPos.xz, uTime ), abs( vWorldNormal.y ) ) );
 vec3 elVV = normalize( cameraPosition - vWorldPos );
@@ -168,8 +387,15 @@ float elHD = max( dot( elVN, normalize( elVL + elVV ) ), 0.0 );
 float elGlint = pow( elHD, 150.0 );
 float elSheen = pow( elHD, 16.0 ) * 0.12;
 reflectedLight.indirectDiffuse += uHaze * elFres * ( 0.05 + 0.20 * uSunUp )
-                               + uSunTint * ( elGlint * 1.8 + elSheen ) * uSunUp;`,
-    'water glint + fresnel');
+                               + uSunTint * ( elGlint * 1.8 + elSheen ) * uSunUp
+                               + elPointLights( elVN ) * 0.8;
+float elCrest = clamp( elWave( vWorldPos.xz, uTime ) * 16.0, 0.0, 1.0 );
+float elShallow = smoothstep( 0.8, 0.3, vFill );
+float elLap = 0.55 + 0.45 * sin( uTime * 2.6 + ( vWorldPos.x + vWorldPos.z ) * 4.1 )
+                        * sin( uTime * 1.7 + vWorldPos.x * 5.3 - vWorldPos.z * 3.7 );
+reflectedLight.indirectDiffuse += vec3( 0.92, 0.97, 1.0 )
+  * ( elShallow * elLap * ( 0.13 + 0.24 * uSunUp ) + elCrest * 0.05 * uSunUp );`,
+    'water glint + fresnel + lights + foam');
     shader.fragmentShader = mustReplace(
       shader.fragmentShader, '#include <fog_fragment>', LIFT, 'water saturation lift');
   };
@@ -177,28 +403,102 @@ reflectedLight.indirectDiffuse += uHaze * elFres * ( 0.05 + 0.20 * uSunUp )
 }
 
 /**
- * The chunk terrain channels: a warm low-sun rim and the saturation lift.
- * Kept deliberately faint — the blocks' own painted art carries the look.
+ * The chunk terrain channels: a warm low-sun rim, the saturation lift and
+ * the point-light decode. Kept deliberately faint — the blocks' own painted
+ * art carries the look; the torchlight is what paints the night.
  */
 export function patchTerrainFinish(mat: THREE.MeshLambertMaterial, kit: ShaderKit): void {
   mat.onBeforeCompile = (shader) => {
     kit.attach(shader);
-    shader.vertexShader = HEAD + shader.vertexShader;
+    shader.vertexShader = headGlsl(kit) + shader.vertexShader;
     shader.vertexShader = mustReplace(
       shader.vertexShader, '#include <begin_vertex>', VERTEX_TRAIL, 'terrain world pos');
     shader.vertexShader = mustReplace(
       shader.vertexShader, '#include <beginnormal_vertex>', NORMAL_TRAIL, 'terrain world normal');
 
-    shader.fragmentShader = HEAD + shader.fragmentShader;
+    shader.fragmentShader = headGlsl(kit) + shader.fragmentShader;
     shader.fragmentShader = mustReplace(shader.fragmentShader, '#include <lights_fragment_end>', `
 vec3 elTN = normalize( vWorldNormal );
 vec3 elTV = normalize( cameraPosition - vWorldPos );
 float elRim = pow( 1.0 - clamp( dot( elTN, elTV ), 0.0, 1.0 ), 3.0 )
             * clamp( dot( elTN, normalize( uSunDir ) ) * 0.7 + 0.3, 0.0, 1.0 );
-reflectedLight.indirectDiffuse += uSunTint * elRim * uLowSun * 0.20;`,
-    'terrain low-sun rim');
+reflectedLight.indirectDiffuse += uSunTint * elRim * uLowSun * 0.20
+                               + elPointLights( elTN );`,
+    'terrain low-sun rim + point lights');
     shader.fragmentShader = mustReplace(
       shader.fragmentShader, '#include <fog_fragment>', LIFT, 'terrain saturation lift');
   };
   mat.customProgramCacheKey = () => 'elocraft-terrain';
+}
+
+/**
+ * Avatars, animals, fish — everything that walks around inside a pool of
+ * firelight. The same point-light decode, nothing else: no rim, no lift, no
+ * saturation opinions — just lights. render/lights.ts sweeps the scene for
+ * Lambert materials that have never been patched and gives them this.
+ */
+export function patchDynamicLights(mat: THREE.MeshLambertMaterial, kit: ShaderKit): void {
+  mat.onBeforeCompile = (shader) => {
+    kit.attach(shader);
+    shader.vertexShader = headGlsl(kit) + shader.vertexShader;
+    shader.vertexShader = mustReplace(
+      shader.vertexShader, '#include <begin_vertex>', VERTEX_TRAIL, 'dynamic world pos');
+    shader.vertexShader = mustReplace(
+      shader.vertexShader, '#include <beginnormal_vertex>', NORMAL_TRAIL, 'dynamic world normal');
+
+    shader.fragmentShader = headGlsl(kit) + shader.fragmentShader;
+    shader.fragmentShader = mustReplace(
+      shader.fragmentShader, '#include <lights_fragment_end>',
+      'reflectedLight.indirectDiffuse += elPointLights( normalize( vWorldNormal ) );',
+      'dynamic point lights');
+  };
+  mat.customProgramCacheKey = () => 'elocraft-dynamic';
+}
+
+/**
+ * The star field: each star breathes — size and brightness wobbling on two
+ * detuned sines of the kit's time, with a per-star seed (the geometry's
+ * `aStarSeed` attribute, see sky.ts) so the sky never pulses as one lamp.
+ * The only patched PointsMaterial in the game, so its cache key is small
+ * print nobody collides with.
+ */
+export function patchStarTwinkle(mat: THREE.PointsMaterial, kit: ShaderKit): void {
+  mat.onBeforeCompile = (shader) => {
+    kit.attach(shader);
+    shader.vertexShader = `
+attribute float aStarSeed;
+varying float vStarSeed;
+uniform float uTime;
+` + shader.vertexShader;
+    shader.vertexShader = mustReplace(
+      shader.vertexShader, 'gl_PointSize = size;',
+      `gl_PointSize = size;
+vStarSeed = aStarSeed;
+gl_PointSize *= 0.72 + 0.5 * sin( uTime * ( 1.9 + fract( aStarSeed * 7.31 ) * 4.4 ) + aStarSeed * 91.7 );`,
+      'star size twinkle');
+    shader.fragmentShader = `
+varying float vStarSeed;
+uniform float uTime;
+` + shader.fragmentShader;
+    shader.fragmentShader = mustReplace(
+      shader.fragmentShader, '#include <fog_fragment>', `
+float elTwb = 0.62 + 0.38 * sin( uTime * ( 1.9 + fract( vStarSeed * 7.31 ) * 4.4 ) + vStarSeed * 91.7 );
+gl_FragColor.rgb *= elTwb;`,
+      'star brightness twinkle');
+  };
+  mat.customProgramCacheKey = () => 'elocraft-stars';
+}
+
+/**
+ * Give a plain sky material (dome, clouds, sun/moon balls) the kit's day
+ * blend — and nothing else. Without it the dome would sit at full ACES all
+ * day while the meadow it paints went raw, which is exactly the pale-blue
+ * "washed out" sky the user saw. Sprites stay out on purpose: their additive
+ * glow wants the film roll-off at every hour.
+ */
+export function bindDayTone(mat: THREE.Material, kit: ShaderKit): void {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uToneOff = kit.uToneOff;
+  };
+  mat.customProgramCacheKey = () => 'elocraft-daytone';
 }

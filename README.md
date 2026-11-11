@@ -248,6 +248,15 @@ New in the palette (Y / △), right next to the planks they're built from:
   and about half a minute later it grows into a full tree — trunk, leaves
   and all, with a little sparkle and a toast. Saplings you leave behind
   keep growing the next time you join. (Chop the tree, plant the next one.)
+- **🔥 Torch** — stick one on a wall or a floor and it **burns all night**:
+  a little wobbling flame, and more importantly a pool of *real* warm light
+  that falls on the grass and stone around it. A line of torches turns a
+  dark meadow into a string of firelight islands you can follow home; the
+  🔥 **Lights** row (below) is the master switch. A torch needs something
+  to lean on — a wall, a floor, the top of another torch — and it rides
+  saves and restarts like every other block. The **💡 Glow Block** has been
+  in the palette all along; now it finally *glows*, pooling a soft
+  daylight-amber light over whatever you build with it.
 
 And the wood shelf is complete: **logs** with bark sides and growth-ring
 ends, **planks**, and **leaves** were already in the palette — now the whole
@@ -428,6 +437,7 @@ Grown-ups control the sky (*Start → 🧑 Grown-Ups*):
 | **🌦️ Weather** | Sometimes (a few minutes of dry, maybe a short shower) · Never · Always rain · Always snow |
 | **☀️ Day & Night** | Day and night (the sun circles ~12 real minutes) · Always day · Always night · No sun or moon |
 | **🌒 Shadows** | On · Off — the sun and moon throw blocky shadows; Off is the gentle choice for old tablets |
+| **🔥 Lights** | On · Off — torches, glow blocks and opened chests throw real pools of flickering light; Off is the gentle look for very old tablets |
 
 Both choices are saved on the tablet, and a parked sun parks instantly —
 bedtime stories at perpetual sunset, or a rainstorm that never stops,
@@ -440,6 +450,17 @@ cliffs, walls, towers, animals and kids all shade the meadow — with a
 soft moon shadow through the night. The sharpness suits itself to the
 machine: smooth PCF shadows on any real graphics chip, crisp blocky ones
 on old tablets, and the 🌒 Shadows row turns them off entirely.
+
+And when the sun goes down, the night really *changes*. The blue deepens,
+the stars twinkle, the moon gets a halo and the sun a glare. Then every
+light in the world starts **throwing light**: torches, glow blocks, opened
+treasure chests and star pickups each pool warm flickering firelight onto
+the ground and the walls around them — the flicker you see on the grass is
+the same sine the flame sprite wobbles on — and the pools stack, so a row
+of torches lights the whole path. Place three torches by your front door
+and night stops being a wall; it becomes a lamp-lit village.
+
+![Three torches beside the stone wall at night — warm flickering pools of firelight, moon shadow, stars](docs/screenshots/lights.jpg)
 
 ## Treasure chests — and the grown-up switch 🔒
 

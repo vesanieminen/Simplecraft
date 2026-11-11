@@ -19,7 +19,7 @@ import {
   ATLAS_CHEST_OPEN_TOP, ATLAS_CHEST_SIDE, ATLAS_DIRT, ATLAS_DOOR, ATLAS_DOOR_TOP, ATLAS_DYNAMITE_CAP, ATLAS_LADDER,
   ATLAS_DYNAMITE_SIDE, ATLAS_GLASS, ATLAS_GLOW, ATLAS_GRASS_SIDE, ATLAS_GRASS_TOP,
   ATLAS_LEAVES, ATLAS_LOG_END, ATLAS_LOG_SIDE, ATLAS_MUSIC, ATLAS_PLANKS, ATLAS_ROCK,
-  ATLAS_SAND, ATLAS_SCORCH, ATLAS_SPARKLE, ATLAS_STONE, ATLAS_WATER, ATLAS_WEAVE,
+  ATLAS_SAND, ATLAS_SCORCH, ATLAS_SPARKLE, ATLAS_STONE, ATLAS_TORCH, ATLAS_WATER, ATLAS_WEAVE,
   PLANT_ATLAS_CELLS,
 } from '../core/blocks';
 
@@ -695,6 +695,31 @@ function drawWeave(ctx: CanvasRenderingContext2D, ox: number): void {
   speckle(ctx, ox, '#efefef', 0.07, 41);
 }
 
+/**
+ * The torch post, painted across the whole cell (the mesher squeezes it onto
+ * a slim column): a hand-cut wooden shaft with a charred, smoking head. The
+ * flame itself is a render-side billboard (render/lights.ts) — this art is
+ * what the torch looks like even when the lights are switched off.
+ */
+function drawTorch(ctx: CanvasRenderingContext2D, ox: number): void {
+  rect(ctx, ox, 0, 0, S, S, '#8a5a2c'); // the shaft
+  for (const [x, w, c] of [
+    [2, 3, '#6e4520'], [9, 2, '#a8763f'], [14, 3, '#6e4520'], [21, 2, '#a8763f'], [26, 4, '#7a4d22'],
+  ] as const) rect(ctx, ox, x, 10, w, S - 10, c); // grain, only below the char
+  rect(ctx, ox, 0, 10, S, 1, '#5c3d1c'); // where the charred head meets the shaft
+  // the charred, tarred head — dark, with live coals glowing through it
+  rect(ctx, ox, 0, 0, S, 10, '#3a2c20');
+  speckle(ctx, ox, '#241a12', 0.16, 97);
+  for (const [x, y] of [[6, 3], [14, 6], [22, 2], [27, 7], [10, 8]] as const) {
+    rect(ctx, ox, x, y, 2, 2, '#ff9c3a'); // coals
+    rect(ctx, ox, x, y, 1, 1, '#ffe9a0');
+  }
+  // a couple of rope wrappings where the head is bound on
+  rect(ctx, ox, 0, 9, S, 1, '#c8a06a');
+  rect(ctx, ox, 0, 12, S, 1, '#c8a06a');
+  outline(ctx, ox, '#4c331d');
+}
+
 type CellArt = (ctx: CanvasRenderingContext2D, ox: number) => void;
 
 /** every atlas cell, keyed by its id from core/blocks.ts */
@@ -728,6 +753,7 @@ const BLOCK_ART: Record<number, CellArt> = {
   [ATLAS_CHEST_INSIDE]: drawChestInside,
   [ATLAS_CHEST_OPEN_TOP]: drawChestOpenTop,
   [ATLAS_LADDER]: drawLadder,
+  [ATLAS_TORCH]: drawTorch,
 };
 
 let cachedBlock: THREE.CanvasTexture | null = null;
@@ -776,6 +802,54 @@ export function waterTexture(): THREE.CanvasTexture {
   // same reason as the block atlas: tints in this game are plain linear values
   tex.colorSpace = THREE.NoColorSpace;
   cachedWater = tex;
+  return tex;
+}
+
+/**
+ * The torch flame's billboard. Soft additive blob: a hot white-gold core
+ * melting into amber, with a tapered tip — the shape a fire reads as even at
+ * a dozen blocks. Drawn with plain linear values like every other texture
+ * here (see the NoColorSpace trap); the light rig stretches and wobbles it
+ * per frame, so the art itself just has to sit still and glow.
+ */
+let cachedFlame: THREE.CanvasTexture | null = null;
+
+export function flameTexture(): THREE.CanvasTexture {
+  if (cachedFlame) return cachedFlame;
+  const W = 32, H = 44;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d')!;
+  // outer amber body — a wide round bottom
+  let g = ctx.createRadialGradient(16, 26, 2, 16, 26, 15);
+  g.addColorStop(0, 'rgba(255,170,60,0.85)');
+  g.addColorStop(0.55, 'rgba(255,120,30,0.45)');
+  g.addColorStop(1, 'rgba(255,90,20,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 8, W, H - 8);
+  // the tongue: a narrower glow climbing toward the tip
+  g = ctx.createRadialGradient(16, 20, 1, 16, 22, 13);
+  g.addColorStop(0, 'rgba(255,236,150,0.95)');
+  g.addColorStop(0.6, 'rgba(255,180,70,0.5)');
+  g.addColorStop(1, 'rgba(255,150,50,0)');
+  ctx.save();
+  ctx.translate(16, 20); ctx.scale(0.52, 1.25); ctx.translate(-16, -20);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+  // the white-hot heart
+  g = ctx.createRadialGradient(16, 26, 0, 16, 26, 6);
+  g.addColorStop(0, 'rgba(255,255,235,1)');
+  g.addColorStop(0.6, 'rgba(255,240,170,0.75)');
+  g.addColorStop(1, 'rgba(255,220,120,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 8, W, H - 8);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+  tex.colorSpace = THREE.NoColorSpace; // same rule as every texture here
+  cachedFlame = tex;
   return tex;
 }
 

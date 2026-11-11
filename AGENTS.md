@@ -498,6 +498,66 @@ event. Renaming a storage key orphans the family's existing saves.
   of the same frame with the row flipped — chunk remeshing is budgeted, so the
   census waits 25 frames and stays inside one `test()` (a reload would reset
   the parked clock). `scripts/shadow-shots.ts` shoots the eyeball set.
+- **World lights** (`render/lights.ts`, `Game.lights` + `ShaderKit` in
+  `render/shaders.ts`): torches, glow blocks, opened chests and star pickups
+  light the world through **scalar uniforms** on the shared chunk materials —
+  `uL0P/uL0C/uL0R`… ×8 (`MAX_WORLD_LIGHTS`), hand-unrolled by
+  `lightsGlslBody()`. Do **not** "tidy" these into a uniform array: on
+  SwiftShader a dynamically indexed uniform array spills the whole program
+  out of the constant banks, and branches are flattened — an `if (i < count)`
+  decode runs the full loop even at count 0. Both measured ~2× frame cost on
+  CI's rasteriser; the unrolled scalar chain with `elBreak` is what survives.
+  `ShaderKit.lightCompileMax` (8 on real GPU, **3** on software GL) is set
+  **once at boot** in `game.ts` from the same `detectShadowQuality` detector,
+  before the first frame compiles the programs — that's what keeps "lights
+  never rebuild a program" true *including* for the 🔥 Lights toggle, which
+  only ever changes `uLightCount` (and `LightKeeper.sync`'s `budget`, which
+  also star-lights and the flame-pool cap). Light list: `LightKeeper.sync`
+  gathers torch/glow/chest emitters within a radius of each camera (plus the
+  nearest 4 star pickups — `pool` + `starLight`, both session-only like the
+  satchel), scores `weight × (1 − d/r)`, sorts, truncates to `max`, and
+  publishes. **Flicker is CPU-side**: `setLights` folds two detuned sines
+  (9.3 / 23.7 rad/s, phase from the cell hash) into `uLightColor` per frame,
+  so the fragment decode is a pure FMA chain; the flame sprites wobble on
+  the same clock, so the pool and the flame are provably the same fire.
+  Attenuation is `(1 − d²/r²)³` with the half-lambert tilted toward the
+  flame (`0.66·NdotL + 0.34`) and the peaks tuned hot-at-the-flame but
+  under 1 (torch `[0.40,0.21,0.075]`, r 6.2 — see the constants in
+  `lights.ts`): three torches along one wall must overlap into a warm lane,
+  never stack a blown cream slab. **The wash fix — `uToneOff`**
+  (`installSoftToneBlend` in `render/shaders.ts`): ACES@1.25 is a midnight
+  masterpiece and a noon wash machine (measured: ground HSV sat 0.311 →
+  0.194 on the same parked frame). The tone-mapping chunks are patched ONCE
+  at import to `mix(toneMapping(c), c, uToneOff)`; `ShaderKit.tick` drives
+  the blend off `sunInfo().day` (a field on the true SUN elevation — never
+  `sunInfo().up`, which describes the MOON at night and once half-blended
+  the moonlight as if it were noon), so noon runs raw-palette, dusk/night
+  keep full film, and rain thins `day` to keep weather moody. Unbound
+  materials (additive sprites, star points) default to 0 = full ACES — the
+  flame tip wants its roll-off at any hour. The sky dome, cloud puffs and
+  sun/moon balls bind the blend via `bindDayTone`; the terrain/water
+  saturation lift (post-fog, `LIFT`, 1.12) is what carries noon PAST the
+  pre-ACES baseline (measured ground sat 0.326 vs main's 0.311, blown 0).
+  Point lights also fade to embers by day (`ShaderKit.dayLight`, applied
+  in `LightKeeper.candidate`) — a noon torch reads as a flame with a shy
+  warm pool, not a second sun. **Day/night parks**:
+  `DAY_PARK=0.32` / `NIGHT_PARK=0.78` — the palette stops say 0/1=midnight,
+  but `sunElevation=sin(2πh)` puts zenith at 0.25, so the old parks (0.5 and
+  0.0) sat on the elevation's zero crossings and a "parked night" was
+  geometrically sunrise (black sun orb on the horizon, full low-sun wash —
+  pre-existing, exposed by the sun-glare sprite). The glare follows the
+  ball's TRUE elevation (`skyEnv.ballY` is captured *before* `sunInfo()`
+  floors the elevation to ~11° for the shadow frustum) and is `visible =
+  false` when faded, not just transparent, so an invisible orb can't bleed
+  through bright snow. Grown-Ups **🔥 Lights** row sits at index **10**
+  (after Shadows 9; **Back moved to 11** — the weather e2e row labels are
+  pinned, and the torch e2e toggles row 10). e2e lens: `__lbw.lightsNow()`
+  (`count/max/flames/emitters/lights[{x,y,z,r,kind}]`) and
+  `__lbw.shaderTime()`; the torch test drives placement through the real
+  `trySet`, counts brighter-than-day pixels at a 640×360 viewport (the
+  software-GL budget), and restores its wall byte-for-byte + `saveNow`
+  like the ladder test. `scripts/lights-shots.ts` shoots the before/after
+  pair and the hero (`docs/screenshots/lights.jpg`).
 - ⚠️ **This worktree has twice silently reverted working-tree files mid-session**
   (game.ts, sky.ts, main.ts, tests…): commit early, commit often, and re-check
   `git status`/`git log` after any mysterious failure.

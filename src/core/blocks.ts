@@ -60,13 +60,21 @@ export const BUCKET: BlockId = 39;
  * up, hold the sneak/dive button to climb down, hold nothing to cling.
  */
 export const LADDER: BlockId = 40;
+/**
+ * The torch (render/lights.ts): a slim glowing stick on a post. NOT solid —
+ * you walk through it — and it never fills its cell: the mesher draws a
+ * narrow post (torchBoxes) and the render side adds a flickering flame plus
+ * a warm light that pools on the snow at midnight. It needs a floor or a
+ * wall, same as a real torch does.
+ */
+export const TORCH: BlockId = 41;
 
 /**
  * Cells of the procedural *block* texture atlas (see render/textures.ts).
  * One 32x32 cell per block face style, laid out in a single row; the mesher
  * divides u by ATLAS_CELL_COUNT, so keep it in step with BLOCK_CELLS there.
  */
-export const ATLAS_CELL_COUNT = 29;
+export const ATLAS_CELL_COUNT = 30;
 export const ATLAS_DYNAMITE_SIDE = 0;
 export const ATLAS_DYNAMITE_CAP = 1;
 export const ATLAS_GRASS_TOP = 2;
@@ -104,6 +112,8 @@ export const ATLAS_CHEST_INSIDE = 26;
 export const ATLAS_CHEST_OPEN_TOP = 27;
 /** a climbing ladder: two upright rails and the rungs between them */
 export const ATLAS_LADDER = 28;
+/** the torch post: wood grain below, a charred smoking head above */
+export const ATLAS_TORCH = 29;
 
 /**
  * How a treasure chest is built. It is not a cube, and only its TOP ever
@@ -350,6 +360,14 @@ const DEFS: BlockDef[] = [
     solid: false, opaque: false,
   },
   {
+    // A torch: a slim glowing post you stick on the ground or against a wall.
+    // Not solid (kids walk through it), and the flame over its head is a
+    // render-side billboard — what makes it a LIGHT is render/lights.ts.
+    id: TORCH, name: 'Torch', icon: '🔥', color: rgb(228, 160, 96),
+    sideAtlasCell: ATLAS_TORCH,
+    solid: false, opaque: false,
+  },
+  {
     // The one palette item that is a tool instead of a brick: scoop a spring
     // with it, pour the spring out somewhere else (core/bucket.ts). The
     // player carries it, so it never lands in the voxel grid.
@@ -412,7 +430,7 @@ export type SoundFamily = 'wood' | 'stone' | 'soft' | 'glass' | 'plant';
 
 const SOUND_FAMILIES = new Map<BlockId, SoundFamily>([
   [WOOD, 'wood'], [PLANKS, 'wood'], [SLAB, 'wood'], [STAIRS, 'wood'], [CHEST, 'wood'], [CHEST_OPEN, 'wood'],
-  [MUSIC, 'wood'], [DYNAMITE, 'wood'], [LADDER, 'wood'],
+  [MUSIC, 'wood'], [DYNAMITE, 'wood'], [LADDER, 'wood'], [TORCH, 'wood'],
   [STONE, 'stone'], [BRICKS, 'stone'], [ROCK, 'stone'],
   [GRASS, 'soft'], [DIRT, 'soft'], [SAND, 'soft'], [SCORCH, 'soft'], [C_WHITE, 'soft'], [BOUNCY, 'soft'],
   [GLASS, 'glass'], [GLOW, 'glass'], [SPARKLE, 'glass'],
@@ -450,6 +468,19 @@ export function isBucket(id: BlockId): boolean {
 /** a climbing ladder — never solid, always leaning against a wall */
 export function isLadderBlock(id: BlockId): boolean {
   return id === LADDER;
+}
+/** a torch — a slim light post, never solid, flame is render-side */
+export function isTorchBlock(id: BlockId): boolean {
+  return id === TORCH;
+}
+/**
+ * Voxel ids that throw real light into the world's light rig
+ * (render/lights.ts): the torch's fire, the glow block's steady lamp and the
+ * treasure still lying in an opened chest. Everything the light keeper
+ * tracks rides on this one predicate.
+ */
+export function emitsLight(id: BlockId): boolean {
+  return id === TORCH || id === GLOW || id === CHEST_OPEN;
 }
 /** collidable height of a block id in its cell (0 for non-solids, 0.5 for a slab) */
 export function solidHeightOf(id: BlockId): number {
@@ -490,6 +521,18 @@ export function rotateStairFacing(facing: number): StairFacing {
  */
 export type LadderFacing = 0 | 1 | 2 | 3;
 
+/** how tall a torch's wooden post stands in its cell (the flame rides above) */
+export const TORCH_POST_H = 0.7;
+
+/**
+ * The wooden post of a torch in the cell at (x, y, z): a slim square column
+ * dead centre of the cell. The mesher paints it; the flickering flame above
+ * it is pure render (render/lights.ts), like the open chest's lid.
+ */
+export function torchBoxes(x: number, y: number, z: number): VoxelBox {
+  return [x + 0.36, y, z + 0.36, x + 0.64, y + TORCH_POST_H, z + 0.64];
+}
+
 /** how thick a ladder's plank panel is, in cells (thin — a real ladder is) */
 export const LADDER_DEPTH = 0.22;
 
@@ -518,7 +561,7 @@ export const PALETTE: BlockId[] = [
   GRASS, DIRT, STONE, SAND, WOOD, PLANKS, STAIRS, SLAB, DOOR, LADDER, BRICKS, GLASS, LEAVES,
   BUCKET,
   SAPLING, FLOWER_RED, FLOWER_YELLOW, TALLGRASS,
-  GLOW, BOUNCY, SPARKLE, MUSIC, DYNAMITE,
+  GLOW, TORCH, BOUNCY, SPARKLE, MUSIC, DYNAMITE,
   C_RED, C_ORANGE, C_YELLOW, C_GREEN, C_BLUE, C_PURPLE, C_PINK, C_WHITE,
 ];
 
@@ -537,6 +580,6 @@ export function paletteFor(allowChests: boolean): BlockId[] {
 
 /** Quick-cycling favorites for shoulder buttons. */
 export const FAVORITES: BlockId[] = [
-  GRASS, PLANKS, STAIRS, SLAB, BRICKS, GLASS, DOOR, GLOW, BOUNCY, SPARKLE, MUSIC, DYNAMITE,
+  GRASS, PLANKS, STAIRS, SLAB, BRICKS, GLASS, DOOR, GLOW, TORCH, BOUNCY, SPARKLE, MUSIC, DYNAMITE,
   C_RED, C_BLUE, C_PINK, C_YELLOW,
 ];
