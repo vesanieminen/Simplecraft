@@ -58,7 +58,7 @@ const KINDS: Record<number, KindDef> = {
   // colour is the pool's PEAK, and it lands on top of whatever the sun or
   // moon already paid, so keep the peak under 1: hot amber at the flame,
   // textured stone two blocks out, and gone (not grey-fogged) at the edge
-  [TORCH]: { color: [0.50, 0.26, 0.09], radius: 6.2, lift: TORCH_POST_H + 0.15, weight: 1.0, name: 'torch' },
+  [TORCH]: { color: [0.40, 0.21, 0.075], radius: 6.2, lift: TORCH_POST_H + 0.15, weight: 1.0, name: 'torch' },
   // the glow block: a steady lamp, a shade cooler than the torch's fire
   [GLOW]: { color: [0.46, 0.38, 0.22], radius: 5.8, lift: 0.5, weight: 0.8, name: 'glow' },
   // an opened chest: a modest golden pulse where the treasure lies

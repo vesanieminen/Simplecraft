@@ -4891,3 +4891,68 @@ test('a torch throws a flickering pool of light into the dark, and row 10 flips 
   // and none of this talked back to the console (a bad GLSL patch would have)
   expect(errors, `console/page errors: ${errors.join('\n')}`).toEqual([]);
 });
+
+test('the parked day keeps its candy palette — never a washed-out film frame', async ({ page }) => {
+  test.slow();
+  await boot(page);
+  await joinWithPad(page);
+
+  // PR #34 review: "the world looks washed out atm due to the lights". The
+  // guard against that regression: the parked-day ground band must keep its
+  // HSV saturation — measured on the identical noon frame, ACES@1.25 had
+  // flattened it from 0.311 (main) to 0.194, and the day-blend fix must not
+  // just recover that ground but pass it (0.326 with the lift).
+  await page.evaluate(() => (window as any).__lbw.setDayMode('day'));
+  await page.waitForFunction(
+    () => (window as any).__lbw.game.chunks.shaders.uToneOff.value > 0.9,
+    null, { timeout: 15000 },
+  );
+  await frames(page, 20);
+
+  // HSV saturation (chroma/max) over the ground band — the honest vivid
+  // measure; HSL's S flatters pastels, which is exactly what ACES makes.
+  const hsv = (png: Buffer): Promise<number> => page.evaluate(async (b64: string) => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${b64}`;
+    await img.decode();
+    const cv = document.createElement('canvas');
+    cv.width = img.width; cv.height = img.height;
+    const ctx = cv.getContext('2d', { willReadFrequently: true })!;
+    ctx.drawImage(img, 0, 0);
+    const d = ctx.getImageData(0, 0, cv.width, cv.height).data;
+    let s = 0, n = 0;
+    for (let y = Math.floor(cv.height * 0.55); y < Math.floor(cv.height * 0.95); y++) {
+      for (let x = 0; x < cv.width; x++) {
+        const p = (y * cv.width + x) * 4;
+        const mx = Math.max(d[p], d[p + 1], d[p + 2]), mn = Math.min(d[p], d[p + 1], d[p + 2]);
+        s += mx < 1 ? 0 : (mx - mn) / mx;
+        n++;
+      }
+    }
+    return s / n;
+  }, png.toString('base64'));
+
+  const shipped = await hsv(await page.screenshot());
+
+  // The regression, forced back on the same frame: freeze the kit's day ramp
+  // and pin the blend at "full ACES at noon" — the state the user complained
+  // about. The shipped look must beat it by a clear margin, on the very same
+  // world (terrain scarring from earlier tests cancels out of the ratio).
+  await page.evaluate(() => {
+    const k = (window as any).__lbw.game.chunks.shaders;
+    const orig = k.tick.bind(k);
+    k.tick = (dt: number, sun: any, haze: any): void => {
+      orig(dt, sun, haze);
+      k.uToneOff.value = 0;
+    };
+  });
+  await frames(page, 10);
+  const washed = await hsv(await page.screenshot());
+  expect(shipped, `parked day must beat its own full-ACES state (${shipped.toFixed(3)} vs ${washed.toFixed(3)})`)
+    .toBeGreaterThan(washed * 1.25);
+
+  // Absolute floor too (guards against the whole palette going grey): main's
+  // noon baseline on a virgin world is ≈0.311; the suite's quarry near spawn
+  // drags the band down, so the floor is deliberately conservative.
+  expect(shipped, 'parked-day ground saturation floor').toBeGreaterThanOrEqual(0.25);
+});

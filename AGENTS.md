@@ -520,11 +520,27 @@ event. Renaming a storage key orphans the family's existing saves.
   (9.3 / 23.7 rad/s, phase from the cell hash) into `uLightColor` per frame,
   so the fragment decode is a pure FMA chain; the flame sprites wobble on
   the same clock, so the pool and the flame are provably the same fire.
-  Attenuation is `(1 − d²/r²)³` — the cube is what keeps a 7.2-r torch from
-  washing a stone wall to flat cream; colours are tuned hot-at-the-flame
-  (see the constants in `lights.ts`). A torch is a real voxel (`TORCH=41`,
-  atlas cell 29, mesher `addTorchShape` post-pass, non-solid, needs a
-  solid/neighbour support or `trySet` refuses it). **Day/night parks**:
+  Attenuation is `(1 − d²/r²)³` with the half-lambert tilted toward the
+  flame (`0.66·NdotL + 0.34`) and the peaks tuned hot-at-the-flame but
+  under 1 (torch `[0.40,0.21,0.075]`, r 6.2 — see the constants in
+  `lights.ts`): three torches along one wall must overlap into a warm lane,
+  never stack a blown cream slab. **The wash fix — `uToneOff`**
+  (`installSoftToneBlend` in `render/shaders.ts`): ACES@1.25 is a midnight
+  masterpiece and a noon wash machine (measured: ground HSV sat 0.311 →
+  0.194 on the same parked frame). The tone-mapping chunks are patched ONCE
+  at import to `mix(toneMapping(c), c, uToneOff)`; `ShaderKit.tick` drives
+  the blend off `sunInfo().day` (a field on the true SUN elevation — never
+  `sunInfo().up`, which describes the MOON at night and once half-blended
+  the moonlight as if it were noon), so noon runs raw-palette, dusk/night
+  keep full film, and rain thins `day` to keep weather moody. Unbound
+  materials (additive sprites, star points) default to 0 = full ACES — the
+  flame tip wants its roll-off at any hour. The sky dome, cloud puffs and
+  sun/moon balls bind the blend via `bindDayTone`; the terrain/water
+  saturation lift (post-fog, `LIFT`, 1.12) is what carries noon PAST the
+  pre-ACES baseline (measured ground sat 0.326 vs main's 0.311, blown 0).
+  Point lights also fade to embers by day (`ShaderKit.dayLight`, applied
+  in `LightKeeper.candidate`) — a noon torch reads as a flame with a shy
+  warm pool, not a second sun. **Day/night parks**:
   `DAY_PARK=0.32` / `NIGHT_PARK=0.78` — the palette stops say 0/1=midnight,
   but `sunElevation=sin(2πh)` puts zenith at 0.25, so the old parks (0.5 and
   0.0) sat on the elevation's zero crossings and a "parked night" was
