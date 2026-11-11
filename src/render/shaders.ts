@@ -81,6 +81,13 @@ export interface SunState {
   low: number;
   /** the light's own colour */
   tint: THREE.Color;
+  /**
+   * How much the SUN (not the moon — sunInfo flips to the moon at night)
+   * already lights the world, 0..1: 0 deep night, 1 full day. The kit rides
+   * this to blend ACES away in daylight and fade point-light pools to embers
+   * so noon torchlight never stacks into a wash.
+   */
+  day: number;
 }
 
 /** Hard cap on world point lights — the ceiling; software GL compiles less. */
@@ -153,13 +160,15 @@ export class ShaderKit {
     this.uLowSun.value = sun.low;
     this.uSunTint.value.copy(sun.tint);
     this.uHaze.value.copy(haze);
-    // The day curve: night and the golden hour keep full ACES (that's where
-    // the film roll-off earns its keep — torch pools, sunsets, the moon);
-    // full daylight pulls the raw, saturated palette back in, keeping a
-    // whisper of the curve so speculars still land instead of clipping.
-    const day = THREE.MathUtils.clamp((sun.up - 0.12) / 0.35, 0, 1);
-    this.uToneOff.value = day * day * (3 - 2 * day) * 0.82;
-    this.dayLight = 1 - (day * day * (3 - 2 * day)) * 0.85;
+    // The day curve, off the SUN's height (never moonlight — sunInfo flips
+    // to the moon after dusk): night and the golden hour keep full ACES
+    // (that's where the film roll-off earns its keep — torch pools, sunsets,
+    // the moon); full daylight pulls the raw, saturated palette back in,
+    // keeping a whisper of the curve so speculars still land, not clip.
+    const day = THREE.MathUtils.clamp(sun.day, 0, 1);
+    const d = day * day * (3 - 2 * day);
+    this.uToneOff.value = d * 0.82;
+    this.dayLight = 1 - d * 0.85;
   }
 
   /** the shared animation clock the shaders read (wrapped seconds) */

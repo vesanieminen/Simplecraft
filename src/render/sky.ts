@@ -432,7 +432,7 @@ export function createSky(scene: THREE.Scene, kit: ShaderKit): SkyEnv {
   const UP_Z = new THREE.Vector3(0, 0, 1);
   const sunWorldDir = new THREE.Vector3(0.4, 0.9, 0.5);
   let curHour = 0.35;
-  const sunState: SunState = { dir: sunWorldDir, up: 1, low: 0, tint: new THREE.Color(0xfff6e0) };
+  const sunState: SunState = { dir: sunWorldDir, up: 1, low: 0, day: 1, tint: new THREE.Color(0xfff6e0) };
   const shadowWant = new THREE.Vector3(WORLD_SX / 2, 12, WORLD_SZ / 2);
   const shadowFocus = shadowWant.clone();
   const shadowTmp = new THREE.Vector3();
@@ -516,6 +516,10 @@ export function createSky(scene: THREE.Scene, kit: ShaderKit): SkyEnv {
       sunState.low = THREE.MathUtils.clamp((0.5 - sunWorldDir.y) / 0.3, 0, 1)
         * (1 - wet * 0.5) * (sunIsDown ? 0.2 : 1);
       sunState.tint.copy(dir.color);
+      // How much the sun (never the moon) already lights the world: the kit
+      // blends its ACES down and its point-light pools to embers by daylight.
+      sunState.day = THREE.MathUtils.clamp((elev + 0.04) / 0.34, 0, 1)
+        * (1 - wet * 0.45);
 
       // Horizon glare: a warm wash that swells around the sun as it dips
       // toward the horizon — the bare ball used to read as a sticker. It
