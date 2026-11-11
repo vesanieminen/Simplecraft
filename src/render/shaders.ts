@@ -161,14 +161,16 @@ export class ShaderKit {
     this.uSunTint.value.copy(sun.tint);
     this.uHaze.value.copy(haze);
     // The day curve, off the SUN's height (never moonlight — sunInfo flips
-    // to the moon after dusk): night and the golden hour keep full ACES
-    // (that's where the film roll-off earns its keep — torch pools, sunsets,
-    // the moon); full daylight pulls the raw, saturated palette back in,
-    // keeping a whisper of the curve so speculars still land, not clip.
+    // to the moon after dusk): night, rain and the golden hour keep full
+    // ACES (that's where the film roll-off earns its keep — torch pools,
+    // sunsets, the moon); full daylight reverts the palette to raw, exactly
+    // the saturation the painted art was authored at — with the ShaderKit's
+    // post-fog lift riding on top, noon reads MORE vivid than the pre-ACES
+    // baseline ever did. The blend passes through every intermediate on the
+    // way down, so dusk dark-rooms into the curve with no seam.
     const day = THREE.MathUtils.clamp(sun.day, 0, 1);
-    const d = day * day * (3 - 2 * day);
-    this.uToneOff.value = d * 0.82;
-    this.dayLight = 1 - d * 0.85;
+    this.uToneOff.value = day * day * (3 - 2 * day);
+    this.dayLight = 1 - day * day * (3 - 2 * day) * 0.9;
   }
 
   /** the shared animation clock the shaders read (wrapped seconds) */
@@ -327,7 +329,7 @@ vWorldNormal = normalize( mat3( modelMatrix ) * objectNormal );
 /** gentle saturation lift — runs after fog, over the encoded colour */
 const LIFT = /* glsl */ `
 float elLuma = dot( gl_FragColor.rgb, vec3( 0.299, 0.587, 0.114 ) );
-gl_FragColor.rgb = mix( vec3( elLuma ), gl_FragColor.rgb, 1.10 );
+gl_FragColor.rgb = mix( vec3( elLuma ), gl_FragColor.rgb, 1.12 );
 `;
 
 /**
