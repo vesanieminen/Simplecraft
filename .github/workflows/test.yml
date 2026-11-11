@@ -42,7 +42,10 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # a starved runner can double every test's wall time; the per-test
+    # timeouts (doubled under CI, ×3 for test.slow()) need room to expire
+    # before the job itself is killed
+    timeout-minutes: 30
     strategy:
       # a failure in one shard shouldn't cancel the others: the reports
       # say which half of the suite broke
