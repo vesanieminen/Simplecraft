@@ -60,13 +60,28 @@ export const BUCKET: BlockId = 39;
  * up, hold the sneak/dive button to climb down, hold nothing to cling.
  */
 export const LADDER: BlockId = 40;
+/**
+ * Railway track (core/rails.ts): a flat plate you walk over, never solid, and
+ * it never fills its cell. What it *connects* to is not stored anywhere — like
+ * the big game, a rail hooks up with whatever rail is next door, including one
+ * step up, and the cart turns at the corners by itself.
+ */
+export const RAIL: BlockId = 41;
+/** the red rail with the boost: a cart rolls over it and is hurled along */
+export const POWERED_RAIL: BlockId = 42;
+/**
+ * The mine cart (core/minecart.ts): a palette *tool* like the bucket. Setting
+ * it down on a rail puts a real rolling cart in the world; it is never written
+ * into the voxel grid, because a cart is a thing that moves, not a cell.
+ */
+export const MINECART: BlockId = 43;
 
 /**
  * Cells of the procedural *block* texture atlas (see render/textures.ts).
  * One 32x32 cell per block face style, laid out in a single row; the mesher
  * divides u by ATLAS_CELL_COUNT, so keep it in step with BLOCK_CELLS there.
  */
-export const ATLAS_CELL_COUNT = 29;
+export const ATLAS_CELL_COUNT = 33;
 export const ATLAS_DYNAMITE_SIDE = 0;
 export const ATLAS_DYNAMITE_CAP = 1;
 export const ATLAS_GRASS_TOP = 2;
@@ -104,6 +119,12 @@ export const ATLAS_CHEST_INSIDE = 26;
 export const ATLAS_CHEST_OPEN_TOP = 27;
 /** a climbing ladder: two upright rails and the rungs between them */
 export const ATLAS_LADDER = 28;
+/** railway track: steel rails on wooden sleepers, straight and crossed, plus
+ *  the powered pair (the red ones) that throw a cart along */
+export const ATLAS_RAIL = 29;
+export const ATLAS_RAIL_CROSS = 30;
+export const ATLAS_POWERED_RAIL = 31;
+export const ATLAS_POWERED_RAIL_CROSS = 32;
 
 /**
  * How a treasure chest is built. It is not a cube, and only its TOP ever
@@ -356,6 +377,27 @@ const DEFS: BlockDef[] = [
     id: BUCKET, name: 'Bucket', icon: '🪣', color: rgb(186, 205, 224),
     solid: false, opaque: false,
   },
+  {
+    // Railway track: a plate of steel on wooden sleepers, 0.14 of a cell tall.
+    // Not solid (walk straight over it) and not opaque (it hides nothing).
+    // It needs ground underneath, exactly like the big game, and it joins up
+    // with every rail next door — see core/rails.ts.
+    id: RAIL, name: 'Rail', icon: '🛤️', color: rgb(158, 160, 168),
+    sideAtlasCell: ATLAS_RAIL, solid: false, opaque: false,
+  },
+  {
+    // The red rail with the booster: roll over it and the cart is thrown
+    // along the track at full speed. Kids wire these in every few blocks.
+    id: POWERED_RAIL, name: 'Powered Rail', icon: '⚡', color: rgb(206, 118, 96),
+    sideAtlasCell: ATLAS_POWERED_RAIL, solid: false, opaque: false,
+  },
+  {
+    // The second palette tool (after the bucket): set it down on a rail and a
+    // real mine cart appears, ready to ride or to run away without anybody
+    // aboard (core/minecart.ts). Like the bucket it never enters the grid.
+    id: MINECART, name: 'Mine Cart', icon: '🚃', color: rgb(146, 152, 165),
+    solid: false, opaque: false,
+  },
 ];
 
 export const BLOCK_MAP = new Map<BlockId, BlockDef>(DEFS.map((d) => [d.id, d]));
@@ -413,7 +455,7 @@ export type SoundFamily = 'wood' | 'stone' | 'soft' | 'glass' | 'plant';
 const SOUND_FAMILIES = new Map<BlockId, SoundFamily>([
   [WOOD, 'wood'], [PLANKS, 'wood'], [SLAB, 'wood'], [STAIRS, 'wood'], [CHEST, 'wood'], [CHEST_OPEN, 'wood'],
   [MUSIC, 'wood'], [DYNAMITE, 'wood'], [LADDER, 'wood'],
-  [STONE, 'stone'], [BRICKS, 'stone'], [ROCK, 'stone'],
+  [STONE, 'stone'], [BRICKS, 'stone'], [ROCK, 'stone'], [RAIL, 'stone'], [POWERED_RAIL, 'stone'],
   [GRASS, 'soft'], [DIRT, 'soft'], [SAND, 'soft'], [SCORCH, 'soft'], [C_WHITE, 'soft'], [BOUNCY, 'soft'],
   [GLASS, 'glass'], [GLOW, 'glass'], [SPARKLE, 'glass'],
   [LEAVES, 'plant'], [FLOWER_RED, 'plant'], [FLOWER_YELLOW, 'plant'], [TALLGRASS, 'plant'], [SAPLING, 'plant'],
@@ -450,6 +492,22 @@ export function isBucket(id: BlockId): boolean {
 /** a climbing ladder — never solid, always leaning against a wall */
 export function isLadderBlock(id: BlockId): boolean {
   return id === LADDER;
+}
+/** either kind of railway track (plain or the powered one) */
+export function isRailBlock(id: BlockId): boolean {
+  return id === RAIL || id === POWERED_RAIL;
+}
+/** the rail that throws a cart along */
+export function isPoweredRail(id: BlockId): boolean {
+  return id === POWERED_RAIL;
+}
+/** the mine cart palette tool — it sets a cart down, it is never a cell */
+export function isCartTool(id: BlockId): boolean {
+  return id === MINECART;
+}
+/** the palette's two tools: things a kid carries instead of builds with */
+export function isPaletteTool(id: BlockId): boolean {
+  return isBucket(id) || isCartTool(id);
 }
 /** collidable height of a block id in its cell (0 for non-solids, 0.5 for a slab) */
 export function solidHeightOf(id: BlockId): number {
@@ -490,6 +548,18 @@ export function rotateStairFacing(facing: number): StairFacing {
  */
 export type LadderFacing = 0 | 1 | 2 | 3;
 
+/**
+ * How thick a rail plate is, in cells. The sleepers and steel sit on the cell
+ * floor inside this plate, which is also how high the cart's wheels ride.
+ */
+export const RAIL_HEIGHT = 0.14;
+/** how long a cart is along the track, and how tall (core/minecart.ts) */
+export const CART_LENGTH = 1.02;
+export const CART_WIDTH = 0.86;
+export const CART_HEIGHT = 0.56;
+/** how high a rider's feet sit above the cart's floor */
+export const CART_SEAT = 0.3;
+
 /** how thick a ladder's plank panel is, in cells (thin — a real ladder is) */
 export const LADDER_DEPTH = 0.22;
 
@@ -515,8 +585,8 @@ export function ladderBoxes(x: number, y: number, z: number, facing: LadderFacin
  * `paletteFor`, which is the palette the game actually shows.
  */
 export const PALETTE: BlockId[] = [
-  GRASS, DIRT, STONE, SAND, WOOD, PLANKS, STAIRS, SLAB, DOOR, LADDER, BRICKS, GLASS, LEAVES,
-  BUCKET,
+  GRASS, DIRT, STONE, SAND, WOOD, PLANKS, STAIRS, SLAB, DOOR, LADDER, RAIL, POWERED_RAIL, BRICKS, GLASS, LEAVES,
+  BUCKET, MINECART,
   SAPLING, FLOWER_RED, FLOWER_YELLOW, TALLGRASS,
   GLOW, BOUNCY, SPARKLE, MUSIC, DYNAMITE,
   C_RED, C_ORANGE, C_YELLOW, C_GREEN, C_BLUE, C_PURPLE, C_PINK, C_WHITE,
@@ -537,6 +607,7 @@ export function paletteFor(allowChests: boolean): BlockId[] {
 
 /** Quick-cycling favorites for shoulder buttons. */
 export const FAVORITES: BlockId[] = [
-  GRASS, PLANKS, STAIRS, SLAB, BRICKS, GLASS, DOOR, GLOW, BOUNCY, SPARKLE, MUSIC, DYNAMITE,
+  GRASS, PLANKS, STAIRS, SLAB, BRICKS, GLASS, DOOR, RAIL, POWERED_RAIL, MINECART,
+  GLOW, BOUNCY, SPARKLE, MUSIC, DYNAMITE,
   C_RED, C_BLUE, C_PINK, C_YELLOW,
 ];

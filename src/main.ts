@@ -1,8 +1,10 @@
 import './ui/styles.css';
 import {
-  AIR, ATLAS_CHEST_BOTTOM, ATLAS_CHEST_INSIDE, ATLAS_CHEST_LID, ATLAS_CHEST_OPEN_TOP, ATLAS_CHEST_SIDE, ATLAS_CELL_COUNT, ATLAS_LADDER,
+  AIR, ATLAS_CHEST_BOTTOM, ATLAS_CHEST_INSIDE, ATLAS_CHEST_LID, ATLAS_CHEST_OPEN_TOP, ATLAS_CHEST_SIDE, ATLAS_CELL_COUNT,
+  ATLAS_LADDER, ATLAS_POWERED_RAIL, ATLAS_POWERED_RAIL_CROSS, ATLAS_RAIL, ATLAS_RAIL_CROSS,
   BUCKET, CHEST, CHEST_OPEN, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, DYNAMITE, FLOWER_RED, FLOWER_YELLOW,
-  GLASS, GRASS, isBucket, LADDER, LEAVES, PLANKS, ROCK, SAND, SAPLING, SCORCH, SLAB, STAIRS, STONE, TALLGRASS, WATER, WATER_FLOW, WOOD,
+  GLASS, GRASS, isPaletteTool, LADDER, LEAVES, MINECART, PLANKS, POWERED_RAIL, RAIL, ROCK, SAND, SAPLING, SCORCH,
+  SLAB, STAIRS, STONE, TALLGRASS, WATER, WATER_FLOW, WOOD,
 } from './core/blocks';
 import { WORLD_SX, WORLD_SY, WORLD_SZ, CHUNK } from './core/world';
 import { buildChunkGeometry } from './core/mesher';
@@ -26,7 +28,14 @@ async function boot(): Promise<void> {
       chunkGeometry: typeof buildChunkGeometry;
       isTool: (id: number) => boolean;
       /** the block atlas, so a test can tell which artwork a face really used */
-      atlas: { cells: number; side: number; lid: number; bottom: number; inside: number; treasure: number; ladder: number };
+      atlas: {
+        cells: number; side: number; lid: number; bottom: number; inside: number; treasure: number; ladder: number;
+        rail: number; railCross: number; poweredRail: number; poweredRailCross: number;
+      };
+      /** the carts rolling about right now, and the joins of one rail cell */
+      carts: () => { x: number; y: number; z: number; dir: number; speed: number; onRails: boolean; riderId: number }[];
+      railLinks: (x: number, y: number, z: number) => number[] | null;
+      layRails: (rows: [number, number, number, number][]) => void;
       waterSurfaceAt: (x: number, y: number, z: number) => number;
       /** is this wet cell caught mid-fall (a waterfall's stream), not settled? */
       waterFallingAt: (x: number, y: number, z: number) => boolean;
@@ -48,6 +57,7 @@ async function boot(): Promise<void> {
       AIR, GRASS, STONE, SAND, ROCK, WATER, WATER_FLOW, WOOD, PLANKS, LEAVES, GLASS,
       FLOWER_RED, FLOWER_YELLOW, TALLGRASS, DYNAMITE, SCORCH, BUCKET,
       SAPLING, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, SLAB, STAIRS, CHEST, CHEST_OPEN, LADDER,
+      RAIL, POWERED_RAIL, MINECART,
     },
     chunkGeometry: buildChunkGeometry,
     /**
@@ -57,9 +67,18 @@ async function boot(): Promise<void> {
     atlas: {
       cells: ATLAS_CELL_COUNT, side: ATLAS_CHEST_SIDE, lid: ATLAS_CHEST_LID,
       bottom: ATLAS_CHEST_BOTTOM, inside: ATLAS_CHEST_INSIDE, treasure: ATLAS_CHEST_OPEN_TOP, ladder: ATLAS_LADDER,
+      rail: ATLAS_RAIL, railCross: ATLAS_RAIL_CROSS, poweredRail: ATLAS_POWERED_RAIL, poweredRailCross: ATLAS_POWERED_RAIL_CROSS,
     },
-    /** is this block id one of the palette's tools (the 🪣)? */
-    isTool: (id: number) => isBucket(id),
+    /** is this block id one of the palette's tools (the 🪣 and the 🚃)? */
+    isTool: (id: number) => isPaletteTool(id),
+    /** every cart in the world, and how the track joins up under one cell */
+    carts: () => (window as unknown as { __lbw: { game: Game } }).__lbw.game.minecarts.carts.map((c) => ({
+      x: c.x, y: c.y, z: c.z, dir: c.dir, speed: c.speed, onRails: c.onRails, riderId: c.rider?.id ?? -1,
+    })),
+    railLinks: (x: number, y: number, z: number) =>
+      (window as unknown as { __lbw: { game: Game } }).__lbw.game.railLinksForTest(x, y, z),
+    layRails: (rows: [number, number, number, number][]) =>
+      (window as unknown as { __lbw: { game: Game } }).__lbw.game.layRailsForTest(rows),
     /** how tall water draws in a cell: 1 full, or the height of a shallow flow */
     waterSurfaceAt: (x: number, y: number, z: number) =>
       waterSurfaceHeight((window as unknown as { __lbw: { game: Game } }).__lbw.game.world, x, y, z),

@@ -4,7 +4,7 @@
  * own input source — no mouse required anywhere.
  */
 
-import { BlockId, blockDef, FAVORITES, isBucket } from '../core/blocks';
+import { BlockId, blockDef, FAVORITES, isPaletteTool } from '../core/blocks';
 import { AudioKit } from '../core/audio';
 import { FISH_DEFS, FishKind } from '../core/fish';
 import { FISH_SNACKS, SNACK_BADGES } from '../core/satchel';
@@ -177,10 +177,11 @@ export class PaletteOverlay extends Overlay {
     this.blocks.forEach((id) => {
       const def = blockDef(id);
       const cell = document.createElement('div');
-      // the bucket is a tool, not a brick: it wears a dashed rim in the grid
-      cell.className = `palette-cell${isBucket(id) ? ' tool' : ''}`;
+      // the bucket and the cart are tools, not bricks: they wear a dashed rim
+      // in the grid, because neither one ever becomes a block in the world
+      cell.className = `palette-cell${isPaletteTool(id) ? ' tool' : ''}`;
       cell.dataset.id = String(id);
-      cell.dataset.tool = isBucket(id) ? '1' : '0';
+      cell.dataset.tool = isPaletteTool(id) ? '1' : '0';
       cell.style.background = `rgb(${def.color.map((x) => Math.round(x * 255)).join(',')})`;
       cell.innerHTML = `<div>${def.icon}</div><div class="pn">${def.name}</div>`;
       cell.addEventListener('click', () => {

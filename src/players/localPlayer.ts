@@ -132,8 +132,13 @@ export class LocalPlayer {
     // in water those buttons are the DIVE control instead (see swimDown), so
     // the squat toggle stays ashore — no half-crouched kids paddling about
     if (!worldMenuBlock && !this.entity.swimmingNow && (frame.pressed.has('crouch') || frame.pressed.has('back'))) {
-      this.entity.toggleCrouch(this.world);
+      // in a cart the sneak buttons are "get out", exactly as in the big game
+      if (this.entity.ridingCart) hooks.interact(this);
+      else this.entity.toggleCrouch(this.world);
     }
+    // A jump while riding hops out too: kids press A to get off things, and
+    // seated A has nothing else to do.
+    if (!worldMenuBlock && this.entity.ridingCart && frame.pressed.has('jump')) hooks.interact(this);
 
     // ---- step simulation ----
     const stepInput = worldMenuBlock

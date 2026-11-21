@@ -8,11 +8,15 @@ import * as THREE from 'three';
 import { AudioKit } from './core/audio';
 import { AnimalWorld, ANIMAL_KINDS } from './core/animals';
 import {
-  blockDef, CHEST, CHEST_OPEN, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, isBucket, isChestBlock,
-  isDoorBlock, isDoorTopBlock, isExplosiveBlock, isLadderBlock, isSolidBlock, isStairsBlock, isWaterId, paletteFor,
-  LadderFacing, LADDER, ROCK, rotateStairFacing, SAPLING, soundFamilyOf, StairFacing, STAIRS, WATER,
+  blockDef, CHEST, CHEST_OPEN, DOOR, DOOR_OPEN, DOOR_TOP, DOOR_TOP_OPEN, isBucket, isCartTool, isChestBlock,
+  isDoorBlock, isDoorTopBlock, isExplosiveBlock, isLadderBlock, isPoweredRail, isRailBlock, isSolidBlock,
+  isStairsBlock, isWaterId, paletteFor,
+  LadderFacing, LADDER, POWERED_RAIL, RAIL, ROCK, rotateStairFacing, SAPLING, soundFamilyOf,
+  StairFacing, STAIRS, WATER,
 } from './core/blocks';
 import { pourableAt, useBucket } from './core/bucket';
+import { CART_RIDE_SEAT, CartBystander, Minecart, MinecartManager } from './core/minecart';
+import { canPlaceRail, DIRS, railCellAt } from './core/rails';
 import { WeatherClock, WeatherKind, WeatherMode } from './core/weather';
 import { DayMode } from './render/sky';
 import { StarField } from './core/collectibles';
@@ -24,7 +28,7 @@ import { SandGravity } from './core/sand';
 import { FISH_SNACKS } from './core/satchel';
 import { WaterFlow } from './core/water';
 import { RayHit } from './core/raycast';
-import { Aabb, aabbOverlapsSolid, blockAabb, boxesOverlap, doorPanelAabb, playerAabb } from './core/physics';
+import { Aabb, aabbOverlapsSolid, blockAabb, boxesOverlap, canStandAt, doorPanelAabb, playerAabb } from './core/physics';
 import { DEFAULT_SEED, generateTerrain, plantTree, themeOf, WORLD_THEMES } from './core/terrain';
 import { BOOST_SECONDS, EMPTY_CHEST_MESSAGE, rollTreasure, Treasure } from './core/treasure';
 import { idx as worldIdx, SavedWorldInfo, World, WorldSaveData, WORLD_SX, WORLD_SY, WORLD_SZ } from './core/world';
@@ -127,6 +131,8 @@ export class Game {
   private rainSound: WeatherKind | null = null;
   /** game time of the last thunder crack, so rumble is rare but not scripted */
   private lastThunder = 0;
+  /** game time of the last "red rails boost" hint, so laying track never spams it */
+  private lastRailHint = -100;
   /** game time of the last bucket hint, so fiddling with a bucket never spams */
   private lastBucketHint = -10;
   /** the camera the last frame rendered through — the sky sits on it */
@@ -165,6 +171,12 @@ export class Game {
   fish!: FishWorld;
   /** fishing lines out in the world (core/fishing.ts) */
   fishing!: FishingManager;
+  /**
+   * The mine carts rolling about on the world's rails (core/minecart.ts). The
+   * track itself is ordinary blocks; a cart is an entity, and one cart may
+   * carry one kid.
+   */
+  minecarts!: MinecartManager;
   /**
    * Player-planted saplings: flat world index -> game time when planted.
    * After `saplingGrowSeconds` of game time (public so tests can hurry it)
@@ -275,6 +287,14 @@ export class Game {
     // water finds its level: the same change hook drives flow spreading and
     // draining, so digging a trench into the sea floods it cell by cell
     this.water = new WaterFlow(this.world);
+    // mine carts ride the track (core/rails.ts). The track is ordinary blocks;
+    // a cart is a thing that rolls, so it lives here and rides along in the
+    // save as "which way does the cart in this cell face".
+    this.minecarts = new MinecartManager(
+      this.scene, this.world, this.particles, this.audio,
+      { bystanders: () => this.cartBystanders(), onBump: (c, who, speed) => this.onCartBump(c, who, speed) },
+    );
+    this.restoreCarts(gen.cartSite);
     this.world.onCellChanged = (x, y, z) => {
       this.sand.notify(x, y, z);
       this.water.notify(x, y, z);
@@ -756,6 +776,7 @@ export class Game {
     this.overlays.delete(p.entity.id);
     this.lastLandSound.delete(p.entity.id);
     this.fishing.clearFor(p.entity.id); // no orphaned bobbers when a kid leaves
+    this.minecarts.dismount(p.entity.id); // and no invisible passenger in a cart
     // that controller may still be holding (or has queued) the button press that
     // confirmed leaving: ignore it briefly, otherwise their half of the screen
     // instantly turns back into a join card instead of closing
@@ -1119,6 +1140,15 @@ export class Game {
         // 🪣 The bucket is a tool, not a brick: an empty one scoops the spring
         // you are looking at, a full one pours a new spring into the gap.
         if (isBucket(id)) return this.bucketAction(lp, hit);
+        // 🚃 The mine cart is a tool too: it never enters the grid, it puts a
+        // real rolling cart down where the kid is pointing.
+        if (isCartTool(id)) return this.placeCart(lp, hit);
+        // 🛤️ Track is a plate nailed to the ground: it needs something solid to
+        // sit on, and it happily flattens a flower out of the way.
+        if (isRailBlock(id) && !canPlaceRail(this.world, px, py, pz)) {
+          this.particles.burst(px + 0.5, py + 0.5, pz + 0.5, 0xff5d5d, 4, 0.4);
+          return false;
+        }
         // A door is TWO blocks high and you always build it from its bottom
         // half: the upper half comes with it, so the cell above has to be free.
         if (isDoorTopBlock(id)) return false;
@@ -1180,6 +1210,10 @@ export class Game {
           else this.world.ladderFacing.delete(i);
           if (blockDef(cid).sparkle) this.sparkleBlocks.add(i);
         }
+        if (isPoweredRail(id) && this.time - this.lastRailHint > 40) {
+          this.lastRailHint = this.time;
+          this.ui.toast('⚡ A red rail throws any cart that rolls over it!', 2400);
+        }
         this.audio.place(soundFamilyOf(id));
         const def = blockDef(id);
         this.particles.burst(px + 0.5, py + 0.5, pz + 0.5, new THREE.Color(def.color[0], def.color[1], def.color[2]), 7, 0.7);
@@ -1197,6 +1231,18 @@ export class Game {
         // normally — that is how you carve a flood back into its banks.)
         if (isBucket(lp.selected) && !lp.bucketFull && hit.block === WATER) {
           if (this.bucketAction(lp, hit)) return;
+        }
+        // 🚃 Break button on a cart: pick the cart up. It is not a block, so it
+        // is not what the aim hit — the aim just has to be closer to the cart.
+        const cart = this.cartAtAim(lp, hit);
+        if (cart) {
+          const rider = cart.rider;
+          if (rider) {
+            const who = this.players.find((pl) => pl.entity.id === rider.id);
+            if (who) this.dismountCart(who);
+          }
+          this.minecarts.despawn(cart);
+          return;
         }
         const def = blockDef(hit.block);
         if (isExplosiveBlock(hit.block)) {
@@ -1239,6 +1285,9 @@ export class Game {
         void lp;
       },
       interact: (lp: LocalPlayer): boolean => {
+        // A kid in a cart gets out first — nothing else is more pressing than
+        // the way back out.
+        if (lp.entity.ridingCart || this.minecarts.cartOfRider(lp.entity.id)) return this.cartInteract(lp);
         // A line already in the water outranks everything: the pet button
         // reels it in — that is what bites mean.
         if (this.fishing.active(lp.entity.id)) {
@@ -1288,6 +1337,146 @@ export class Game {
         return this.animals.petNearest(lp.entity.pos.x, lp.entity.pos.y + 0.8, lp.entity.pos.z, 2.4) !== null;
       },
     };
+  }
+
+  // ------------------------------------------------------------ mine carts
+  //
+  // Track is ordinary blocks (core/rails.ts reads the joins off the neighbours);
+  // a cart is a thing that rolls (core/minecart.ts). Kids lay track with the
+  // palette, set a cart down from the 🚃, hop in with the pet button and lean
+  // the stick to get going. Red rails throw a cart along; a line that runs out
+  // spills it onto the grass, where it sits until somebody rails it up again.
+
+  /**
+   * Put the world's carts back. Ones that came with the save stand where the
+   * family left them (a 0 in the map means "this cart was picked up", so it
+   * stays away); a world nobody has ever edited gets the cart its abandoned
+   * railway keeps — the same cart, in the same place, every time that seed is
+   * loaded, exactly like the chests and the fish.
+   */
+  private restoreCarts(cartSite: [number, number, number] | null): void {
+    for (const [i, v] of this.world.carts) {
+      if (v <= 0) continue; // that cart was picked up: the 0 keeps it away
+      const [x, y, z] = unidx(i);
+      this.minecarts.spawn(x, y, z, v - 1);
+    }
+    if (this.world.carts.size === 0 && cartSite) {
+      this.minecarts.spawn(cartSite[0], cartSite[1], cartSite[2], 0);
+    }
+  }
+
+  /** who a runaway cart may bump: the kids and every animal in the world */
+  private cartBystanders(): CartBystander[] {
+    return [...this.players.map((p) => p.entity), ...this.animals.animals];
+  }
+
+  /**
+   * A cart ran into somebody. There is no health in this game, so a bump is a
+   * shove and a giggle: they go flying, the cart slows, and the kid driving it
+   * hears the clang.
+   */
+  private onCartBump(cart: Minecart, who: CartBystander, speed: number): void {
+    const e = who as Partial<PlayerEntity>;
+    const launch = Math.max(2.5, Math.min(9, speed * 1.2));
+    if (e && typeof e.vel?.set === 'function' && e.id !== undefined) {
+      e.vel.y = Math.max(e.vel.y, launch * 0.7);
+      e.vel.x = cart.dir === 0 ? launch : cart.dir === 1 ? -launch : e.vel.x;
+      e.vel.z = cart.dir === 2 ? launch : cart.dir === 3 ? -launch : e.vel.z;
+      e.grounded = false;
+      this.audio.cartCrash();
+      return;
+    }
+    // an animal: the same tumble a blast gives, only gentler
+    const a = who as { tumble?: (vx: number, vz: number) => void; pos: THREE.Vector3 };
+    if (a && typeof a.tumble === 'function') a.tumble((cart.dir === 0 ? 1 : cart.dir === 1 ? -1 : 0) * launch * 0.8,
+      (cart.dir === 2 ? 1 : cart.dir === 3 ? -1 : 0) * launch * 0.8);
+    this.audio.cartCrash();
+  }
+
+  /**
+   * Which cart this kid is aiming at, if any — closer than the block behind it,
+   * so pointing at a cart in front of a wall still picks the cart.
+   */
+  private cartAtAim(lp: LocalPlayer, hit: RayHit | null): Minecart | null {
+    const head = new THREE.Vector3(lp.entity.pos.x, lp.entity.pos.y + lp.entity.headHeight, lp.entity.pos.z);
+    const dir = lp.aimDir();
+    const cart = this.minecarts.pickAim(head, dir, hit ? Math.max(1.2, hit.dist) : 4.6);
+    if (cart) return cart;
+    // a cart at their feet counts too: kids point at the floor when they mean
+    // "this one, right here"
+    return this.minecarts.near(lp.entity.pos.x, lp.entity.pos.y + 0.6, lp.entity.pos.z, 1.5);
+  }
+
+  /** 🚃 Set a cart down: it needs a rail (or at least level ground) under it */
+  private placeCart(lp: LocalPlayer, hit: RayHit): boolean {
+    const cells: [number, number, number][] = [
+      [hit.x, hit.y, hit.z], // on the rail (or block) they are looking at…
+      [hit.px, hit.py, hit.pz], // …or in the empty cell just past it
+    ];
+    for (const [x, y, z] of cells) {
+      if (!this.world.inBounds(x, y, z)) continue;
+      const cart = this.minecarts.spawn(x, y, z, this.cartDirFromAim(lp));
+      if (!cart) continue;
+      cart.rider = null;
+      this.ui.toast('Mine cart! Stand beside it and press the pet button to ride 🚃', 2600);
+      return true;
+    }
+    this.particles.burst(hit.px + 0.5, hit.py + 0.5, hit.pz + 0.5, 0xff5d5d, 4, 0.4);
+    return false;
+  }
+
+  /** which way a new cart faces: along the track it is sitting on, if any */
+  private cartDirFromAim(lp: LocalPlayer): number {
+    const dir = lp.aimDir();
+    return Math.abs(dir.x) >= Math.abs(dir.z) ? (dir.x >= 0 ? 0 : 1) : (dir.z >= 0 ? 2 : 3);
+  }
+
+  /**
+   * Hop in, or hop out. The pet button is the family's "do something nice"
+   * button, and a cart straight ahead is more pressing than an animal — but a
+   * kid already riding gets out instead (the crouch buttons do the same, as in
+   * the big game).
+   */
+  private cartInteract(lp: LocalPlayer): boolean {
+    const e = lp.entity;
+    if (e.ridingCart) {
+      this.dismountCart(lp);
+      return true;
+    }
+    const cart = this.cartAtAim(lp, lp.target);
+    if (!cart) return false;
+    if (cart.rider) {
+      const who = this.players.find((p) => p.entity.id === cart.rider?.id);
+      if (who) this.ui.toast(`${who.entity.name} is already in that cart!`, 1600);
+      return true;
+    }
+    // the kid sits where the cart's floor is, a little above it
+    e.ridingCart = true;
+    e.crouching = false;
+    e.vel.set(0, 0, 0);
+    e.pos.set(cart.x, cart.y + CART_RIDE_SEAT, cart.z);
+    if (!this.minecarts.board(cart, e)) e.ridingCart = false;
+    return true;
+  }
+
+  /** get off: they land on their feet beside the cart, facing along the track */
+  private dismountCart(lp: LocalPlayer): void {
+    const e = lp.entity;
+    const cart = this.minecarts.cartOfRider(e.id);
+    e.ridingCart = false;
+    this.minecarts.dismount(e.id);
+    if (!cart) return;
+    const [dx, dz] = DIRS[cart.dir];
+    // step off to the side of the track, and never into a wall
+    const sx = -dz, sz = dx;
+    for (const [ox, oz] of [[sx, sz], [-sx, -sz], [dx, dz], [-dx, -dz]] as const) {
+      const nx = cart.x + ox * 0.9, nz = cart.z + oz * 0.9;
+      if (canStandAt(this.world, nx, cart.y, nz)) {
+        e.pos.set(nx, cart.y, nz);
+        break;
+      }
+    }
+    e.vel.set(0, 0, 0);
   }
 
   // -------------------------------------------------------------------- sky
@@ -1482,6 +1671,19 @@ export class Game {
    * Drive the bucket from the console (tests): pad aim adds too much noise for
    * a deterministic flood, so this hands the bucket action the exact aim cell.
    */
+  railLinksForTest(x: number, y: number, z: number): number[] | null {
+    return railCellAt(this.world, x, y, z)?.links ?? null;
+  }
+
+  /**
+   * Lay a line of track from the test console: rows of [x, y, z, powered].
+   * Track laying through the pad costs a test a lot of aim; the joins are what
+   * the test cares about, and those come from the rails next door.
+   */
+  layRailsForTest(rows: [number, number, number, number][]): void {
+    for (const [x, y, z, powered] of rows) this.world.set(x, y, z, powered ? POWERED_RAIL : RAIL);
+  }
+
   bucketForTest(p: LocalPlayer, hit: RayHit): boolean {
     return this.bucketAction(p, hit);
   }
@@ -1512,6 +1714,19 @@ export class Game {
     const cx = b.x + 0.5, cy = b.y + 0.5, cz = b.z + 0.5;
     const range = b.radius * 2.4;
     const launched = this.animals.blastAway(cx, cy, cz, b.radius);
+
+    // a cart caught in the crater is scrap, rider and all — the track it was
+    // riding on is gone anyway
+    for (const cart of [...this.minecarts.carts]) {
+      const rider = cart.rider;
+      if (Math.hypot(cart.x - cx, cart.y - cy, cart.z - cz) <= b.radius + 0.6) {
+        if (rider) {
+          const who = this.players.find((p) => p.entity.id === rider.id);
+          if (who) who.entity.ridingCart = false;
+        }
+        this.minecarts.despawn(cart);
+      }
+    }
 
     for (const p of this.players) {
       const e = p.entity;
@@ -1693,6 +1908,9 @@ export class Game {
   }
 
   async saveNow(): Promise<void> {
+    // the carts are entities, so they are only in the save because we write them
+    // into the world's cart map first (which is what the save is built from)
+    this.world.syncCarts(this.minecarts.toSave());
     const save = this.world.toSave();
     save.savedAt = Date.now();
     this.updateWorldIndex(save);
@@ -1774,18 +1992,21 @@ export class Game {
     this.fish.dispose();
     this.fish = new FishWorld(this.scene, this.world, this.particles);
     this.fishing.clear();
+    this.minecarts.clear(); // no cart from the old world rattling about in the new one
     this.sparkleBlocks.clear();
     this.saplings.clear();
     this.dynamite.clear(); // no half-burnt sticks from the old world, please
     this.sand.reset();
     this.sandFalls.clear();
     this.water.reset(); // forget old floods; a fresh world's sea starts still
+    this.minecarts.clear(); // no carts from the old world rolling around in the new one
     // living things and lit fuses that came with a save wake up, same as at boot
     for (const [i, b] of this.world.mods) {
       if (blockDef(b).sparkle) this.sparkleBlocks.add(i);
       if (b === SAPLING) this.saplings.set(i, -this.saplingGrowSeconds + 10);
     }
     this.dynamite.restoreFromWorld();
+    this.restoreCarts(gen.cartSite); // this world's own carts, or its railway's
     for (const p of this.players) p.respawnAt(this.spawnPoint.clone());
     this.lastRevision = this.world.revision;
     void this.saveNow(); // remember the (possibly just restored) world
@@ -1889,6 +2110,7 @@ export class Game {
       this.sand.update(dt);
       this.sandFalls.update(dt);
       this.water.update(dt);
+      this.minecarts.update(dt);
       this.growSaplings();
 
       // ambient sparkles from placed sparkle blocks
@@ -2016,6 +2238,9 @@ export class Game {
     '🎣 Aim at the water and press the pet button to fish!',
     '🍬 Land on a bouncy block!',
     '🎵 Step on a music block!',
+    '🛤️ Lay a line of rail and watch a cart run away without anybody in it!',
+    '🚃 Find the abandoned railway and ride the cart!',
+    '⚡ Red rails throw a cart along — put one every few blocks!',
   ];
 
   dispose(): void {

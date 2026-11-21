@@ -18,7 +18,8 @@ import {
   ATLAS_BOUNCY, ATLAS_BRICKS, ATLAS_CELL_COUNT, ATLAS_CHEST_BOTTOM, ATLAS_CHEST_INSIDE, ATLAS_CHEST_LID,
   ATLAS_CHEST_OPEN_TOP, ATLAS_CHEST_SIDE, ATLAS_DIRT, ATLAS_DOOR, ATLAS_DOOR_TOP, ATLAS_DYNAMITE_CAP, ATLAS_LADDER,
   ATLAS_DYNAMITE_SIDE, ATLAS_GLASS, ATLAS_GLOW, ATLAS_GRASS_SIDE, ATLAS_GRASS_TOP,
-  ATLAS_LEAVES, ATLAS_LOG_END, ATLAS_LOG_SIDE, ATLAS_MUSIC, ATLAS_PLANKS, ATLAS_ROCK,
+  ATLAS_LEAVES, ATLAS_LOG_END, ATLAS_LOG_SIDE, ATLAS_MUSIC, ATLAS_PLANKS, ATLAS_POWERED_RAIL, ATLAS_POWERED_RAIL_CROSS,
+  ATLAS_RAIL, ATLAS_RAIL_CROSS, ATLAS_ROCK,
   ATLAS_SAND, ATLAS_SCORCH, ATLAS_SPARKLE, ATLAS_STONE, ATLAS_WATER, ATLAS_WEAVE,
   PLANT_ATLAS_CELLS,
 } from '../core/blocks';
@@ -543,6 +544,94 @@ function drawLadder(ctx: CanvasRenderingContext2D, ox: number): void {
   outline(ctx, ox, '#493119');
 }
 
+/**
+ * Railway track. Steel on wooden sleepers on a bed of grit, running left to
+ * right across the cell (the mesher transposes the UVs for the other way
+ * round). A rail plate is only a few pixels tall on screen and its top face is
+ * the only part usually visible, so the steel is painted almost white.
+ */
+function drawRail(ctx: CanvasRenderingContext2D, ox: number): void {
+  rect(ctx, ox, 0, 0, S, S, '#5d5647'); // the ballast bed
+  speckle(ctx, ox, '#726a58', 0.16, 61);
+  for (const x of [3, 11, 19, 27]) { // sleepers, laid across the line
+    rect(ctx, ox, x, 3, 4, S - 6, '#7c5227');
+    rect(ctx, ox, x, 3, 1, S - 6, '#a3703c');
+  }
+  railPair(ctx, ox, 7, 21, '#aeb7c6', '#f2f6fb', '#616a79'); // the two steel rails
+  outline(ctx, ox, '#3c372d');
+}
+
+/** two steel rails: a mid tone, a lit top edge and a shadow under each */
+function railPair(ctx: CanvasRenderingContext2D, ox: number, y1: number, y2: number, mid: string, lit: string, dim: string): void {
+  for (const y of [y1, y2]) {
+    rect(ctx, ox, 0, y, S, 4, mid);
+    rect(ctx, ox, 0, y, S, 1, lit);
+    rect(ctx, ox, 0, y + 3, S, 1, dim);
+  }
+}
+
+/** a crossing: the line carries on both ways, so steel runs both directions */
+function drawRailCross(ctx: CanvasRenderingContext2D, ox: number): void {
+  rect(ctx, ox, 0, 0, S, S, '#5d5647');
+  speckle(ctx, ox, '#726a58', 0.16, 83);
+  for (const y of [2, 9, 21, 28]) { // sleepers along both directions
+    rect(ctx, ox, 0, y, S, 3, '#7c5227');
+    rect(ctx, ox, 0, y, S, 1, '#a3703c');
+  }
+  for (const x of [2, 9, 21, 28]) {
+    rect(ctx, ox, x, 0, 3, S, '#7c5227');
+    rect(ctx, ox, x, 0, 1, S, '#a3703c');
+  }
+  railPair(ctx, ox, 8, 20, '#aeb7c6', '#f2f6fb', '#616a79'); // left-right
+  railPairV(ctx, ox, 8, 20, '#aeb7c6', '#f2f6fb', '#616a79'); // and up-down
+  outline(ctx, ox, '#3c372d');
+}
+
+/** the same pair of steel rails, standing up and down the cell */
+function railPairV(ctx: CanvasRenderingContext2D, ox: number, x1: number, x2: number, mid: string, lit: string, dim: string): void {
+  for (const x of [x1, x2]) {
+    rect(ctx, ox, x, 0, 4, S, mid);
+    rect(ctx, ox, x, 0, 1, S, lit);
+    rect(ctx, ox, x + 3, 0, 1, S, dim);
+  }
+}
+
+/**
+ * The powered rail: the same steel on a red-painted bed with a bright band
+ * down the middle, so a kid can see from far off where the cart gets a shove.
+ */
+function drawPoweredRail(ctx: CanvasRenderingContext2D, ox: number): void {
+  rect(ctx, ox, 0, 0, S, S, '#8e3b2c'); // the painted bed
+  speckle(ctx, ox, '#a4482f', 0.16, 47);
+  for (const x of [3, 11, 19, 27]) {
+    rect(ctx, ox, x, 3, 4, S - 6, '#5f3d24');
+    rect(ctx, ox, x, 3, 1, S - 6, '#7c5227');
+  }
+  railPair(ctx, ox, 7, 21, '#b7c0cf', '#f7fbff', '#5f6673');
+  rect(ctx, ox, 0, 14, S, 4, '#ffd24a'); // the booster band
+  rect(ctx, ox, 0, 14, S, 1, '#fff2b0');
+  outline(ctx, ox, '#4a2118');
+}
+
+/** the powered crossing: a boost whichever way the cart came */
+function drawPoweredRailCross(ctx: CanvasRenderingContext2D, ox: number): void {
+  rect(ctx, ox, 0, 0, S, S, '#8e3b2c');
+  speckle(ctx, ox, '#a4482f', 0.16, 29);
+  for (const y of [2, 9, 21, 28]) {
+    rect(ctx, ox, 0, y, S, 3, '#5f3d24');
+    rect(ctx, ox, 0, y, S, 1, '#7c5227');
+  }
+  for (const x of [2, 9, 21, 28]) {
+    rect(ctx, ox, x, 0, 3, S, '#5f3d24');
+    rect(ctx, ox, x, 0, 1, S, '#7c5227');
+  }
+  railPair(ctx, ox, 8, 20, '#b7c0cf', '#f7fbff', '#5f6673');
+  railPairV(ctx, ox, 8, 20, '#b7c0cf', '#f7fbff', '#5f6673');
+  rect(ctx, ox, 14, 0, 4, S, '#ffd24a');
+  rect(ctx, ox, 14, 0, 1, S, '#fff2b0');
+  outline(ctx, ox, '#4a2118');
+}
+
 /** the inside of the chest's walls, seen when you look down into an opened chest */
 function drawChestInside(ctx: CanvasRenderingContext2D, ox: number): void {
   // the inside of a box is darker and smoother than its outside: plain boards,
@@ -728,6 +817,10 @@ const BLOCK_ART: Record<number, CellArt> = {
   [ATLAS_CHEST_INSIDE]: drawChestInside,
   [ATLAS_CHEST_OPEN_TOP]: drawChestOpenTop,
   [ATLAS_LADDER]: drawLadder,
+  [ATLAS_RAIL]: drawRail,
+  [ATLAS_RAIL_CROSS]: drawRailCross,
+  [ATLAS_POWERED_RAIL]: drawPoweredRail,
+  [ATLAS_POWERED_RAIL_CROSS]: drawPoweredRailCross,
 };
 
 let cachedBlock: THREE.CanvasTexture | null = null;

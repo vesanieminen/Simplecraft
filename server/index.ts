@@ -14,6 +14,8 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DATA_DIR = process.env.LBW_DATA_DIR ?? path.join(ROOT, 'world-data');
 const PORT = Number(process.env.PORT ?? 3000);
+/** the save format this server writes (see src/core/world.ts, which reads it back) */
+const SAVE_VERSION = 6;
 const IS_PROD = process.env.NODE_ENV === 'production';
 
 interface WorldSave {
@@ -26,6 +28,7 @@ interface WorldSave {
   stairFacing?: Record<string, number>;
   waterLevels?: Record<string, number>;
   ladderFacing?: Record<string, number>;
+  carts?: Record<string, number>;
   savedAt?: number;
 }
 
@@ -40,7 +43,7 @@ interface SavedWorldInfo {
 function validSave(x: unknown): x is WorldSave {
   if (!x || typeof x !== 'object') return false;
   const s = x as WorldSave;
-  if (s.version !== 1 && s.version !== 2 && s.version !== 3 && s.version !== 4 && s.version !== 5) return false;
+  if (s.version !== 1 && s.version !== 2 && s.version !== 3 && s.version !== 4 && s.version !== 5 && s.version !== 6) return false;
   if (typeof s.seed !== 'number' || !Number.isInteger(s.seed)) return false;
   if (s.theme !== undefined && (typeof s.theme !== 'number' || !Number.isInteger(s.theme) || s.theme < 0 || s.theme > 64)) return false;
   if (!s.mods || typeof s.mods !== 'object') return false;
@@ -77,6 +80,14 @@ function validSave(x: unknown): x is WorldSave {
       const i = Number(k);
       if (!Number.isInteger(i) || i < 0 || i > 4_200_000) return false;
       if (!Number.isInteger(v) || v < 0 || v > 7) return false;
+    }
+  }
+  if (s.carts !== undefined) {
+    for (const [k, v] of Object.entries(s.carts)) {
+      const i = Number(k);
+      if (!Number.isInteger(i) || i < 0 || i > 4_200_000) return false;
+      // 0 = "the cart that stood here is gone" (the merge cannot delete), 1..4 = the way it faces
+      if (!Number.isInteger(v) || v < 0 || v > 4) return false;
     }
   }
   if (s.savedAt !== undefined && typeof s.savedAt !== 'number') return false;
@@ -185,8 +196,9 @@ async function main(): Promise<void> {
         const stairFacing = { ...prev.stairFacing, ...incoming.stairFacing };
         const waterLevels = { ...prev.waterLevels, ...incoming.waterLevels };
         const ladderFacing = { ...prev.ladderFacing, ...incoming.ladderFacing };
+        const carts = { ...prev.carts, ...incoming.carts };
         writeWorld({
-          version: 5, seed: incoming.seed, theme, mods, collectedStars, doorFacing, stairFacing, waterLevels, ladderFacing,
+          version: SAVE_VERSION, seed: incoming.seed, theme, mods, collectedStars, doorFacing, stairFacing, waterLevels, ladderFacing, carts,
           savedAt: Math.max(prev.savedAt ?? 0, incoming.savedAt ?? 0) || Date.now(),
         });
       }
