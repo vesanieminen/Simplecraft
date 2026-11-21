@@ -3042,19 +3042,26 @@ test('a ladder: walk into it, hold jump to climb up, sneak to climb down, get on
 
 /**
  * Cart courses share one preparation: a run of columns (dx,dz offsets from a
- * chosen anchor) gets a level stone floor, a clear cell for the track and clear
- * headroom — and every original block is remembered so the meadow can be handed
- * back byte for byte when the course is over. `world.set` records mods literally,
- * so a half-restored strip would be in every later test's world.
+ * chosen anchor) gets a level stone floor and a clear cell for the track — and
+ * every original block is remembered so the meadow can be handed back byte for
+ * byte when the course is over. `world.set` records mods literally, so a
+ * half-restored strip would be in every later test's world.
  *
  * The anchor is searched for a stretch of dry ground: the meadow near spawn has
  * ponds, and scooping out a wet cell would set the flow sim off inside another
  * test's course.
  */
-type RailSite = { x0: number; z0: number; G: number; cols: [number, number][]; orig: number[] };
+type RailSite = {
+  x0: number; z0: number; G: number;
+  /** [x, z, high] — a high column is one whose cell above the track matters too */
+  cols: [number, number, number][]; orig: number[];
+};
 
-async function prepareRails(page: Page, offsets: [number, number][]): Promise<RailSite> {
-  return page.evaluate((offs: [number, number][]) => {
+async function prepareRails(
+  page: Page, offsets: [number, number][], high: [number, number][] = [],
+): Promise<RailSite> {
+  return page.evaluate((arg: { offs: [number, number][]; high: [number, number][] }) => {
+    const { offs, high } = arg;
     const game = (window as any).__lbw.game;
     const S = game.world;
     const ids = (window as any).__lbw.ids;
@@ -3082,16 +3089,24 @@ async function prepareRails(page: Page, offsets: [number, number][]): Promise<Ra
       break;
     }
     if (!found) throw new Error('no dry ground near spawn for a railway course');
-    const cols: [number, number][] = offs.map(([dx, dz]) => [x0 + dx, z0 + dz]);
+    // two cells per column: a level floor, and the track's own cell. Nothing
+    // higher matters to a cart, which never collides with the world — and every
+    // extra write is a chunk remesh and a shadow re-bake in CI's software GL.
+    // A course that raises the track one cell passes those columns in `high`:
+    // they must be cleared (and handed back) a cell taller as well.
+    const up = new Set(high.map(([dx, dz]) => `${x0 + dx},${z0 + dz}`));
+    const cols: [number, number, number][] = offs.map(([dx, dz]) => {
+      const x = x0 + dx, z = z0 + dz;
+      return [x, z, up.has(`${x},${z}`) ? 1 : 0];
+    });
     const orig: number[] = [];
-    for (const [x, z] of cols) {
-      for (const y of [G, G + 1, G + 2]) orig.push(S.get(x, y, z));
-      S.set(x, G, z, ids.STONE);    // a level floor to nail the sleepers to
-      S.set(x, G + 1, z, ids.AIR);  // the track's own cell
-      S.set(x, G + 2, z, ids.AIR);  // and headroom for anybody riding
+    for (const [x, z, isHigh] of cols) {
+      const ys = isHigh ? [G, G + 1, G + 2] : [G, G + 1];
+      for (const y of ys) orig.push(S.get(x, y, z));
+      for (const y of ys) S.set(x, y, z, y === G ? ids.STONE : ids.AIR);
     }
     return { x0, z0, G, cols, orig };
-  }, offsets);
+  }, { offs: offsets, high });
 }
 
 /** hand the meadow back as it was, with no cart left rattling about */
@@ -3101,8 +3116,9 @@ async function restoreRails(page: Page, site: RailSite): Promise<void> {
     const S = game.world;
     game.minecarts.clear();
     let k = 0;
-    for (const [x, z] of s.cols) {
-      for (const y of [s.G, s.G + 1, s.G + 2]) S.set(x, y, z, s.orig[k++]);
+    for (const [x, z, isHigh] of s.cols) {
+      const ys = isHigh ? [s.G, s.G + 1, s.G + 2] : [s.G, s.G + 1];
+      for (const y of ys) S.set(x, y, z, s.orig[k++]);
       S.touchAt(x, z);
     }
     return game.saveNow();
@@ -3116,7 +3132,7 @@ const railRun = (from: number, to: number, dz = 0): [number, number][] =>
 test('a railway lays itself: joins, a climb, a crossing, and the mesher draws what a cart drives by', async ({ page }) => {
   await boot(page);
   await joinWithPad(page);
-  const site = await prepareRails(page, [...railRun(0, 8), [1, -1], [1, 1], [6, 3], [5, 3]]);
+  const site = await prepareRails(page, [...railRun(0, 8), [1, -1], [1, 1], [6, 3], [5, 3]], railRun(4, 8));
 
   const built = await page.evaluate((s: { x0: number; z0: number; G: number }) => {
     const game = (window as any).__lbw.game;
@@ -3197,7 +3213,7 @@ test('a railway lays itself: joins, a climb, a crossing, and the mesher draws wh
 test('a cart rolls the line: red rails throw it along, a dead end spills it onto the grass, and new track puts it back on wheels', async ({ page }) => {
   await boot(page);
   await joinWithPad(page);
-  const site = await prepareRails(page, railRun(0, 14));
+  const site = await prepareRails(page, railRun(0, 12));
   const { x0, z0, G } = site;
 
   await page.evaluate((s: { x0: number; z0: number; G: number }) => {
@@ -3248,7 +3264,7 @@ test('a kid climbs in, leans the stick to ride it, takes the corner they are loo
   await boot(page);
   await joinWithPad(page);
   const site = await prepareRails(page, [...railRun(0, 3), [3, 1], [3, 2], [3, -1]]);
-  const { z0, G } = site;
+  const { x0, z0, G } = site;
 
   const ready = await page.evaluate((s: { x0: number; z0: number; G: number }) => {
     const game = (window as any).__lbw.game;
@@ -3294,11 +3310,16 @@ test('a kid climbs in, leans the stick to ride it, takes the corner they are loo
   expect(rolled.speed, 'leaning into it gets a cart going').toBeGreaterThan(2);
 
   // at a junction with no way straight on, the cart goes the way the rider looks
-  const turned = await page.waitForFunction((arg: { z0: number }) => {
+  const turned = await page.waitForFunction((arg: { x0: number; z0: number }) => {
     const c = (window as any).__lbw.carts()[0];
-    return c && c.dir === 2 && c.z > arg.z0 + 1 && c.onRails ? { z: c.z } : false;
-  }, { z0 }, { timeout: 10000 }).then((h) => h.jsonValue() as Promise<{ z: number }>);
-  expect(turned.z, 'the corner followed their look').toBeGreaterThan(z0 + 1);
+    if (!c) return false;
+    // it went down the branch it was looking at...
+    if (c.dir === 2 && c.z > arg.z0 + 1 && c.onRails) return { turned: true, dir: c.dir, z: +c.z.toFixed(2) };
+    // ...or it ran on past the junction cell, which is the failure worth naming
+    if (c.x > arg.x0 + 4.4) return { turned: false, dir: c.dir, x: +c.x.toFixed(2), z: +c.z.toFixed(2) };
+    return false;
+  }, { x0, z0 }, { timeout: 12000 }).then((h) => h.jsonValue() as Promise<Record<string, unknown>>);
+  expect(turned.turned, `the corner followed their look (dir ${turned.dir} at z ${turned.z})`).toBe(true);
 
   const carried = await page.evaluate(() => {
     const e = (window as any).__lbw.game.players[0].entity;
