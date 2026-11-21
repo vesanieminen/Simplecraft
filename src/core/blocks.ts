@@ -557,8 +557,12 @@ export const RAIL_HEIGHT = 0.14;
 export const CART_LENGTH = 1.02;
 export const CART_WIDTH = 0.86;
 export const CART_HEIGHT = 0.56;
-/** how high a rider's feet sit above the cart's floor */
-export const CART_SEAT = 0.3;
+/**
+ * How high a rider's feet sit above the cart's floor. Just clear of the tub's
+ * own floor: any higher and the kid is perched on nothing, with their legs
+ * sticking out through the cart's end wall.
+ */
+export const CART_SEAT = 0.17;
 
 /** how thick a ladder's plank panel is, in cells (thin — a real ladder is) */
 export const LADDER_DEPTH = 0.22;

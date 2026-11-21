@@ -243,12 +243,14 @@ export const CROUCH_BOB = 0.03;
 
 /**
  * Sitting in a mine cart (core/minecart.ts). Same no-knees problem as the
- * crouch, so it is three angles again: the thighs lift level in front
+ * crouch, so it is three angles again: the thighs angle down into the tub
  * (`SIT_LEGS`, negative swings a down-pointing limb forward), the torso stays
- * upright on its hips, and the hands come in on the sides of the tub. The seat
- * height itself comes from the cart, never from the pose.
+ * upright on its hips, and the hands rest forward over the rim. The seat height
+ * itself comes from the cart, never from the pose. Legs level in front was the
+ * first try and it drove the feet clean through the cart's end wall — a kid in a
+ * tub has their feet *down* in it.
  */
-export const SIT_LEGS = -1.45;
+export const SIT_LEGS = -0.55;
 export const SIT_ARMS = -1.15;
 export const SIT_SPLAY = 0.16;
 

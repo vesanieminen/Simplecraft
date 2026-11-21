@@ -91,7 +91,8 @@ interface CartGeometries {
   floor: THREE.BoxGeometry;
   end: THREE.BoxGeometry;
   side: THREE.BoxGeometry;
-  rim: THREE.BoxGeometry;
+  rimLong: THREE.BoxGeometry;
+  rimShort: THREE.BoxGeometry;
 }
 
 let cartGeo: CartGeometries | null = null;
@@ -104,7 +105,10 @@ function cartGeometries(): CartGeometries {
       floor: new THREE.BoxGeometry(CART_LENGTH, t, CART_WIDTH),
       end: new THREE.BoxGeometry(t, CART_HEIGHT, CART_WIDTH),
       side: new THREE.BoxGeometry(CART_LENGTH, CART_HEIGHT, t),
-      rim: new THREE.BoxGeometry(CART_LENGTH + 0.08, 0.08, CART_WIDTH + 0.08),
+      // the bright edge goes round the top, it does not close it over: a plate
+      // there turned the tub into a lid and the cart read as a chest
+      rimLong: new THREE.BoxGeometry(CART_LENGTH + 0.1, 0.09, 0.11),
+      rimShort: new THREE.BoxGeometry(0.11, 0.09, CART_WIDTH + 0.1),
     };
   }
   return cartGeo;
@@ -132,7 +136,11 @@ function buildCartMesh(): THREE.Group {
   add(new THREE.Mesh(geo.end), iron, CART_LENGTH / 2 - 0.06, wall, 0);
   add(new THREE.Mesh(geo.side), iron, 0, wall, -(CART_WIDTH / 2 - 0.06));
   add(new THREE.Mesh(geo.side), iron, 0, wall, CART_WIDTH / 2 - 0.06);
-  add(new THREE.Mesh(geo.rim), bright, 0, CART_HEIGHT + 0.07, 0);
+  const rim = CART_HEIGHT + 0.075;
+  add(new THREE.Mesh(geo.rimLong), bright, 0, rim, -(CART_WIDTH / 2 + 0.005));
+  add(new THREE.Mesh(geo.rimLong), bright, 0, rim, CART_WIDTH / 2 + 0.005);
+  add(new THREE.Mesh(geo.rimShort), bright, -(CART_LENGTH / 2 + 0.005), rim, 0);
+  add(new THREE.Mesh(geo.rimShort), bright, CART_LENGTH / 2 + 0.005, rim, 0);
   g.userData.cart = true; // so a tidy-up (or a test) can spot a cart rig
   return g;
 }

@@ -3280,7 +3280,7 @@ test('a kid climbs in, leans the stick to ride it, takes the corner they are loo
   });
   expect(seated.riding).toBe(true);
   expect(seated.overCart, 'the cart carries the kid, not the other way round').toBe(true);
-  expect(seated.seatAbove, 'they sit up in the tub, not on the sleepers').toBeCloseTo(0.3, 1);
+  expect(seated.seatAbove, 'their feet are down in the tub, not on the sleepers').toBeCloseTo(0.17, 1);
 
   // lean the stick forward: that is the throttle, and the only one there is
   await page.evaluate(() => {
