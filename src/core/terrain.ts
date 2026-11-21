@@ -130,7 +130,7 @@ export const CHESTS_PER_WORLD = 12;
 /** how much track an abandoned mine lays down, at most */
 export const MINE_RAIL_LENGTH = 26;
 /** every so often the abandoned line has a red rail left in it, to throw a cart along */
-export const MINE_POWERED_EVERY = 7;
+export const MINE_POWERED_EVERY = 5;
 /** how far from the starting meadow a mine may start (the family's first walk) */
 export const MINE_MIN_DISTANCE = 26;
 
@@ -280,7 +280,7 @@ export function generateTerrain(world: World, theme?: WorldTheme): GeneratedWorl
   // the starting meadow, with a cart sitting in the middle of it. Like the
   // chests it comes out of the seed, so the same world always hides the same
   // line, and nobody has to build a single rail to find a ride.
-  const cartSite = generateMine(world, data, heights, cx, cz, meadowR, waterLevel, seedA);
+  const cartSite = generateMine(data, heights, cx, cz, meadowR, waterLevel, seedA);
 
   world.markAllDirty();
 
@@ -300,51 +300,54 @@ export function generateTerrain(world: World, theme?: WorldTheme): GeneratedWorl
  * found nowhere flat enough.
  */
 function generateMine(
-  world: World, data: Uint8Array, heights: Uint8Array,
+  data: Uint8Array, heights: Uint8Array,
   cx: number, cz: number, meadowR: number, waterLevel: number, seedA: number,
 ): [number, number, number] | null {
   const flat = (id: number): boolean => id === GRASS || id === SAND || id === DIRT || id === STONE;
+  const at = (x: number, y: number, z: number): number => (x * WORLD_SZ + z) * WORLD_SY + y;
 
-  for (let tryIdx = 0; tryIdx < 24; tryIdx++) {
+  // The seed tries a number of starting columns and keeps the longest line it
+  // can lay — a railway a kid can actually ride down, not three sleepers in a
+  // field. One pass walks the line before a single block is written, so a line
+  // that gives out half way leaves nothing behind.
+  let best: [number, number, number][] = [];
+  for (let tryIdx = 0; tryIdx < 40; tryIdx++) {
     // a starting column, chosen from the seed, away from home and out of the sea
     const sx = 6 + Math.floor(hash2(tryIdx, 11, seedA + 313) * (WORLD_SX - 12));
     const sz = 6 + Math.floor(hash2(tryIdx, 29, seedA + 787) * (WORLD_SZ - 12));
     if (Math.hypot(sx - cx, sz - cz) < meadowR + MINE_MIN_DISTANCE) continue;
     if (heights[sx * WORLD_SZ + sz] <= waterLevel + 1) continue;
 
-    // the line wanders: mostly straight on, sometimes a step sideways, and it
-    // gives up where the land gets too steep for a plate of track
-    const dir = Math.floor(hash2(sx, sz, seedA + 1234) * 4);
     const line: [number, number, number][] = [];
-    let x = sx, z = sz, d = dir;
+    let x = sx, z = sz, d = Math.floor(hash2(sx, sz, seedA + 1234) * 4);
     for (let n = 0; n < MINE_RAIL_LENGTH; n++) {
       if (x < 3 || z < 3 || x > WORLD_SX - 4 || z > WORLD_SZ - 4) break;
       const h = heights[x * WORLD_SZ + z];
+      const y = h + 1;
       const prev = line[line.length - 1];
-      if (prev && Math.abs(h + 1 - prev[1]) > 1) break; // too steep for a rail
-      const ground = data[(x * WORLD_SZ + z) * WORLD_SY + h];
-      if (!flat(ground)) break;
-      if (data[(x * WORLD_SZ + z) * WORLD_SY + h + 1] !== AIR) break; // a tree is standing there
-      if (prev && Math.hypot(x - prev[0], z - prev[2]) !== 1) break; // no diagonals
-      line.push([x, h + 1, z]);
-      if (n % MINE_POWERED_EVERY === MINE_POWERED_EVERY - 1) {
-        data[(x * WORLD_SZ + z) * WORLD_SY + h + 1] = POWERED_RAIL;
-      } else {
-        data[(x * WORLD_SZ + z) * WORLD_SY + h + 1] = RAIL;
-      }
+      if (prev && (Math.abs(x - prev[0]) + Math.abs(z - prev[2]) !== 1 || Math.abs(y - prev[1]) > 1)) break;
+      if (!flat(data[at(x, h, z)])) break; // no ground to nail the plate to
+      if (data[at(x, y, z)] !== AIR) break; // a tree, a chest or a roof is standing there
+      if (line.some(([lx, , lz]) => lx === x && lz === z)) break; // never cross ourselves
+      line.push([x, y, z]);
       if (hash2(x, z, seedA + 4717) < 0.22) d = (d + (hash2(x, z, seedA + 99) < 0.5 ? 1 : 3)) % 4;
       x += [[1, 0], [-1, 0], [0, 1], [0, -1]][d][0];
       z += [[1, 0], [-1, 0], [0, 1], [0, -1]][d][1];
     }
-    if (line.length < 10) continue; // not a railway, just a few sleepers
-    const mid = line[Math.floor(line.length / 2)];
-    // the cart the world keeps is parked on an ordinary sleeper: a red one
-    // would throw it off down the line before anybody had a chance to climb in
-    data[(mid[0] * WORLD_SZ + mid[2]) * WORLD_SY + mid[1]] = RAIL;
-    return mid;
+    if (line.length > best.length) best = line;
   }
-  void world;
-  return null;
+  if (best.length < 11) return null; // nowhere flat enough for a railway
+
+  // Lay it down, with a red rail left in every few sleepers so a cart shoved at
+  // one end makes it to the other. The middle stays an ordinary sleeper: that is
+  // where the world's cart is parked, and a red one would send it shooting off
+  // down the line before anybody had a chance to climb in.
+  const mid = Math.floor(best.length / 2);
+  best.forEach(([lx, ly, lz], i) => {
+    const red = i !== mid && i % MINE_POWERED_EVERY === MINE_POWERED_EVERY - 1;
+    data[at(lx, ly, lz)] = red ? POWERED_RAIL : RAIL;
+  });
+  return best[mid];
 }
 
 /**
