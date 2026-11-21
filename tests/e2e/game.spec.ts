@@ -3040,6 +3040,360 @@ test('a ladder: walk into it, hold jump to climb up, sneak to climb down, get on
   }, site);
 });
 
+/**
+ * Cart courses share one preparation: a run of columns (dx,dz offsets from a
+ * chosen anchor) gets a level stone floor, a clear cell for the track and clear
+ * headroom — and every original block is remembered so the meadow can be handed
+ * back byte for byte when the course is over. `world.set` records mods literally,
+ * so a half-restored strip would be in every later test's world.
+ *
+ * The anchor is searched for a stretch of dry ground: the meadow near spawn has
+ * ponds, and scooping out a wet cell would set the flow sim off inside another
+ * test's course.
+ */
+type RailSite = { x0: number; z0: number; G: number; cols: [number, number][]; orig: number[] };
+
+async function prepareRails(page: Page, offsets: [number, number][]): Promise<RailSite> {
+  return page.evaluate((offs: [number, number][]) => {
+    const game = (window as any).__lbw.game;
+    const S = game.world;
+    const ids = (window as any).__lbw.ids;
+    game.minecarts.clear(); // no stray cart from an earlier course on this run
+    const e = game.players[0].entity;
+    const home = Math.round(e.pos.x), homeZ = Math.round(e.pos.z);
+    const tries: [number, number][] = [[0, 0], [8, 0], [-8, 0], [0, 8], [0, -8], [6, 6], [-6, 6],
+      [6, -6], [-6, -6], [12, 0], [-12, 0], [0, 12], [0, -12]];
+    const wet = (x: number, z: number): boolean => {
+      const G = S.surfaceY(x, z);
+      for (let y = G - 1; y <= G + 3; y++) {
+        const id = S.get(x, y, z);
+        if (id === ids.WATER || id === ids.WATER_FLOW) return true;
+      }
+      return false;
+    };
+    let x0 = home, z0 = homeZ, G = S.surfaceY(home, homeZ);
+    let found = false;
+    for (const [ox, oz] of tries) {
+      const px = home + ox, pz = homeZ + oz;
+      if (!S.inBounds(px, 1, pz)) continue;
+      if (offs.some(([dx, dz]) => wet(px + dx, pz + dz))) continue;
+      x0 = px; z0 = pz; G = S.surfaceY(px, pz);
+      found = true;
+      break;
+    }
+    if (!found) throw new Error('no dry ground near spawn for a railway course');
+    const cols: [number, number][] = offs.map(([dx, dz]) => [x0 + dx, z0 + dz]);
+    const orig: number[] = [];
+    for (const [x, z] of cols) {
+      for (const y of [G, G + 1, G + 2]) orig.push(S.get(x, y, z));
+      S.set(x, G, z, ids.STONE);    // a level floor to nail the sleepers to
+      S.set(x, G + 1, z, ids.AIR);  // the track's own cell
+      S.set(x, G + 2, z, ids.AIR);  // and headroom for anybody riding
+    }
+    return { x0, z0, G, cols, orig };
+  }, offsets);
+}
+
+/** hand the meadow back as it was, with no cart left rattling about */
+async function restoreRails(page: Page, site: RailSite): Promise<void> {
+  await page.evaluate((s: RailSite) => {
+    const game = (window as any).__lbw.game;
+    const S = game.world;
+    game.minecarts.clear();
+    let k = 0;
+    for (const [x, z] of s.cols) {
+      for (const y of [s.G, s.G + 1, s.G + 2]) S.set(x, y, z, s.orig[k++]);
+      S.touchAt(x, z);
+    }
+    return game.saveNow();
+  }, site);
+}
+
+/** a run of columns along +x at dz 0 */
+const railRun = (from: number, to: number, dz = 0): [number, number][] =>
+  Array.from({ length: to - from + 1 }, (_, i) => [from + i, dz] as [number, number]);
+
+test('a railway lays itself: joins, a climb, a crossing, and the mesher draws what a cart drives by', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page);
+  const site = await prepareRails(page, [...railRun(0, 8), [1, -1], [1, 1], [6, 3], [5, 3]]);
+
+  const built = await page.evaluate((s: { x0: number; z0: number; G: number }) => {
+    const game = (window as any).__lbw.game;
+    const S = game.world;
+    const ids = (window as any).__lbw.ids;
+    const lbw = (window as any).__lbw;
+    // three sleepers on the meadow floor with a red rail among them, then a
+    // climb onto a shoulder of track, and a siding through (x0+1)
+    const rows: [number, number, number, number][] = [];
+    for (let i = 0; i <= 3; i++) rows.push([s.x0 + i, s.G + 1, s.z0, i === 2 ? 1 : 0]);
+    for (let i = 4; i <= 8; i++) {
+      S.set(s.x0 + i, s.G + 1, s.z0, ids.STONE); // the shoulder the rail stands on
+      rows.push([s.x0 + i, s.G + 2, s.z0, 0]);
+    }
+    rows.push([s.x0 + 1, s.G + 1, s.z0 + 1, 0], [s.x0 + 1, s.G + 1, s.z0 - 1, 0]);
+    lbw.layRails(rows);
+
+    // a rail may only go down where there is something to nail it to
+    const onGround = lbw.placeRail(s.x0 + 6, s.G + 1, s.z0 + 3);
+    S.set(s.x0 + 5, s.G, s.z0 + 3, ids.AIR);            // dig the floor out
+    const overHole = lbw.placeRail(s.x0 + 5, s.G + 1, s.z0 + 3);
+    return {
+      crossing: lbw.railLinks(s.x0 + 1, s.G + 1, s.z0),
+      footOfClimb: lbw.railLinks(s.x0 + 3, s.G + 1, s.z0),
+      topOfClimb: lbw.railLinks(s.x0 + 4, s.G + 2, s.z0),
+      redRail: S.get(s.x0 + 2, s.G + 1, s.z0) === ids.POWERED_RAIL,
+      onGround, overHole,
+    };
+  }, site);
+  await frames(page, 8);
+
+  // every rail is one cell in a graph whose joins come from its neighbours —
+  // the same reading the mesher paints and the cart rides by
+  expect(built.crossing, 'the crossing joins flat on all four sides').toEqual([1, 1, 1, 1]);
+  expect(built.footOfClimb[0], 'the lower cell climbs out of its +x side').toBe(2);
+  expect(built.topOfClimb[1], 'the upper cell comes down its -x side').toBe(3);
+  expect(built.redRail, 'the red rail is a real block in the world').toBe(true);
+  expect(built.onGround, 'track lays on ground').toBe(true);
+  expect(built.overHole, 'track will not lay over a hole').toBe(false);
+
+  // and the drawn track agrees with the ridden one: decode the mesh's UVs and
+  // find the three pieces of rail art actually in use here
+  const art = await page.evaluate((s: { x0: number; z0: number; G: number }) => {
+    const S = (window as any).__lbw.game.world;
+    const atlas = (window as any).__lbw.atlas;
+    const chunk = (window as any).__lbw.dims.chunk;
+    const seen = new Set<number>();
+    for (let cx = Math.floor(s.x0 / chunk); cx <= Math.floor((s.x0 + 8) / chunk); cx++) {
+      for (let cz = Math.floor((s.z0 - 1) / chunk); cz <= Math.floor((s.z0 + 1) / chunk); cz++) {
+        const geo = (window as any).__lbw.chunkGeometry(S, cx, cz).textured;
+        if (!geo) continue;
+        const pos = geo.getAttribute('position').array;
+        const uv = geo.getAttribute('uv').array;
+        for (let t = 0; t < pos.length; t += 9) {
+          const px = Math.floor((pos[t] + pos[t + 3] + pos[t + 6]) / 3);
+          const py = Math.floor((pos[t + 1] + pos[t + 4] + pos[t + 7]) / 3);
+          const pz = Math.floor((pos[t + 2] + pos[t + 5] + pos[t + 8]) / 3);
+          const onLine = pz === s.z0 && px >= s.x0 && px <= s.x0 + 8
+            && (py === s.G + 1 || py === s.G + 2);
+          const onSiding = px === s.x0 + 1 && Math.abs(pz - s.z0) <= 1 && py === s.G + 1;
+          if (!onLine && !onSiding) continue;
+          seen.add(Math.floor(uv[(t / 3) * 2] * atlas.cells));
+        }
+      }
+    }
+    return {
+      rail: seen.has(atlas.rail), cross: seen.has(atlas.railCross),
+      powered: seen.has(atlas.poweredRail),
+    };
+  }, site);
+  expect(art.rail, 'plain track is painted from the rail art').toBe(true);
+  expect(art.cross, 'the crossing is painted from the crossing art').toBe(true);
+  expect(art.powered, 'the red rail is painted from the powered rail art').toBe(true);
+
+  await restoreRails(page, site);
+});
+
+test('a cart rolls the line: red rails throw it along, a dead end spills it onto the grass, and new track puts it back on wheels', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page);
+  const site = await prepareRails(page, railRun(0, 14));
+  const { x0, z0, G } = site;
+
+  await page.evaluate((s: { x0: number; z0: number; G: number }) => {
+    const rows: [number, number, number, number][] = [];
+    for (let i = 0; i <= 5; i++) rows.push([s.x0 + i, s.G + 1, s.z0, i === 1 ? 1 : 0]);
+    (window as any).__lbw.layRails(rows); // six sleepers, one red, then nothing
+  }, site);
+  await frames(page, 6);
+
+  const start = await page.evaluate((s: { x0: number; z0: number; G: number }) => {
+    const lbw = (window as any).__lbw;
+    return { placed: lbw.spawnCart(s.x0 + 1, s.G + 1, s.z0, 0), on: lbw.carts()[0] };
+  }, site);
+  expect(start.placed, 'the 🚃 sets a cart down on the red rail').toBe(true);
+  expect(start.on.onRails, 'and it is sitting on the track').toBe(true);
+
+  // a red rail throws any cart that rolls over it — which is why kids line the
+  // line with them
+  const flying = await page.waitForFunction(() => {
+    const c = (window as any).__lbw.carts()[0];
+    return c && c.speed > 5 ? { speed: c.speed, x: c.x } : false;
+  }, null, { timeout: 8000 }).then((h) => h.jsonValue() as Promise<{ speed: number; x: number }>);
+  expect(flying.speed, 'the red rail threw it along').toBeGreaterThan(5);
+
+  // with no more red rails, and no track at all past the end, friction wins: it
+  // leaves the sleepers, drops onto the grass and rolls to a stop
+  const rest = await page.waitForFunction(() => {
+    const c = (window as any).__lbw.carts()[0];
+    return c && !c.onRails && c.speed === 0 ? { x: c.x, y: c.y } : false;
+  }, null, { timeout: 20000 }).then((h) => h.jsonValue() as Promise<{ x: number; y: number }>);
+  expect(rest.x, 'it ran clean off the end of the track').toBeGreaterThan(x0 + 5.5);
+  expect(rest.y, 'and it lies on the ground, not floating').toBeCloseTo(G + 1, 2);
+
+  // lay a rail under it and it is back on wheels, with nobody to lift anything
+  await page.evaluate((s: { x: number; G: number; z0: number }) => {
+    const lbw = (window as any).__lbw;
+    lbw.layRails([[Math.floor(s.x), s.G + 1, s.z0, 0]]);
+    lbw.game.world.touchAt(Math.floor(s.x), s.z0);
+  }, { x: rest.x, G, z0 });
+  await frames(page, 6);
+  const backOn = await page.evaluate(() => (window as any).__lbw.carts()[0]);
+  expect(backOn.onRails, 'track laid under a derailed cart puts it back on rails').toBe(true);
+
+  await restoreRails(page, site);
+});
+
+test('a kid climbs in, leans the stick to ride it, takes the corner they are looking at, and hops out', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page);
+  const site = await prepareRails(page, [...railRun(0, 3), [3, 1], [3, 2], [3, -1]]);
+  const { z0, G } = site;
+
+  const ready = await page.evaluate((s: { x0: number; z0: number; G: number }) => {
+    const game = (window as any).__lbw.game;
+    const lbw = (window as any).__lbw;
+    const rows: [number, number, number, number][] = [];
+    for (let i = 0; i <= 3; i++) rows.push([s.x0 + i, s.G + 1, s.z0, 0]);
+    rows.push([s.x0 + 3, s.G + 1, s.z0 + 1, 0], [s.x0 + 3, s.G + 1, s.z0 + 2, 0],
+      [s.x0 + 3, s.G + 1, s.z0 - 1, 0]); // a Y: the line ends and splits in two
+    lbw.layRails(rows);
+    const placed = lbw.spawnCart(s.x0, s.G + 1, s.z0, 0);
+    // a cart is a thing in the scene, not a chunk of terrain — which is the
+    // only way it can move without rebuilding the world under it every frame
+    const drawn = game.scene.children.filter((o: any) => o.userData?.cart).length;
+    return { placed, drawn };
+  }, site);
+  expect(ready.placed, 'the cart is sitting on the track').toBe(true);
+  expect(ready.drawn, 'the cart is drawn as its own rig').toBe(1);
+
+  const boarded = await page.evaluate(() => (window as any).__lbw.rideCart(0, 0));
+  expect(boarded, 'the pet button drops them in').toBe(true);
+  const seated = await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    const c = (window as any).__lbw.carts()[0];
+    return {
+      riding: e.ridingCart,
+      overCart: Math.abs(e.pos.x - c.x) < 0.05 && Math.abs(e.pos.z - c.z) < 0.05,
+      seatAbove: +(e.pos.y - c.y).toFixed(2),
+    };
+  });
+  expect(seated.riding).toBe(true);
+  expect(seated.overCart, 'the cart carries the kid, not the other way round').toBe(true);
+  expect(seated.seatAbove, 'they sit up in the tub, not on the sleepers').toBeCloseTo(0.3, 1);
+
+  // lean the stick forward: that is the throttle, and the only one there is
+  await page.evaluate(() => {
+    (window as any).__lbw.game.players[0].entity.yaw = 0; // looking along +z
+    (window as any).__testPad.setMove(0, -1);
+  });
+  const rolled = await page.waitForFunction(() => {
+    const c = (window as any).__lbw.carts()[0];
+    return c && c.speed > 2 && c.onRails ? { speed: c.speed, x: c.x } : false;
+  }, null, { timeout: 10000 }).then((h) => h.jsonValue() as Promise<{ speed: number; x: number }>);
+  expect(rolled.speed, 'leaning into it gets a cart going').toBeGreaterThan(2);
+
+  // at a junction with no way straight on, the cart goes the way the rider looks
+  const turned = await page.waitForFunction((arg: { z0: number }) => {
+    const c = (window as any).__lbw.carts()[0];
+    return c && c.dir === 2 && c.z > arg.z0 + 1 && c.onRails ? { z: c.z } : false;
+  }, { z0 }, { timeout: 10000 }).then((h) => h.jsonValue() as Promise<{ z: number }>);
+  expect(turned.z, 'the corner followed their look').toBeGreaterThan(z0 + 1);
+
+  const carried = await page.evaluate(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    const c = (window as any).__lbw.carts()[0];
+    return Math.abs(e.pos.z - c.z) < 0.1 && Math.abs(e.pos.x - c.x) < 0.1;
+  });
+  expect(carried, 'and the rider goes with it').toBe(true);
+
+  // the sneak buttons (and A) mean "get out", exactly as in the big game
+  await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
+  await tap(page, 'crouch');
+  const out = await page.waitForFunction(() => {
+    const e = (window as any).__lbw.game.players[0].entity;
+    return !e.ridingCart ? { grounded: e.grounded, y: e.pos.y } : false;
+  }, null, { timeout: 10000 }).then((h) => h.jsonValue() as Promise<{ grounded: boolean; y: number }>);
+  expect(out.grounded, 'they land on their feet beside the cart').toBe(true);
+  expect(out.y, 'off the seat and back on the ground').toBeLessThan(G + 1.6);
+  const empty = await page.evaluate(() => {
+    const game = (window as any).__lbw.game;
+    return game.minecarts.cartOfRider(game.players[0].entity.id) === null;
+  });
+  expect(empty, 'the cart has no passenger now').toBe(true);
+
+  await restoreRails(page, site);
+});
+
+test('the carts a family set down come back in the morning, and the ones they took away stay away', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page);
+  const site = await prepareRails(page, [...railRun(0, 2), ...railRun(0, 2, 3)]);
+  const { x0, z0 } = site;
+
+  const laid = await page.evaluate((s: { x0: number; z0: number; G: number }) => {
+    const lbw = (window as any).__lbw;
+    lbw.layRails([
+      [s.x0, s.G + 1, s.z0, 0], [s.x0 + 1, s.G + 1, s.z0, 0], [s.x0 + 2, s.G + 1, s.z0, 1],
+      [s.x0, s.G + 1, s.z0 + 3, 0], [s.x0 + 1, s.G + 1, s.z0 + 3, 0], [s.x0 + 2, s.G + 1, s.z0 + 3, 0],
+    ]);
+    const a = lbw.spawnCart(s.x0, s.G + 1, s.z0, 0);
+    const b = lbw.spawnCart(s.x0 + 1, s.G + 1, s.z0 + 3, 1);
+    return { a, b, carts: lbw.carts().length };
+  }, site);
+  expect([laid.a, laid.b]).toEqual([true, true]);
+  expect(laid.carts, 'two carts, on two lines').toBe(2);
+
+  const saved = await page.evaluate(async (s: { x0: number; z0: number; G: number }) => {
+    const game = (window as any).__lbw.game;
+    const { sz, sy } = (window as any).__lbw.dims;
+    const key = (x: number, z: number) => String((x * sz + z) * sy + s.G + 1);
+    await game.saveNow(); // a cart is an entity: the save is written from the world's cart map
+    const save = game.world.toSave();
+    return {
+      version: save.version,
+      lineA: save.carts?.[key(s.x0, s.z0)],
+      lineB: save.carts?.[key(s.x0 + 1, s.z0 + 3)],
+    };
+  }, site);
+  expect(saved.version, 'carts are a new part of the save').toBe(6);
+  expect(saved.lineA, 'a cart remembers which way it faces (1 = dir 0)').toBe(1);
+  expect(saved.lineB, 'and the other cart remembers its own way (2 = dir 1)').toBe(2);
+
+  await page.reload();
+  await page.waitForFunction('window.__lbw !== undefined', null, { timeout: 20000 });
+  const woke = await page.evaluate((s: { x0: number; z0: number; G: number }) => {
+    return (window as any).__lbw.carts()
+      .filter((c: any) => Math.abs(c.y - (s.G + 1.14)) < 0.02)
+      .map((c: any) => ({ x: Math.floor(c.x), z: Math.floor(c.z), dir: c.dir }));
+  }, site);
+  expect(woke, 'both carts stand where the family left them, facing the same way').toEqual(
+    expect.arrayContaining([{ x: x0, z: z0, dir: 0 }, { x: x0 + 1, z: z0 + 3, dir: 1 }]));
+
+  // take one away and it stays away: a cart that was picked up leaves a marked
+  // empty cell in the save, so the server's last-write-wins merge cannot bring
+  // the old one back to life
+  const gone = await page.evaluate(async (s: { x0: number; z0: number; G: number }) => {
+    const game = (window as any).__lbw.game;
+    const { sz, sy } = (window as any).__lbw.dims;
+    const cart = game.minecarts.carts.find((c: any) => c.cz === s.z0 + 3);
+    game.minecarts.despawn(cart);
+    await game.saveNow();
+    const key = String(((s.x0 + 1) * sz + (s.z0 + 3)) * sy + s.G + 1);
+    return { tombstone: game.world.toSave().carts?.[key], left: game.minecarts.carts.length };
+  }, site);
+  expect(gone.tombstone, 'the cell it stood in is marked empty').toBe(0);
+  expect(gone.left).toBe(1);
+
+  await page.reload();
+  await page.waitForFunction('window.__lbw !== undefined', null, { timeout: 20000 });
+  const after = await page.evaluate(() => (window as any).__lbw.carts()
+    .map((c: any) => ({ x: Math.floor(c.x), z: Math.floor(c.z) })));
+  expect(after, 'only the cart that was still standing comes back').toEqual([{ x: x0, z: z0 }]);
+
+  await restoreRails(page, site);
+});
+
 test('the kids are dressed: knitted jumpers, denim legs, a faced head', async ({ page }) => {
   await boot(page);
   await joinWithPad(page);
