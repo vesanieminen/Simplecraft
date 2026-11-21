@@ -285,7 +285,11 @@ export class Minecart {
     if (grade !== 0) this.speed -= grade * SLOPE_ACCEL * dt;
     // and plain rolling friction — which is why kids line the line with red rails
     this.speed = Math.max(0, this.speed - (FRICTION + DRAG * this.speed) * dt);
-    if (this.speed < STOP_SPEED && push === 0) {
+    // A cart with nobody leaning in settles — unless gravity has hold of it.
+    // On a downhill cell the crawl it just earned is how a parked cart starts
+    // rolling, so pinching that off is what made carts sit frozen on slopes
+    // instead of running away down them.
+    if (this.speed < STOP_SPEED && push === 0 && grade >= 0) {
       this.speed = 0;
       if (grade > 0 && this.flipCool <= 0) {
         this.turnAround(); // parked facing uphill on a slope: it rolls back down
@@ -381,8 +385,11 @@ export class Minecart {
     } else {
       this.y = floor;
       this.fallV = 0;
-      // re-rail it: somebody may have laid track underneath in the meantime
-      const cell = railCellAt(world, cx, Math.floor(this.y - RAIL_HEIGHT), cz);
+      // re-rail it: somebody may have laid track underneath in the meantime.
+      // The cart lies with its wheels on the ground, which is the floor of the
+      // cell a rail in that column would occupy — so the cell it is IN is the
+      // cell to look at, not the one below it.
+      const cell = railCellAt(world, cx, Math.floor(this.y + 0.01), cz);
       if (cell) {
         this.onRails = true;
         this.cx = cx; this.cy = cell.y; this.cz = cz;
