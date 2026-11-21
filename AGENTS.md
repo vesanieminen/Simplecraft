@@ -498,6 +498,66 @@ event. Renaming a storage key orphans the family's existing saves.
   of the same frame with the row flipped — chunk remeshing is budgeted, so the
   census waits 25 frames and stays inside one `test()` (a reload would reset
   the parked clock). `scripts/shadow-shots.ts` shoots the eyeball set.
-- ⚠️ **This worktree has twice silently reverted working-tree files mid-session**
-  (game.ts, sky.ts, main.ts, tests…): commit early, commit often, and re-check
-  `git status`/`git log` after any mysterious failure.
+- Mine carts (`core/rails.ts`, `core/minecart.ts`, `render` side nothing):
+  **three ids** — `RAIL=41`, `POWERED_RAIL=42` (real voxels, non-solid/non-opaque,
+  stone sound family, atlas cells 29-32, `ATLAS_CELL_COUNT` 33) and `MINECART=43`,
+  a palette **tool** like `BUCKET` — placing one spawns an entity, it is never
+  written into the grid. **There is no per-cell rail/facing map**: the joins come
+  from the neighbouring rails (`railCellAt` → `links[4]` of
+  `LINK_NONE/FLAT/UP/DOWN`, `canPlaceRail` = something solid under, `chooseExit`,
+  `exitLevelOf`). The mesher (`addRailShape`/`addRailRamp`) and the sim read the
+  *same* function, so painted track and ridden track cannot disagree — that is
+  the invariant to protect. Slopes live in the **lower** cell; `exitLevelOf`
+  carries a flat join at `y + RAIL_HEIGHT` (the sleeper height), not the cell
+  floor, or a cart bobs at every cell edge.
+  **Carts are entities with their own THREE group** (`buildCartMesh`,
+  `group.userData.cart` for leak checks), *never* chunk geometry: chunk meshes
+  are cached per `world.revision` and a rolling cart changes no block, so a
+  meshed cart either never appears or freezes (same reason `render/sandFalls.ts`
+  exists). Cart state is cell + `s` (−0.5..0.5 through the cell) + `dir` (0..3,
+  the stairs/ladders convention) + `speed` + three levels (enter/mid/exit) —
+  straight segments plus a mid level is how a slope works with no curved
+  geometry. Traps found the hard way: the settle-to-zero clamp must **not** fire
+  when the cell's `grade < 0` (that clamp pinned a parked cart to a hillside
+  instead of letting it run away downhill); `flipCool` + `leanFlipped` so one
+  rider lean owns a turn-around (otherwise a parked cart shivers, flipping every
+  step); and the re-rail lookup is `Math.floor(this.y + 0.01)` — a derailed cart
+  lies with its wheels at the *floor of the cell a rail in that column would
+  occupy*, so look at the cell it is IN, not the one below.
+  **Riding:** `PlayerEntity.ridingCart/cartPush/seatYaw`; the riding branch of
+  `step` skips gravity/collision/footsteps and sets `cartPush = -input.moveY`
+  (stick **up** is `moveY = -1` = lean forward). Steering reads `rider.yaw`
+  through `chooseExit` — a junction with no way straight on goes the way the
+  rider looks, and with nobody aboard it is a coin toss. Sitting is a **pose**
+  (`animateAvatar(..., sitting)`, `SIT_LEGS/SIT_ARMS/SIT_SPLAY`), never a scale.
+  Board/dismount: `cartInteract` (pet button, and the sneak buttons / A while
+  riding route to it via `LocalPlayer`).
+  **Persistence:** `world.carts` (flat index → `dir + 1`, and **`0` is a
+  tombstone** so the server's last-write-wins merge cannot resurrect a cart
+  somebody picked up) — save **version 6**, mirrored in `server/index.ts`
+  (validates 0..4). Cart motion does *not* bump `world.revision`, so carts are
+  only written when `saveNow()` calls `world.syncCarts`, which re-tombstones
+  every previously-saved cell and then writes the live ones (keys accumulate
+  harmlessly, like `ladderFacing` orphans).
+  **Every world hides a railway:** terrain step 7 (`generateMine`) walks forty
+  candidate lines, keeps the **longest** and lays only that one (never half a
+  line), with a red rail every `MINE_POWERED_EVERY` (5) sleeper and **never on
+  the middle cell** — the middle is where the world's cart is parked and a red
+  one would throw it off down the line before anyone climbed in. Returns
+  `GeneratedWorld.cartSite`; that seeded cart spawns only while
+  `world.carts.size === 0` (fish-style, not an entity save). Terrain rails are
+  **not** in `world.mods` (they come back from the seed each boot).
+  **e2e lenses:** `__lbw.carts()`, `railLinks(x,y,z)`, `layRails(rows)`,
+  `placeRail`, `spawnCart`, `rideCart(playerIdx, cartIdx)`, `getOutOfCart`,
+  `atlas.rail/railCross/poweredRail/poweredRailCross`, `ids.RAIL/POWERED_RAIL/MINECART`.
+  The four courses use the `prepareRails`/`restoreRails` helpers in
+  `tests/e2e/game.spec.ts`: they hunt for a **dry** anchor (scooping a wet cell
+  near spawn sets the flow sim off inside another test's course) and restore the
+  strip **byte for byte + `saveNow()`**, because rails are blocks in `mods` and a
+  cart left rolling near spawn will shove the kids in later tests. Poll
+  `__lbw.carts()` for boosts/derails — never `waitForTimeout` (game time is ~half
+  wall clock in headless Chromium). Four tests pin `save.version === 6`.
+- ⚠️ **This worktree has silently reverted working-tree files mid-session three
+  times** (game.ts, sky.ts, main.ts, tests…, and the whole cart render pass):
+  commit early, commit often, and re-check `git status`/`git log` (and grep for
+  the symbol you just wrote) after any mysterious failure.

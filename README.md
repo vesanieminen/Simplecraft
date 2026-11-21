@@ -29,6 +29,9 @@ Creative mode, built for a 5-year-old and a parent on one couch.
   chests hidden in every world,
   slabs, saplings that grow into trees** — and planks that finally look like
   planks.
+- **🛤️ Mine carts** — lay a line of track, set a cart down, hop in and ride it.
+  Red rails throw it along, and every world hides an abandoned railway with a
+  cart standing in the middle of it (see *Mine carts* below).
 - Glowing stars to collect, bouncy blocks, musical blocks, and a world
   full of textured flowers, grass tufts, lakes, and trees.
 
@@ -252,6 +255,40 @@ New in the palette (Y / △), right next to the planks they're built from:
 And the wood shelf is complete: **logs** with bark sides and growth-ring
 ends, **planks**, and **leaves** were already in the palette — now the whole
 tree, from sapling to plank, is buildable by hand.
+
+## Mine carts 🚃
+
+Track and rides, the way the big game does them — no switches to flip and no
+power to wire up.
+
+- **🛤️ Rail** — lay a line of track anywhere there is ground under it. Each piece
+  works out its joins from the rails next door: bend the line and it bends, four
+  rails meeting make a **crossing** (drawn as a crossing, ridden as one), and a
+  rail placed one block up beside another makes a **climb** — a cart rolls up or
+  down through that one cell. Track is not solid: kids walk over it, animals
+  stroll across it, nobody trips.
+- **⚡ Powered rail** — a red rail in the line. Any cart rolling over it is
+  thrown along at a good clip, which is how a cart survives the whole length of a
+  long line. A cart *parked* on one sets off by itself.
+- **🚃 Mine cart** — a palette tool like the bucket rather than a block: aim at a
+  rail (or at the grass) and press the build trigger, and a cart is set down
+  there. Carts are saved, so the one you left at the top of the hill is still
+  there when you come back.
+- **Riding** — walk up to a cart and press **LT / L2 / E**: the kid sits down in
+  the tub. The **left stick leans the cart** — forward is the throttle, back is
+  the brake, and leaning back on a parked cart turns it round and sends it the
+  other way. At a junction the cart goes **the way the rider is looking**: look
+  down the branch you want and lean in. That is the whole steering. Get out with
+  the sneak buttons (**B / ◯ / Ctrl**) or **A**.
+- **End of the line** — a cart that runs out of track leaves the sleepers, drops
+  to the ground, rolls a little way and sits. Lay a rail under it and it is back
+  on wheels. Two carts on one line bump and catch up; a running cart shoves kids
+  and animals along (gently — nobody gets hurt).
+- **Every world hides an abandoned railway** beyond the starting meadow, laid
+  along the contours with a red rail every few sleepers and a cart standing in
+  the middle of the line. It comes out of the seed, like the treasure chests, so
+  the same world keeps the same line forever — follow the sleepers and you have a
+  ride without placing a single block.
 
 ## Treasure chests 📦
 
@@ -533,7 +570,7 @@ running out, so children learn to run clear without anyone having to tell them.
 
 ## Testing status (honest)
 
-Automated (Playwright, real Chromium, 42 tests): game loads error-free,
+Automated (Playwright, real Chromium, 71 tests): game loads error-free,
 keyboard-only join, controller join/move/jump/build/cycle, palette with
 D-pad, per-player menu + fly toggle, split-screen activation, 2×2
 four-player grid, independent movement, one player's palette not pausing
@@ -587,6 +624,18 @@ via three.js layers while every other camera keeps seeing it; the 10-row
 player menu really **fits inside a half-height stacked pane**; grown-up
 layout + sound settings come back from `lbw-settings` after a reload; and
 all **eight animal kinds** live in every meadow.
+New this round: **mine carts**. The joins a rail cell makes are read cell by
+cell — a crossing really joins on all four sides, and a climb reads LINK_UP out
+of the lower cell and LINK_DOWN back into the upper one — and the chunk mesh is
+decoded to prove the mesher painted the *matching* rail art, so the track a kid
+sees is the track a cart drives by. A cart set down on a red rail is thrown
+along, runs clean off a dead end, lands on the grass and stops, and is back on
+wheels when somebody lays track underneath it. A kid boards, leans the stick to
+get going, takes the corner they were looking at, and hops out on the sneak
+button, landing on their feet beside the cart. Carts come back across a reload
+facing the way they were left (the save is now **version 6**, which carries the
+cart map), and a cart that was taken away leaves a marked-empty cell behind so
+the server's merge cannot bring it back to life.
 
 ```bash
 npm test          # e2e suite (starts its own server on :3100)
@@ -601,7 +650,9 @@ controller. The items below are what to re-check after any input change; the
 the **door / slab / stairs / sapling** blocks, the **treasure chests** (**LT**
 opens a lid, and a boost badge appears on the HUD), the **first-person
 visibility fix**, the **Leave / Waiting Players** rows, and the **My Worlds**
-saved-game list all still owe the couch a turn. Virtual pads in the automated
+saved-game list, and the **mine carts** (🛤️ ⚡ 🚃: laying track by aiming, setting
+a cart down, boarding, leaning the stick, hopping out) all still owe the couch a
+turn. Virtual pads in the automated
 tests drive the exact same input abstraction (dead zones, edge detection,
 button mapping all shared) — a good regression net, still not a substitute for
 hardware QA.
@@ -640,6 +691,16 @@ hardware QA.
    a tree. In the **block palette**, check the D-pad really goes up/down as
    well as left/right. Check all of this on the pad, not just in the
    automated tests, and build/break a few times on both triggers.
+5d. Find the abandoned railway (or lay a line of **🛤️** yourself) and set a
+    **🚃** down on it: aiming at a rail should place the cart, aiming at thin air
+    should refuse. Walk up to it and tap **LT** — the kid climbs in. **Lean the
+    left stick forward** and the cart sets off; pull the stick back and it slows,
+    stops, and on a parked cart turns round and goes the other way. At a fork,
+    **look** down the branch you want and lean in — the cart should follow the
+    look, not the stick. Tap **B / ◯** (or **A**) and the kid hops out beside it.
+    Ride one into a sheep: the animal is shoved, nobody is hurt, the cart keeps
+    rolling. And lay a **⚡** in the line: a cart parked on it should start by
+    itself.
 6. Walk into a lake and hold **A** — you kick up to the surface, then hop out
    onto the bank instead of paddling in circles (works from the Islands sea too).
 7. Start menu → Fly ON → A rises, **LT** descends (held LT in flight is the
@@ -666,7 +727,8 @@ hardware QA.
 Implemented: a 128 × 128 × 64 voxel world (four world themes + any seed,
 picked on a screen with a live map preview), building, textured plants,
 eight kinds of animals, doors, slabs, real stairs, treasure chests with random
-treasure hidden in every world, saplings that grow into trees,
+treasure hidden in every world, saplings that grow into trees, rails and
+rideable mine carts (with an abandoned railway hidden in every world),
 stars, special blocks, audio, particles, complete controller UX,
 2–4 player split screen, per-world persistence with a saved-worlds menu, and
 remembered grown-up settings.
