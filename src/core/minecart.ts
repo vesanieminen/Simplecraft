@@ -44,6 +44,8 @@ const STOP_SPEED = 0.3;
 const GRAVITY = 24;
 /** a bump is only fun once, so each cart waits a beat between them */
 const BUMP_SECONDS = 0.7;
+/** and neither a shove nor a hill may spin a parked cart round every single step */
+const FLIP_COOLDOWN = 0.9;
 /** how long one roll of the rumble lasts while a cart is running */
 const ROLL_SECONDS = 0.34;
 /** how high the rider sits above the cart's own floor */
@@ -186,6 +188,10 @@ export class Minecart {
   /** no clunk, no second shove: the manager reads and sets these */
   bumpCool = 0;
   rollCool = 0;
+  /** a cart that has just been turned round does not turn again until asked to */
+  private flipCool = 0;
+  /** how long the rider has been leaning backwards (it owns the turn) */
+  private leanFlipped = false;
   private bob = 0;
 
   constructor(world: World, cx: number, cy: number, cz: number, dir = 0) {
@@ -243,6 +249,7 @@ export class Minecart {
    */
   step(world: World, dt: number, mgr: MinecartManager): void {
     this.bumpCool = Math.max(0, this.bumpCool - dt);
+    this.flipCool = Math.max(0, this.flipCool - dt);
     if (!this.onRails) {
       this.stepOffRail(world, dt);
       return;
@@ -257,14 +264,21 @@ export class Minecart {
     }
 
     // ---- what pushes on it ----
+    // The stick leans the cart: forward goes the way the seat faces, back turns
+    // it round (the seat turns with it, so the kid is always leaning the way
+    // they travel) and goes the other way. The lean stays in charge until the
+    // stick comes back, which is what stops a parked cart shivering on a hill.
     const push = this.rider ? Math.max(-1, Math.min(1, this.rider.cartPush)) : 0;
-    if (push < 0 && this.speed < STOP_SPEED) this.turnAround(); // leaning back: set off the other way
+    if (push > -0.2) this.leanFlipped = false;
     if (push !== 0) {
-      this.speed += push * RIDER_PUSH * dt;
-      if (this.speed < 0) {
+      if (push < 0 && !this.leanFlipped && this.flipCool <= 0) {
         this.turnAround();
-        this.speed = Math.min(-this.speed, 2.2); // it lurches the other way, it does not grind
+        this.flipCool = FLIP_COOLDOWN;
+        this.leanFlipped = true;
       }
+      const drive = push > 0 || this.leanFlipped;
+      if (drive) this.speed += Math.abs(push) * RIDER_PUSH * dt;
+      else this.speed = Math.max(0, this.speed - Math.abs(push) * RIDER_PUSH * dt);
     }
     // gravity along the slope of the cell it is crossing
     const grade = this.exitLevel - this.enterLevel;
@@ -273,7 +287,10 @@ export class Minecart {
     this.speed = Math.max(0, this.speed - (FRICTION + DRAG * this.speed) * dt);
     if (this.speed < STOP_SPEED && push === 0) {
       this.speed = 0;
-      if (grade > 0) this.turnAround(); // parked facing uphill on a slope: it rolls back down
+      if (grade > 0 && this.flipCool <= 0) {
+        this.turnAround(); // parked facing uphill on a slope: it rolls back down
+        this.flipCool = FLIP_COOLDOWN;
+      }
     }
     if (this.speed > CART_MAX_SPEED) this.speed = CART_MAX_SPEED;
 

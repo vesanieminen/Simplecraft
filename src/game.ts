@@ -1395,16 +1395,17 @@ export class Game {
 
   /**
    * Which cart this kid is aiming at, if any — closer than the block behind it,
-   * so pointing at a cart in front of a wall still picks the cart.
+   * so pointing at a cart in front of a wall still picks the cart. `atFeet`
+   * adds the generous version for the pet button: a kid pointing at the floor
+   * right where they stand means "this one, here". The break button never uses
+   * it — you break the block you are looking at, not somebody's cart behind you.
    */
-  private cartAtAim(lp: LocalPlayer, hit: RayHit | null): Minecart | null {
+  private cartAtAim(lp: LocalPlayer, hit: RayHit | null, atFeet = false): Minecart | null {
     const head = new THREE.Vector3(lp.entity.pos.x, lp.entity.pos.y + lp.entity.headHeight, lp.entity.pos.z);
     const dir = lp.aimDir();
     const cart = this.minecarts.pickAim(head, dir, hit ? Math.max(1.2, hit.dist) : 4.6);
     if (cart) return cart;
-    // a cart at their feet counts too: kids point at the floor when they mean
-    // "this one, right here"
-    return this.minecarts.near(lp.entity.pos.x, lp.entity.pos.y + 0.6, lp.entity.pos.z, 1.5);
+    return atFeet ? this.minecarts.near(lp.entity.pos.x, lp.entity.pos.y + 0.6, lp.entity.pos.z, 1.5) : null;
   }
 
   /** 🚃 Set a cart down: it needs a rail (or at least level ground) under it */
@@ -1450,12 +1451,27 @@ export class Game {
       if (who) this.ui.toast(`${who.entity.name} is already in that cart!`, 1600);
       return true;
     }
-    // the kid sits where the cart's floor is, a little above it
+    return this.boardCart(lp, cart);
+  }
+
+  /**
+   * Hop in: the kid sits on the cart's floor, a little above it, and from here
+   * the cart carries them (PlayerEntity stops walking, swimming and falling
+   * while `ridingCart` is set).
+   */
+  private boardCart(lp: LocalPlayer, cart: Minecart): boolean {
+    const e = lp.entity;
+    if (e.ridingCart || cart.rider) return false;
     e.ridingCart = true;
     e.crouching = false;
+    e.flying = false;
     e.vel.set(0, 0, 0);
     e.pos.set(cart.x, cart.y + CART_RIDE_SEAT, cart.z);
-    if (!this.minecarts.board(cart, e)) e.ridingCart = false;
+    e.seatYaw = cart.dir === 0 ? Math.PI / 2 : cart.dir === 1 ? -Math.PI / 2 : cart.dir === 3 ? Math.PI : 0;
+    if (!this.minecarts.board(cart, e)) {
+      e.ridingCart = false;
+      return false;
+    }
     return true;
   }
 
@@ -1671,6 +1687,37 @@ export class Game {
    * Drive the bucket from the console (tests): pad aim adds too much noise for
    * a deterministic flood, so this hands the bucket action the exact aim cell.
    */
+  /**
+   * Lay one rail from the test console, through the same rule the build button
+   * uses: it needs something solid under it. Reports whether it went down.
+   */
+  placeRailForTest(x: number, y: number, z: number, powered = false): boolean {
+    if (!canPlaceRail(this.world, x, y, z)) return false;
+    this.world.set(x, y, z, powered ? POWERED_RAIL : RAIL);
+    this.audio.place(soundFamilyOf(RAIL));
+    return true;
+  }
+
+  /** set a cart down from the test console (the 🚃 tool, without the aim noise) */
+  spawnCartForTest(x: number, y: number, z: number, dir = 0): boolean {
+    return this.minecarts.spawn(x, y, z, dir) !== null;
+  }
+
+  /** hop a kid into cart number `n` (the pet button, without the aim noise) */
+  boardCartForTest(playerIdx: number, cartIdx = 0): boolean {
+    const lp = this.players[playerIdx];
+    const cart = this.minecarts.carts[cartIdx];
+    return !!lp && !!cart && this.boardCart(lp, cart);
+  }
+
+  /** hop out again (the sneak buttons / A while riding) */
+  dismountForTest(playerIdx: number): boolean {
+    const lp = this.players[playerIdx];
+    if (!lp || !lp.entity.ridingCart) return false;
+    this.dismountCart(lp);
+    return true;
+  }
+
   railLinksForTest(x: number, y: number, z: number): number[] | null {
     return railCellAt(this.world, x, y, z)?.links ?? null;
   }

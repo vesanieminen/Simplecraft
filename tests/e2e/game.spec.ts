@@ -1418,7 +1418,7 @@ test('water flows: a dug channel floods from the source, reaches exactly seven, 
     const { sz, sy } = (window as any).__lbw.dims;
     return { version: save.version, at: String((arg.x3 * sz + arg.fz) * sy + arg.gy), levels: save.waterLevels ?? {} };
   }, { x3: fx + 3, fz, gy });
-  expect(saved.version).toBe(5);
+  expect(saved.version).toBe(6);
   expect(saved.levels[saved.at]).toBe(1);
 
   // break the chain at the source: levels climb, then the whole flood drains away
@@ -3006,7 +3006,7 @@ test('a ladder: walk into it, hold jump to climb up, sneak to climb down, get on
       facing: (save.ladderFacing ?? {})[String((s.x * sz + s.z) * sy + s.G + 2)] ?? -1,
     };
   }, site);
-  expect(saved.version).toBe(5);
+  expect(saved.version).toBe(6);
   expect(saved.facing, 'a ladder remembers its wall').toBe(3);
 
   // and a reload brings the ladder back, nailed to the same wall
@@ -3282,7 +3282,7 @@ test('doors: two blocks high and half a block deep — build, pat open, walk thr
       swingTop: save.doorFacing?.[at(1)],
     };
   }, door2);
-  expect(saved.version).toBe(5);
+  expect(saved.version).toBe(6);
   expect(saved.bottom).toBe(ids.DOOR);
   expect(saved.top).toBe(ids.DOOR_TOP);
   expect(saved.swingBottom === 0 || saved.swingBottom === 1).toBe(true);
@@ -3555,7 +3555,7 @@ test('stairs: a real step — it points away from the builder, walking one climb
       })),
     };
   }, { run: [0, 1, 2, 3].map((k) => ({ x: step.x + k, y: step.y + k, z: step.z })) });
-  expect(after.version).toBe(5);
+  expect(after.version).toBe(6);
   for (const s of after.run) {
     expect(s.block).toBe(ids.STAIRS);
     expect([0, STAIR_TURN[0]]).toContain(s.facing);

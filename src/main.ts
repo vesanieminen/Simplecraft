@@ -36,6 +36,10 @@ async function boot(): Promise<void> {
       carts: () => { x: number; y: number; z: number; dir: number; speed: number; onRails: boolean; riderId: number }[];
       railLinks: (x: number, y: number, z: number) => number[] | null;
       layRails: (rows: [number, number, number, number][]) => void;
+      placeRail: (x: number, y: number, z: number, powered?: boolean) => boolean;
+      spawnCart: (x: number, y: number, z: number, dir?: number) => boolean;
+      rideCart: (playerIdx: number, cartIdx?: number) => boolean;
+      getOutOfCart: (playerIdx: number) => boolean;
       waterSurfaceAt: (x: number, y: number, z: number) => number;
       /** is this wet cell caught mid-fall (a waterfall's stream), not settled? */
       waterFallingAt: (x: number, y: number, z: number) => boolean;
@@ -79,6 +83,17 @@ async function boot(): Promise<void> {
       (window as unknown as { __lbw: { game: Game } }).__lbw.game.railLinksForTest(x, y, z),
     layRails: (rows: [number, number, number, number][]) =>
       (window as unknown as { __lbw: { game: Game } }).__lbw.game.layRailsForTest(rows),
+    /** lay one rail through the build button's own rule (it needs ground) */
+    placeRail: (x: number, y: number, z: number, powered?: boolean) =>
+      (window as unknown as { __lbw: { game: Game } }).__lbw.game.placeRailForTest(x, y, z, !!powered),
+    /** set a cart down, the way the 🚃 tool does */
+    spawnCart: (x: number, y: number, z: number, dir?: number) =>
+      (window as unknown as { __lbw: { game: Game } }).__lbw.game.spawnCartForTest(x, y, z, dir ?? 0),
+    /** hop in / hop out (the pet button, and the sneak buttons while riding) */
+    rideCart: (playerIdx: number, cartIdx?: number) =>
+      (window as unknown as { __lbw: { game: Game } }).__lbw.game.boardCartForTest(playerIdx, cartIdx ?? 0),
+    getOutOfCart: (playerIdx: number) =>
+      (window as unknown as { __lbw: { game: Game } }).__lbw.game.dismountForTest(playerIdx),
     /** how tall water draws in a cell: 1 full, or the height of a shallow flow */
     waterSurfaceAt: (x: number, y: number, z: number) =>
       waterSurfaceHeight((window as unknown as { __lbw: { game: Game } }).__lbw.game.world, x, y, z),

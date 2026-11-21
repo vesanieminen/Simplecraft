@@ -338,6 +338,9 @@ function generateMine(
     }
     if (line.length < 10) continue; // not a railway, just a few sleepers
     const mid = line[Math.floor(line.length / 2)];
+    // the cart the world keeps is parked on an ordinary sleeper: a red one
+    // would throw it off down the line before anybody had a chance to climb in
+    data[(mid[0] * WORLD_SZ + mid[2]) * WORLD_SY + mid[1]] = RAIL;
     return mid;
   }
   void world;

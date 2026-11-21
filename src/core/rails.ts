@@ -144,7 +144,16 @@ export function isSlopeCell(cell: RailCell, dir: number): boolean {
   return cell.links[dir] === LINK_UP || cell.links[BACK[dir]] === LINK_UP;
 }
 
-/** the height a cart's wheels are at on leaving this cell in `dir` */
+/**
+ * The height a cart's wheels are at on leaving this cell in `dir`. A flat join
+ * carries the floor straight on; an ascending one climbs to the top of the cell
+ * (that is where the next cell's floor begins); a descending one drops to the
+ * bottom of the cell — the slope itself lives in the cell below, and the cart
+ * rides down through it.
+ */
 export function exitLevelOf(cell: RailCell, dir: number): number {
-  return cell.y + (cell.links[dir] === LINK_UP ? 1 : 0);
+  const link = cell.links[dir];
+  if (link === LINK_UP) return cell.y + 1;
+  if (link === LINK_DOWN) return cell.y;
+  return cell.y + RAIL_HEIGHT;
 }
