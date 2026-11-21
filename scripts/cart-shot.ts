@@ -98,9 +98,7 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(1200);
 await page.evaluate(() => {
-  (window as any).__pad.setMove(0, 0);
-  const s = (window as any).__site;
-  void s;
+  (window as any).__pad.setMove(0, 0); // let it settle, then sit in on the still
   (window as any).__followCart = { i: 0, dx: -2.6, dy: 1.9, dz: -2.6 };
 });
 await page.waitForFunction(() => {
