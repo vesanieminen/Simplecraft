@@ -557,6 +557,11 @@ event. Renaming a storage key orphans the family's existing saves.
   cart left rolling near spawn will shove the kids in later tests. Poll
   `__lbw.carts()` for boosts/derails — never `waitForTimeout` (game time is ~half
   wall clock in headless Chromium). Four tests pin `save.version === 6`.
+  `scripts/cart-shot.ts` shoots the eyeball set (the line with a crossing, climb
+  and red rail; a kid sitting in a cart; one derailed in the grass) — the look
+  lives in `buildCartMesh`/`CART_SEAT`/`SIT_*`, and a solid rim plate turns the
+  tub into a lid, while a seat above the tub's floor puts the legs through its
+  end wall (both happened; both are what the shots are for).
 - ⚠️ **This worktree has silently reverted working-tree files mid-session three
   times** (game.ts, sky.ts, main.ts, tests…, and the whole cart render pass):
   commit early, commit often, and re-check `git status`/`git log` (and grep for

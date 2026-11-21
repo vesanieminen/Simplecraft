@@ -258,6 +258,8 @@ tree, from sapling to plank, is buildable by hand.
 
 ## Mine carts 🚃
 
+![A line of track through the meadow: a crossing, a red rail, and a climb onto the shoulder](docs/screenshots/carts.jpg)
+
 Track and rides, the way the big game does them — no switches to flip and no
 power to wire up.
 
@@ -284,6 +286,8 @@ power to wire up.
   to the ground, rolls a little way and sits. Lay a rail under it and it is back
   on wheels. Two carts on one line bump and catch up; a running cart shoves kids
   and animals along (gently — nobody gets hurt).
+![A kid leaning into the cart: the stick is the throttle, and the corner goes the way they are looking](docs/screenshots/carts-riding.jpg)
+
 - **Every world hides an abandoned railway** beyond the starting meadow, laid
   along the contours with a red rail every few sleepers and a cart standing in
   the middle of the line. It comes out of the seed, like the treasure chests, so

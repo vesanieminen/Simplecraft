@@ -38,10 +38,12 @@ await page.evaluate(() => {
   const p = game.players[0];
   const cx = Math.round(p.entity.pos.x), cz = Math.round(p.entity.pos.z);
   const G = S.surfaceY(cx, cz);
+  // a corridor rather than a plaza: the rails and their shoulder get a level
+  // floor and clear air, and the meadow around them stays the meadow
   for (let x = cx - 4; x <= cx + 12; x++) {
-    for (let z = cz - 4; z <= cz + 4; z++) {
-      for (let y = G - 2; y <= G + 6; y++) S.set(x, y, z, AIR);
-      S.set(x, G, z, STONE);
+    for (let z = cz - 3; z <= cz + 3; z++) {
+      for (let y = G + 1; y <= G + 8; y++) S.set(x, y, z, AIR);
+      if (Math.abs(z - cz) <= 1) S.set(x, G, z, STONE);
     }
   }
   game.minecarts.clear(); // one cart in the picture: whatever an earlier shoot left behind
