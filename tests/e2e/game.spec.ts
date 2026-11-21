@@ -3310,16 +3310,28 @@ test('a kid climbs in, leans the stick to ride it, takes the corner they are loo
   expect(rolled.speed, 'leaning into it gets a cart going').toBeGreaterThan(2);
 
   // at a junction with no way straight on, the cart goes the way the rider looks
-  const turned = await page.waitForFunction((arg: { x0: number; z0: number }) => {
-    const c = (window as any).__lbw.carts()[0];
+  const turned = await page.waitForFunction((arg: { x0: number; z0: number; G: number }) => {
+    const lbw = (window as any).__lbw;
+    const c = lbw.carts()[0];
     if (!c) return false;
     // it went down the branch it was looking at...
     if (c.dir === 2 && c.z > arg.z0 + 1 && c.onRails) return { turned: true, dir: c.dir, z: +c.z.toFixed(2) };
-    // ...or it ran on past the junction cell, which is the failure worth naming
-    if (c.x > arg.x0 + 4.4) return { turned: false, dir: c.dir, x: +c.x.toFixed(2), z: +c.z.toFixed(2) };
+    // ...or it has left the junction cell (x0+3..x0+4) still heading +x, which
+    // is the failure worth naming: the junction's joins say whether the rail it
+    // should have turned into was really there. Waiting for the cell to be
+    // behind it matters — the junction is decided at the middle of the cell, so
+    // a cart caught there is a cart that has not turned yet.
+    if (c.dir !== 2 && c.x > arg.x0 + 4.05) {
+      const links = lbw.railLinks(arg.x0 + 3, arg.G + 1, arg.z0);
+      return {
+        turned: false, dir: c.dir, x: +c.x.toFixed(2), z: +c.z.toFixed(2), links,
+      };
+    }
     return false;
-  }, { x0, z0 }, { timeout: 12000 }).then((h) => h.jsonValue() as Promise<Record<string, unknown>>);
-  expect(turned.turned, `the corner followed their look (dir ${turned.dir} at z ${turned.z})`).toBe(true);
+  }, { x0, z0, G }, { timeout: 12000 }).then(
+    (h) => h.jsonValue() as Promise<{ turned: boolean; dir: number; x?: number; z?: number; links?: number[] }>,
+  );
+  expect(turned.turned, `the corner followed their look (dir ${turned.dir} at ${turned.x},${turned.z}, junction joins ${JSON.stringify(turned.links)})`).toBe(true);
 
   const carried = await page.evaluate(() => {
     const e = (window as any).__lbw.game.players[0].entity;

@@ -231,6 +231,20 @@ export class Minecart {
     return this.speed > 0.4;
   }
 
+  /**
+   * Which way the cart leaves its cell, settled once per cell at its middle.
+   * Cheap to call again from the move loop — a cart carried over the middle by a
+   * coarse frame must still take the corner before it leaves the cell.
+   */
+  private decideJunction(world: World, cell: RailCell): void {
+    if (this.decided || this.s < 0) return;
+    this.decided = true;
+    const go = chooseExit(cell, this.dir, this.rider ? this.rider.yaw : null, Math.random);
+    // go < 0 is a dead end: keep going and see what happens (that is the fun part)
+    if (go >= 0) this.setDir(world, go, cell);
+    this.exitLevel = exitLevelOf(cell, this.dir);
+  }
+
   /** point the cart a new way, keeping the ground it has already covered */
   private setDir(world: World, d: number, cell: RailCell): void {
     if (d < 0 || d > 3 || d === this.dir) return;
@@ -307,13 +321,7 @@ export class Minecart {
     if (this.speed > CART_MAX_SPEED) this.speed = CART_MAX_SPEED;
 
     // ---- the junction, taken at the middle of the cell ----
-    if (!this.decided && this.s >= 0) {
-      this.decided = true;
-      const go = chooseExit(cell, this.dir, this.rider ? this.rider.yaw : null, Math.random);
-      // go < 0 is a dead end: keep going and see what happens (that is the fun part)
-      if (go >= 0) this.setDir(world, go, cell);
-      this.exitLevel = exitLevelOf(cell, this.dir);
-    }
+    this.decideJunction(world, cell);
 
     // ---- the red rail: any cart that rolls over gets thrown along ----
     if (cell.powered && this.speed < CART_BOOST_SPEED) {
@@ -322,7 +330,7 @@ export class Minecart {
     }
 
     // ---- another cart sitting in the cell ahead: catch up and follow it ----
-    const [dx, dz] = DIRS[this.dir];
+    let [dx, dz] = DIRS[this.dir];
     const ahead = mgr.cartIn(this.cx + dx, this.cy + (cell.links[this.dir] === LINK_UP ? 1 : 0), this.cz + dz, this);
     if (ahead && this.speed > ahead.speed) {
       this.speed = ahead.speed;
@@ -332,6 +340,13 @@ export class Minecart {
     // ---- move ----
     this.s += this.speed * dt;
     while (this.s >= 0.5) {
+      // Settle the junction before leaving the cell. With `dt` capped at 0.05 a
+      // cart can't cross the middle and the far side in one step, so today this
+      // only ever repeats a decision already made — it is here for whoever
+      // raises CART_MAX_SPEED or the cap and would otherwise ship a cart that
+      // barrels straight off the end of a line at a corner.
+      this.decideJunction(world, cell);
+      [dx, dz] = DIRS[this.dir];
       const link = cell.links[this.dir];
       cell = railCellAt(world,
         this.cx + dx,

@@ -517,7 +517,17 @@ event. Renaming a storage key orphans the family's existing saves.
   exists). Cart state is cell + `s` (−0.5..0.5 through the cell) + `dir` (0..3,
   the stairs/ladders convention) + `speed` + three levels (enter/mid/exit) —
   straight segments plus a mid level is how a slope works with no curved
-  geometry. Traps found the hard way: the settle-to-zero clamp must **not** fire
+  geometry. The junction is settled by `decideJunction` at the **middle** of each
+  cell (`decided` latches per cell), and it is settled again from inside the move
+  loop before the cart leaves the cell — with `dt` capped at 0.05 a cart can never
+  cross a cell middle and its far side in one step (`CART_MAX_SPEED` × 0.05 =
+  0.42), so that second call is defence for whoever raises the speed or the cap
+  later. **An e2e must not call a cart "missed the corner" until it is past the
+  junction cell** (`x > x0 + 4` for a junction at `x0 + 3`), not past its middle:
+  the middle is exactly where a cart that has not turned *yet* is standing, and
+  sampling there is the race that made the riding course fail half the time (the
+  decision lands in the following step).
+  Traps found the hard way: the settle-to-zero clamp must **not** fire
   when the cell's `grade < 0` (that clamp pinned a parked cart to a hillside
   instead of letting it run away downhill); `flipCool` + `leanFlipped` so one
   rider lean owns a turn-around (otherwise a parked cart shivers, flipping every
@@ -553,7 +563,13 @@ event. Renaming a storage key orphans the family's existing saves.
   The four courses use the `prepareRails`/`restoreRails` helpers in
   `tests/e2e/game.spec.ts`: they hunt for a **dry** anchor (scooping a wet cell
   near spawn sets the flow sim off inside another test's course) and restore the
-  strip **byte for byte + `saveNow()`**, because rails are blocks in `mods` and a
+  strip **byte for byte + `saveNow()`** — including the extra cell of a **raised**
+  track: `prepareRails` takes a second `high` list of columns (a climb's rails
+  sit at `G+2`, so those columns are cleared, and handed back, one taller —
+  without it the climb leaves its rails behind in the meadow for every later
+  course). Prep is only `G..G+1` where it can be: a cart never collides with the
+  block above it, and every extra `set` is a chunk remesh and a shadow re-bake in
+  CI's software GL. Because rails are blocks in `mods` and a
   cart left rolling near spawn will shove the kids in later tests. Poll
   `__lbw.carts()` for boosts/derails — never `waitForTimeout` (game time is ~half
   wall clock in headless Chromium). Four tests pin `save.version === 6`.
