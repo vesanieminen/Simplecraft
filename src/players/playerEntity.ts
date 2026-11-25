@@ -72,6 +72,16 @@ export class PlayerEntity {
   swimmingNow = false;
   /** true while holding on to a ladder (gravity off; jump climbs, sneak descends) */
   climbingNow = false;
+  /**
+   * true while sitting in a mine cart (core/minecart.ts). The cart drives: no
+   * gravity, no walking, no jump — the stick leans the cart and the look
+   * steers it at corners. The cart manager moves the kid every frame.
+   */
+  ridingCart = false;
+  /** -1..1: how hard a riding kid leans into it (stick forward = go) */
+  cartPush = 0;
+  /** which way the cart's seat faces (the kid turns with it at corners) */
+  seatYaw = 0;
   /** Minecraft-style sneak: squat hitbox, slow creep, ledge protection */
   crouching = false;
   walkPhase = 0;
@@ -200,6 +210,18 @@ export class PlayerEntity {
     const feetOnLadder = isLadderBlock(world.get(
       Math.floor(this.pos.x), Math.floor(this.pos.y), Math.floor(this.pos.z),
     ));
+    // A cart outranks everything: a kid in one is not walking, swimming or
+    // climbing, and their position and velocity belong to the cart.
+    const riding = this.ridingCart;
+    if (riding) {
+      this.swimmingNow = false;
+      this.climbingNow = false;
+      this.crouching = false;
+      this.flying = false;
+      this.cartPush = Math.max(-1, Math.min(1, -input.moveY)); // stick up = lean in
+    } else {
+      this.cartPush = 0;
+    }
 
     // horizontal target velocity in yaw space.
     // forward F = (sin yaw, 0, cos yaw) matches the avatar facing (+Z at yaw 0).
@@ -208,16 +230,28 @@ export class PlayerEntity {
     const fwd = -input.moveY; // stick up (-1) means forward
     const fx = sin * fwd - cos * input.moveX;
     const fz = cos * fwd + sin * input.moveX;
-    const speed = (this.flying ? FLY_SPEED : swimming ? WALK_SPEED * 0.7
-      : this.crouching ? WALK_SPEED * CROUCH_MUL : WALK_SPEED)
-      * (this.zoomTime > 0 ? ZOOM_MUL : 1);
-    const tvx = fx * speed, tvz = fz * speed;
-    const accel = 1 - Math.exp(-(this.grounded || this.flying ? 14 : 6) * dt);
-    this.vel.x += (tvx - this.vel.x) * accel;
-    this.vel.z += (tvz - this.vel.z) * accel;
-    this.moving = Math.hypot(this.vel.x, this.vel.z) > 0.6;
+    if (riding) {
+      // the cart owns the velocity: the cart manager set it a moment ago, and
+      // leaning is the only steering a rider gets
+      this.moving = Math.hypot(this.vel.x, this.vel.z) > 0.6;
+      this.grounded = true; // the seat holds them up
+    } else {
+      const speed = (this.flying ? FLY_SPEED : swimming ? WALK_SPEED * 0.7
+        : this.crouching ? WALK_SPEED * CROUCH_MUL : WALK_SPEED)
+        * (this.zoomTime > 0 ? ZOOM_MUL : 1);
+      const tvx = fx * speed, tvz = fz * speed;
+      const accel = 1 - Math.exp(-(this.grounded || this.flying ? 14 : 6) * dt);
+      this.vel.x += (tvx - this.vel.x) * accel;
+      this.vel.z += (tvz - this.vel.z) * accel;
+      this.moving = Math.hypot(this.vel.x, this.vel.z) > 0.6;
+    }
 
-    if (this.flying) {
+    if (riding) {
+      // nothing to integrate: the cart carries them, and the cart has already
+      // moved this frame. Leaning is the throttle (see Minecart.step).
+      this.jumpBuffer = 0;
+      this.coyote = 0;
+    } else if (this.flying) {
       this.crouching = false; // no sneaking mid-flight, thanks
       let vy = 0;
       if (input.jump || input.flyUp) vy += FLY_VERT;
@@ -290,72 +324,84 @@ export class PlayerEntity {
       }
     }
 
-    const box = this.aabb;
-    const preX = box.x, preZ = box.z;
-    const wasGrounded = this.grounded;
-    const res: MoveResult = moveAabb(world, box, this.vel.x, this.vel.y, this.vel.z, dt);
-    // sneak edge protection (Minecraft): a crouched kid never walks off a
-    // ledge — if the step would leave their feet unsupported, undo it
-    if (this.crouching && !this.flying && wasGrounded && !groundedTest(world, box)) {
-      box.x = preX;
-      box.z = preZ;
-      res.vx = 0;
-      res.vz = 0;
-    }
-    this.pos.set(box.x + box.w / 2, box.y, box.z + box.d / 2);
-    this.vel.set(res.vx, res.vy, res.vz);
-    this.grounded = res.hitGround || groundedTest(world, box);
-
-    // Top of the ladder: the last bit of a climb is swinging over the ledge.
-    // Climb up into a ladder cell that has a solid block beside it the kid can
-    // stand on, and they come up onto it — no extra button, keep climbing.
-    if (climbing && input.jump) this.mantelOntoLedge(world);
-
-    // keep inside world bounds (invisible walls)
-    this.pos.x = Math.max(0.35, Math.min(WORLD_SX - 0.35, this.pos.x));
-    this.pos.z = Math.max(0.35, Math.min(WORLD_SZ - 0.35, this.pos.z));
-    if (this.pos.y < -4) { // safety net
-      this.pos.copy(this.spawn);
-      this.vel.set(0, 0, 0);
-    }
-    if (this.pos.y > WORLD_SY + 8) {
-      this.pos.y = WORLD_SY + 8;
-      this.vel.y = Math.min(this.vel.y, 0);
-    }
-
-    // special blocks under feet
-    if (this.grounded) {
-      const bx = Math.floor(this.pos.x);
-      const by = Math.floor(this.pos.y - 0.1);
-      const bz = Math.floor(this.pos.z);
-      const def = blockDef(world.get(bx, by, bz));
-      if (def.bounce && res.hitGround) {
-        events.bounced = def.bounce;
-        this.flying = false;
-      } else if (def.note !== undefined) {
-        events.steppedOnMusic = { note: def.note, x: bx, y: by, z: bz };
+    if (riding) {
+      // the cart holds them: no gravity, no collision step, no landing or
+      // splash to report — just the world's invisible walls, in case a line of
+      // track runs up against the edge of the map
+      this.pos.x = Math.max(0.35, Math.min(WORLD_SX - 0.35, this.pos.x));
+      this.pos.z = Math.max(0.35, Math.min(WORLD_SZ - 0.35, this.pos.z));
+      this.wasInAir = false;
+      this.wasInWater = false;
+    } else {
+      const box = this.aabb;
+      const preX = box.x, preZ = box.z;
+      const wasGrounded = this.grounded;
+      const res: MoveResult = moveAabb(world, box, this.vel.x, this.vel.y, this.vel.z, dt);
+      // sneak edge protection (Minecraft): a crouched kid never walks off a
+      // ledge — if the step would leave their feet unsupported, undo it
+      if (this.crouching && !this.flying && wasGrounded && !groundedTest(world, box)) {
+        box.x = preX;
+        box.z = preZ;
+        res.vx = 0;
+        res.vz = 0;
       }
-      if (def.sparkle) events.steppedOnSparkle = true;
-      // a sparkle block anywhere nearby is fine; handled in placement
-    }
+      this.pos.set(box.x + box.w / 2, box.y, box.z + box.d / 2);
+      this.vel.set(res.vx, res.vy, res.vz);
+      this.grounded = res.hitGround || groundedTest(world, box);
 
-    if (events.bounced) {
-      this.vel.y = events.bounced;
-      this.grounded = false;
-    }
+      // Top of the ladder: the last bit of a climb is swinging over the ledge.
+      // Climb up into a ladder cell that has a solid block beside it the kid can
+      // stand on, and they come up onto it — no extra button, keep climbing.
+      if (climbing && input.jump) this.mantelOntoLedge(world);
 
-    // landing event
-    if (res.hitGround && this.wasInAir && !events.bounced) {
-      events.landed = true;
-      events.landedOn = world.get(Math.floor(this.pos.x), Math.floor(this.pos.y - 0.1), Math.floor(this.pos.z));
-    }
-    this.wasInAir = !this.grounded;
+      // keep inside world bounds (invisible walls)
+      this.pos.x = Math.max(0.35, Math.min(WORLD_SX - 0.35, this.pos.x));
+      this.pos.z = Math.max(0.35, Math.min(WORLD_SZ - 0.35, this.pos.z));
+      if (this.pos.y < -4) { // safety net
+        this.pos.copy(this.spawn);
+        this.vel.set(0, 0, 0);
+      }
+      if (this.pos.y > WORLD_SY + 8) {
+        this.pos.y = WORLD_SY + 8;
+        this.vel.y = Math.min(this.vel.y, 0);
+      }
 
-    // water splash
-    if (this.inWaterNow && !this.wasInWater) events.splashed = true;
-    this.wasInWater = this.inWaterNow;
+      // special blocks under feet
+      if (this.grounded) {
+        const bx = Math.floor(this.pos.x);
+        const by = Math.floor(this.pos.y - 0.1);
+        const bz = Math.floor(this.pos.z);
+        const def = blockDef(world.get(bx, by, bz));
+        if (def.bounce && res.hitGround) {
+          events.bounced = def.bounce;
+          this.flying = false;
+        } else if (def.note !== undefined) {
+          events.steppedOnMusic = { note: def.note, x: bx, y: by, z: bz };
+        }
+        if (def.sparkle) events.steppedOnSparkle = true;
+        // a sparkle block anywhere nearby is fine; handled in placement
+      }
 
-    if (this.moving && this.grounded) {
+      if (events.bounced) {
+        this.vel.y = events.bounced;
+        this.grounded = false;
+      }
+
+      // landing event
+      if (res.hitGround && this.wasInAir && !events.bounced) {
+        events.landed = true;
+        events.landedOn = world.get(Math.floor(this.pos.x), Math.floor(this.pos.y - 0.1), Math.floor(this.pos.z));
+      }
+      this.wasInAir = !this.grounded;
+
+      // water splash
+      if (this.inWaterNow && !this.wasInWater) events.splashed = true;
+      this.wasInWater = this.inWaterNow;    }
+
+    if (riding) {
+      this.walkPhase += dt * 2.4; // a slow sway in the seat, and no footsteps
+      this.footDist = 1.2;
+    } else if (this.moving && this.grounded) {
       this.walkPhase += dt * 9.5;
       // footsteps: one per stride, with the material under the foot
       this.footDist += Math.hypot(this.vel.x, this.vel.z) * dt;
@@ -375,7 +421,7 @@ export class PlayerEntity {
     const climbAnim = climbing && !swimming;
     animateAvatar(
       this.avatar, this.walkPhase, (this.moving && this.grounded) || (climbAnim && Math.abs(this.vel.y) > 0.2),
-      !this.grounded && !swimming && !climbing, dt, this.crouching, swimming, climbAnim,
+      !this.grounded && !swimming && !climbing, dt, this.crouching, swimming, climbAnim, riding,
     );
     this.syncAvatar(dt);
   }
@@ -383,7 +429,16 @@ export class PlayerEntity {
   syncAvatar(dt: number): void {
     const g = this.avatar.group;
     g.position.copy(this.pos);
-    g.rotation.y = this.yaw;
+    if (this.ridingCart) {
+      // in a cart the body faces down the line, whatever way the kid is looking
+      // (their own look still steers the cart at corners)
+      let diff = this.seatYaw - g.rotation.y;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      g.rotation.y += diff * (dt > 0 ? 1 - Math.exp(-10 * dt) : 1);
+    } else {
+      g.rotation.y = this.yaw;
+    }
     // face down in the water while swimming, upright again out of it
     const lean = this.swimmingNow ? 1.2 : 0;
     g.rotation.x += (lean - g.rotation.x) * (1 - Math.exp(-9 * dt));

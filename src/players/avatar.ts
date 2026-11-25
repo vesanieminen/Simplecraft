@@ -241,6 +241,19 @@ export const CROUCH_SWING = 0.24;
 /** the creep's weight: the body dips a hair on each stride's bottom */
 export const CROUCH_BOB = 0.03;
 
+/**
+ * Sitting in a mine cart (core/minecart.ts). Same no-knees problem as the
+ * crouch, so it is three angles again: the thighs angle down into the tub
+ * (`SIT_LEGS`, negative swings a down-pointing limb forward), the torso stays
+ * upright on its hips, and the hands rest forward over the rim. The seat height
+ * itself comes from the cart, never from the pose. Legs level in front was the
+ * first try and it drove the feet clean through the cart's end wall — a kid in a
+ * tub has their feet *down* in it.
+ */
+export const SIT_LEGS = -0.55;
+export const SIT_ARMS = -1.15;
+export const SIT_SPLAY = 0.16;
+
 /** small box helper for costume bits; parented so it rides the body/arm motion */
 function costumeBox(
   parent: THREE.Object3D, w: number, h: number, d: number,
@@ -470,6 +483,7 @@ export function animateAvatar(
   crouching = false,
   swimming = false,
   climbing = false,
+  sitting = false,
 ): void {
   const target = moving ? Math.sin(walkPhase) : Math.sin(walkPhase) * 0.15;
   let armA = airborne ? 1.1 : target * 0.85;
@@ -497,6 +511,15 @@ export function animateAvatar(
     armR = -2.3 - s * 0.7;
     legL = -0.15 - s * 0.5;
     legR = -0.15 + s * 0.5;
+  } else if (sitting) {
+    // In a cart: knees up in front, back straight, hands on the rim. The cart
+    // turns the whole body with the seat (see PlayerEntity.syncAvatar), so the
+    // pose itself never leans.
+    const s = moving ? Math.sin(walkPhase) * 0.05 : 0; // the rattle of the ride
+    legL = SIT_LEGS + s;
+    legR = SIT_LEGS - s;
+    armL = SIT_ARMS + s;
+    armR = SIT_ARMS - s;
   } else if (folded) {
     // How the big game sells a sneak, adapted to a rig with no knees: `body`
     // pivots at the feet, so tipping it forward plants the feet, lifts the
@@ -525,7 +548,7 @@ export function animateAvatar(
   // z-roll of the arms: flung out while falling, tucked in for the breaststroke,
   // braced a touch out to the sides when sneaking (same sign convention as the
   // fall) — enough to read as balance, not enough to look like a scarecrow
-  const elbowZ = airborne ? -0.5 : swimming ? 0.35 : folded ? -0.12 : climbing ? 0.12 : 0;
+  const elbowZ = airborne ? -0.5 : swimming ? 0.35 : folded ? -0.12 : climbing ? 0.12 : sitting ? SIT_SPLAY : 0;
   parts.leftArm.rotation.z = elbowZ;
   parts.rightArm.rotation.z = -elbowZ;
 

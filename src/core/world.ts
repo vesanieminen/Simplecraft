@@ -18,6 +18,9 @@ export function idx(x: number, y: number, z: number): number {
   return (x * WORLD_SZ + z) * WORLD_SY + y;
 }
 
+/** the save format this build writes; the server pins the same number */
+export const SAVE_VERSION = 6;
+
 export interface WorldSaveData {
   version: number;
   seed: number;
@@ -50,6 +53,13 @@ export interface WorldSaveData {
    * climbing side faces (see core/blocks.ts LadderFacing). Added in version 5.
    */
   ladderFacing?: Record<string, number>;
+  /**
+   * Which way each mine cart is facing on the track: flat index -> direction
+   * + 1 (see core/rails.ts DIRS). Added in version 6. A cart that has been
+   * picked up leaves a 0 behind on purpose: the server merge is per key and
+   * last-write-wins, so the 0 is what stops an old cart coming back.
+   */
+  carts?: Record<string, number>;
   /** wall-clock ms of the last write, for the "My Worlds" last-played list */
   savedAt?: number;
 }
@@ -80,6 +90,11 @@ export class World {
   readonly ladderFacing = new Map<number, number>();
   /** flat index -> flow depth of a WATER_FLOW cell (0 deep … 6 nearly puddle) */
   readonly waterLevel = new Map<number, number>();
+  /**
+   * flat index -> which way a mine cart is facing, stored as direction + 1 so
+   * that 0 can mean "this cart was picked up" (see WorldSaveData.carts).
+   */
+  readonly carts = new Map<number, number>();
   /** bumped on every change so listeners (autosave) can debounce */
   revision = 0;
 
@@ -100,6 +115,7 @@ export class World {
     this.stairFacing.clear();
     this.ladderFacing.clear();
     this.waterLevel.clear();
+    this.carts.clear();
     this.revision++;
   }
 
@@ -204,6 +220,22 @@ export class World {
     this.touchAt(x, z);
   }
 
+  /**
+   * Rewrites the saved cart map from the carts standing in the world right now.
+   * Whatever was saved before is written as 0 ("gone") first, because the
+   * server merge is last-write-wins and cannot delete: without that, a cart
+   * that rolled on, or that a kid picked up, would be waiting for them exactly
+   * where it used to be.
+   */
+  syncCarts(live: Iterable<{ x: number; y: number; z: number; dir: number }>): void {
+    for (const i of this.carts.keys()) this.carts.set(i, 0);
+    for (const c of live) {
+      const i = idx(c.x, c.y, c.z);
+      if (i < 0 || i >= this.data.length) continue;
+      this.carts.set(i, Math.max(0, Math.min(3, Math.trunc(c.dir))) + 1);
+    }
+  }
+
   isSolid(x: number, y: number, z: number): boolean {
     return isSolidBlock(this.get(Math.floor(x), Math.floor(y), Math.floor(z)));
   }
@@ -260,6 +292,14 @@ export class World {
         }
       }
     }
+    if (save.carts) {
+      for (const [k, v] of Object.entries(save.carts)) {
+        const i = Number(k);
+        if (Number.isInteger(i) && i >= 0 && i < this.data.length && v >= 0 && v <= 4) {
+          this.carts.set(i, v); // 0 stays 0: it is a grave marker, not a cart
+        }
+      }
+    }
     this.markAllDirty();
   }
 
@@ -274,8 +314,10 @@ export class World {
     for (const [i, v] of this.waterLevel) waterLevels[String(i)] = v;
     const ladderFacing: Record<string, number> = {};
     for (const [i, v] of this.ladderFacing) ladderFacing[String(i)] = v;
+    const carts: Record<string, number> = {};
+    for (const [i, v] of this.carts) carts[String(i)] = v;
     return {
-      version: 5,
+      version: SAVE_VERSION,
       seed: this.seed,
       theme: this.theme,
       mods,
@@ -284,6 +326,7 @@ export class World {
       stairFacing,
       waterLevels,
       ladderFacing,
+      carts,
     };
   }
 }

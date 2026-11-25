@@ -3,7 +3,7 @@
  * player's split-screen pane. Scales with pane size.
  */
 
-import { blockDef, isBucket } from '../core/blocks';
+import { blockDef, isBucket, isCartTool } from '../core/blocks';
 import { ControllerType } from '../input/types';
 import { LocalPlayer } from '../players/localPlayer';
 
@@ -87,8 +87,10 @@ export class Hud {
   }
 
   update(player: LocalPlayer): void {
-    // the bucket's name tells the whole story: empty, or carrying a spring
-    const carrying = isBucket(player.selected) ? (player.bucketFull ? 'Bucket — full 💧' : 'Bucket — empty') : '';
+    // the bucket's name tells the whole story: empty, or carrying a spring.
+    // The cart's says where it has to go: on a rail.
+    const carrying = isBucket(player.selected) ? (player.bucketFull ? 'Bucket — full 💧' : 'Bucket — empty')
+      : isCartTool(player.selected) ? 'Mine cart — set it on a rail 🛤️' : '';
     if (player.selected !== this.lastBlock || carrying !== this.lastCarrying) {
       this.lastBlock = player.selected;
       this.lastCarrying = carrying;

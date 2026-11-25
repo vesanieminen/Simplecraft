@@ -7,11 +7,14 @@
 import * as THREE from 'three';
 import {
   ATLAS_CHEST_INSIDE, ATLAS_CHEST_LID, ATLAS_CHEST_OPEN_TOP, ATLAS_CELL_COUNT, ATLAS_DOOR, ATLAS_LADDER, ATLAS_PLANKS,
+  ATLAS_POWERED_RAIL, ATLAS_POWERED_RAIL_CROSS, ATLAS_RAIL, ATLAS_RAIL_CROSS,
   BlockId, blockDef,
   CHEST_INSET, CHEST_OPEN, chestOpenBoxes, isChestBlock, isCrossBlock, isDoorBlock,
-  isDoorClosedBlock, isFullCellBlock, isLadderBlock, isOpaqueBlock, isStairsBlock, isTranslucentBlock, isWaterId,
-  LadderFacing, ladderBoxes, PLANT_ATLAS_CELLS, SAND, StairFacing, stairBoxes, VoxelBox,
+  isDoorClosedBlock, isFullCellBlock, isLadderBlock, isOpaqueBlock, isPoweredRail, isRailBlock, isStairsBlock,
+  isTranslucentBlock, isWaterId, LadderFacing, ladderBoxes, PLANT_ATLAS_CELLS, RAIL_HEIGHT, SAND, StairFacing,
+  stairBoxes, VoxelBox,
 } from './blocks';
+import { LINK_NONE, LINK_UP, railCellAt } from './rails';
 import { CHUNK, idx as worldIdx, WORLD_SY, World } from './world';
 import { waterSurfaceHeight } from './water';
 
@@ -236,6 +239,13 @@ export function buildChunkGeometry(
             { cullFlush: true });
           continue;
         }
+        if (isRailBlock(id)) {
+          // Track: a thin plate on the cell floor, painted with sleepers and
+          // steel. Which way it runs — and whether it crosses itself or climbs
+          // a block — comes from the rails next door, not from anything saved.
+          addRailShape(tex, world, x, y, z, id);
+          continue;
+        }
 
         const sideCell = def.sideAtlasCell;
         const isTextured = sideCell !== undefined;
@@ -407,17 +417,26 @@ const ATLAS_CELLS = ATLAS_CELL_COUNT; // from core/blocks.ts, shared with the at
  * whole cell across the square.
  */
 function faceUvs(
-  fi: number, sideCell: number, topCell: number, bottomCell: number,
+  fi: number, sideCell: number, topCell: number, bottomCell: number, transpose = false,
 ): [number, number][] {
   const pad = 0.5 / 32; // half-pixel inset to avoid atlas bleed
   const v0 = pad, v1 = 1 - pad;
   const cell = fi === 2 ? topCell : fi === 3 ? bottomCell : sideCell;
   const u0 = (cell + pad) / ATLAS_CELLS;
   const u1 = (cell + 1 - pad) / ATLAS_CELLS;
+  // swapping the two axes *inside the cell* turns the artwork a quarter turn,
+  // which is how a rail that runs north-south gets the same sleepers as one
+  // running east-west. (The swap has to happen in cell-local space: the block
+  // atlas is a horizontal strip, so raw u and v are not interchangeable.)
+  const flip = (uv: [number, number][]): [number, number][] => {
+    if (!transpose) return uv;
+    const su = u1 - u0, sv = v1 - v0;
+    return uv.map(([u, v]) => [u0 + ((v - v0) / sv) * su, v0 + ((u - u0) / su) * sv] as [number, number]);
+  };
   if (fi === 2 || fi === 3) {
-    return [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
+    return flip([[u0, v0], [u1, v0], [u1, v1], [u0, v1]]);
   }
-  return [[u0, v0], [u0, v1], [u1, v1], [u1, v0]];
+  return flip([[u0, v0], [u0, v1], [u1, v1], [u1, v0]]);
 }
 
 /**
@@ -502,6 +521,94 @@ function addStairShape(
   // the upper part keeps its `away` face: that is the riser of the step
   addTexturedSubBox(g, world, [x, y, z], [tx0, mid, tz0, tx1, tall[4], tz1], sideCell,
     { cullFlush: true, skip: faceSkip(FACE_NY) });
+}
+
+/**
+ * One rail cell: a thin plate of sleepers and steel lying on the cell floor —
+ * or the same plate tilted up a whole block where the line climbs. Which way it
+ * runs, whether it crosses itself and whether it slopes all come from the
+ * rails next door (core/rails.ts), which is the same reading a cart drives by,
+ * so a drawn corner and a ridden corner can never disagree.
+ */
+function addRailShape(g: GeomBuilder, world: World, x: number, y: number, z: number, id: BlockId): void {
+  const cell = railCellAt(world, x, y, z);
+  if (!cell) return;
+  let upDir = -1;
+  let runsX = false, runsZ = false;
+  for (let d = 0; d < 4; d++) {
+    if (cell.links[d] === LINK_NONE) continue;
+    if (d <= 1) runsX = true; else runsZ = true;
+    if (cell.links[d] === LINK_UP) upDir = d;
+  }
+  const powered = isPoweredRail(id);
+  const crossing = runsX && runsZ;
+  const art = powered
+    ? (crossing ? ATLAS_POWERED_RAIL_CROSS : ATLAS_POWERED_RAIL)
+    : (crossing ? ATLAS_RAIL_CROSS : ATLAS_RAIL);
+  if (upDir >= 0) {
+    addRailRamp(g, x, y, z, upDir, art);
+    return;
+  }
+  // a line that only runs north-south: turn the same artwork a quarter turn
+  addTexturedSubBox(g, world, [x, y, z], [x, y, z, x + 1, y + RAIL_HEIGHT, z + 1], art,
+    { cullFlush: true, transposeUv: !runsX && runsZ });
+}
+
+/**
+ * The climbing rail: the plate starts on the cell floor at one end and ends
+ * level with the cell's ceiling at the other, so a cart rolling through the
+ * cell rises exactly as far as the track says it does. A wedge, drawn as five
+ * quads: the running surface, the two long sides, and the two ends.
+ */
+function addRailRamp(g: GeomBuilder, x: number, y: number, z: number, dir: number, art: number): void {
+  const riseX = dir === 0 || dir === 1;
+  const vary = 1 + (hashByte(x, y, z) - 0.5) * 0.07;
+  const hLo = y + RAIL_HEIGHT, hHi = y + 1;
+  // how high the plate stands at any point of the cell: 0 at the low edge,
+  // a whole block at the edge the line climbs toward
+  const hi = (px: number, pz: number): number => {
+    const t = dir === 0 ? px - x : dir === 1 ? x + 1 - px : dir === 2 ? pz - z : z + 1 - pz;
+    return hLo + t * (hHi - hLo);
+  };
+  // the four corners of the cell, in the same order the top face is wound
+  const A: [number, number] = [x, z], B: [number, number] = [x + 1, z];
+  const C: [number, number] = [x + 1, z + 1], D: [number, number] = [x, z + 1];
+  const top = (p: [number, number]): [number, number, number] => [p[0], hi(p[0], p[1]), p[1]];
+  const bottom = (p: [number, number]): [number, number, number] => [p[0], y, p[1]];
+  const uv = (p: [number, number]): [number, number] =>
+    riseX ? [p[0] - x, p[1] - z] : [p[1] - z, p[0] - x];
+
+  // the running surface, tilted with the rise: its normal leans back downhill
+  const slope = 1 - RAIL_HEIGHT;
+  const nx = dir === 0 ? -slope : dir === 1 ? slope : 0;
+  const nz = dir === 2 ? -slope : dir === 3 ? slope : 0;
+  const nl = Math.hypot(nx, 1, nz);
+  const shadeTop = FACE_SHADE[FACE_PY] * vary;
+  const tintTop = (): [number, number, number][] => [0, 1, 2, 3].map(() => [shadeTop, shadeTop, shadeTop]) as [number, number, number][];
+  g.quad(top(D), top(C), top(B), top(A), [nx / nl, 1 / nl, nz / nl], tintTop(),
+    [uv(D), uv(C), uv(B), uv(A)].map(([u, v]) => atlasUvInCell(art, u, v)));
+
+  // the four sides: trapezoids standing on the cell floor
+  const side = (fi: number, p: [number, number], q: [number, number]): void => {
+    const f = FACES[fi];
+    const dim = FACE_SHADE[fi] * vary;
+    const tint = [0, 1, 2, 3].map(() => [dim, dim, dim]) as [number, number, number][];
+    g.quad(bottom(p), top(p), top(q), bottom(q), f.dir, tint,
+      [atlasUvInCell(art, 0, 0), atlasUvInCell(art, 0, 1), atlasUvInCell(art, 1, 1), atlasUvInCell(art, 1, 0)]);
+  };
+  side(FACE_PX, B, C);
+  side(FACE_NX, D, A);
+  side(FACE_PZ, C, D);
+  side(FACE_NZ, A, B);
+}
+
+/** one point inside one atlas cell, in that cell's own 0..1 art space */
+function atlasUvInCell(cell: number, u: number, v: number): [number, number] {
+  const pad = 0.5 / 32;
+  return [
+    (cell + pad + u * (1 - 2 * pad)) / ATLAS_CELLS,
+    pad + v * (1 - 2 * pad),
+  ];
 }
 
 /**
@@ -655,7 +762,7 @@ function addTexturedSubBox(
   cell: [number, number, number],
   box: VoxelBox,
   sideCell: number,
-  opts: { cullFlush?: boolean; capCell?: number; bottomCell?: number; skip?: boolean[] } = {},
+  opts: { cullFlush?: boolean; capCell?: number; bottomCell?: number; skip?: boolean[]; transposeUv?: boolean } = {},
 ): void {
   const [cx, cy, cz] = cell;
   const [x0, y0, z0, x1, y1, z1] = box;
@@ -681,7 +788,8 @@ function addTexturedSubBox(
     const pts = f.corners.map(([ax, ay, az]) => [
       ax ? x1 : x0, ay ? y1 : y0, az ? z1 : z0,
     ] as [number, number, number]);
-    g.quad(pts[0], pts[1], pts[2], pts[3], f.dir, tint, faceUvs(fi, sideCell, capCell, bottomCell));
+    g.quad(pts[0], pts[1], pts[2], pts[3], f.dir, tint,
+      faceUvs(fi, sideCell, capCell, bottomCell, opts.transposeUv ?? false));
   }
 }
 

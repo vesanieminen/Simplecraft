@@ -238,6 +238,67 @@ export class AudioKit {
     this.tone('sine', 190, 240, 0.14, 0.045);
   }
 
+  // ------------------------------------------------------------ mine carts
+
+  /** a cart being set down on the track: iron clonking onto the sleepers */
+  cartSet(): void {
+    this.log('cart:place');
+    this.noise(0.06, 0.12, 2400, 0, 'bandpass');
+    this.tone('square', 260, 180, 0.08, 0.07);
+    this.tone('sine', 130, 90, 0.14, 0.1, 0.02);
+  }
+
+  /** a cart taken back off the track: it comes apart with a rattle */
+  cartBreak(): void {
+    this.log('cart:remove');
+    for (let i = 0; i < 3; i++) this.noise(0.03, 0.1, 1800 + i * 700, i * 0.05, 'bandpass');
+    this.tone('square', 210, 120, 0.12, 0.06);
+  }
+
+  /** hopping in: a scuff and the tub taking the weight */
+  cartBoard(): void {
+    this.log('cart:board');
+    this.noise(0.05, 0.07, 900);
+    this.tone('square', 190, 150, 0.09, 0.05);
+  }
+
+  /** hopping out: a shove-off scuff and the tub rocking back */
+  cartExit(): void {
+    this.log('cart:exit');
+    this.noise(0.05, 0.06, 1000);
+    this.tone('square', 170, 230, 0.1, 0.05);
+  }
+
+  /** the powered rail's shove: a whump and a rising whine as it picks up speed */
+  cartBoost(): void {
+    this.log('cart:boost');
+    this.noise(0.16, 0.1, 1400, 0, 'bandpass');
+    this.tone('sawtooth', 180, 520, 0.3, 0.07);
+  }
+
+  /** iron on iron: the clunk of one cart meeting another, or a wall */
+  cartBump(): void {
+    this.log('cart:bump');
+    this.noise(0.05, 0.16, 3200, 0, 'bandpass');
+    this.tone('square', 330, 210, 0.09, 0.1);
+    this.tone('sine', 150, 100, 0.16, 0.12, 0.01);
+  }
+
+  /** the rumble of the wheels along the line, one sample per beat (0..1 speed) */
+  cartRoll(intensity: number): void {
+    this.log(`cart:roll:${Math.round(intensity * 100) / 100}`);
+    this.noise(0.2, 0.03 + 0.05 * intensity, 700 + 900 * intensity, 0, 'bandpass');
+    this.tone('sine', 70 + 40 * intensity, 60 + 30 * intensity, 0.18, 0.02 + 0.03 * intensity);
+  }
+
+  /** a runaway cart ran into somebody: the clang, and the horn they deserve */
+  cartCrash(): void {
+    this.log('cart:crash');
+    this.noise(0.08, 0.2, 2600, 0, 'bandpass');
+    this.tone('square', 420, 300, 0.16, 0.12);
+    this.tone('triangle', 660, 620, 0.5, 0.12, 0.08);
+  }
+
   // ------------------------------------------------------------- fishing
 
   /** the cast: the line whizzes out through the air */
