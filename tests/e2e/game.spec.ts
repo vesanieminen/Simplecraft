@@ -3263,7 +3263,9 @@ test('a cart rolls the line: red rails throw it along, a dead end spills it onto
 test('a kid climbs in, leans the stick to ride it, takes the corner they are looking at, and hops out', async ({ page }) => {
   await boot(page);
   await joinWithPad(page);
-  const site = await prepareRails(page, [...railRun(0, 3), [3, 1], [3, 2], [3, -1]]);
+  // the two columns behind the cart are cleared too: that is where the kid
+  // stands to reach for it with the pet key, as the 🚃 toast tells them to
+  const site = await prepareRails(page, [...railRun(-2, 3), [3, 1], [3, 2], [3, -1]]);
   const { x0, z0, G } = site;
 
   const ready = await page.evaluate((s: { x0: number; z0: number; G: number }) => {
@@ -3283,8 +3285,27 @@ test('a kid climbs in, leans the stick to ride it, takes the corner they are loo
   expect(ready.placed, 'the cart is sitting on the track').toBe(true);
   expect(ready.drawn, 'the cart is drawn as its own rig').toBe(1);
 
-  const boarded = await page.evaluate(() => (window as any).__lbw.rideCart(0, 0));
-  expect(boarded, 'the pet button drops them in').toBe(true);
+  // The way the family does it: stand in front of the cart, look at it, press
+  // the pet key. Two cells back on purpose — far enough that only an aim that
+  // really found the cart can board it, and nothing else in the hook (a door, a
+  // chest, water, a wandering sheep) would explain the kid being in the tub.
+  // This is the button the 🚃 toast promises, not a test lens reaching into the
+  // cart manager — which is exactly how the broken version passed for a day.
+  await page.evaluate((s: { x0: number; z0: number; G: number }) => {
+    const game = (window as any).__lbw.game;
+    const e = game.players[0].entity;
+    const c = game.minecarts.carts[0];
+    e.pos.set(s.x0 - 1.5, s.G + 1, s.z0 + 0.5); // two cells back along the line
+    e.vel.set(0, 0, 0);
+    // aim the crosshair at the tub's middle, the way a kid pointing at it does —
+    // computed off the real head height and rail height rather than a guess
+    const dx = c.x - e.pos.x, dz = c.z - e.pos.z;
+    e.yaw = Math.atan2(dx, dz);
+    e.pitch = Math.atan2((c.y + 0.35) - (e.pos.y + e.headHeight), Math.hypot(dx, dz));
+  }, site);
+  await frames(page, 4);
+  await tap(page, 'interact');
+  await page.waitForFunction(() => (window as any).__lbw.game.players[0].entity.ridingCart === true, null, { timeout: 8000 });
   const seated = await page.evaluate(() => {
     const e = (window as any).__lbw.game.players[0].entity;
     const c = (window as any).__lbw.carts()[0];
@@ -3343,11 +3364,13 @@ test('a kid climbs in, leans the stick to ride it, takes the corner they are loo
   // the sneak buttons (and A) mean "get out", exactly as in the big game
   await page.evaluate(() => (window as any).__testPad.setMove(0, 0));
   await tap(page, 'crouch');
+  // wait for them to be OUT *and* back on their feet: getting off puts them
+  // down at the seat's height, so for a frame or two they are legitimately
+  // falling, and asserting the instant `ridingCart` clears is a coin toss
   const out = await page.waitForFunction(() => {
     const e = (window as any).__lbw.game.players[0].entity;
-    return !e.ridingCart ? { grounded: e.grounded, y: e.pos.y } : false;
-  }, null, { timeout: 10000 }).then((h) => h.jsonValue() as Promise<{ grounded: boolean; y: number }>);
-  expect(out.grounded, 'they land on their feet beside the cart').toBe(true);
+    return !e.ridingCart && e.grounded ? { y: e.pos.y } : false;
+  }, null, { timeout: 10000 }).then((h) => h.jsonValue() as Promise<{ y: number }>);
   expect(out.y, 'off the seat and back on the ground').toBeLessThan(G + 1.6);
   const empty = await page.evaluate(() => {
     const game = (window as any).__lbw.game;
@@ -3358,6 +3381,38 @@ test('a kid climbs in, leans the stick to ride it, takes the corner they are loo
   await restoreRails(page, site);
 });
 
+test('a cart parked beside a kid boards on the pet key, even unseen', async ({ page }) => {
+  await boot(page);
+  await joinWithPad(page);
+  // the line, plus the cell beside it the kid stands on — prepareRails gives both
+  // back afterwards, so nothing is left in the meadow
+  const site = await prepareRails(page, [...railRun(0, 1), [0, 1]]);
+
+  await page.evaluate((s: { x0: number; z0: number; G: number }) => {
+    const lbw = (window as any).__lbw;
+    lbw.layRails([[s.x0, s.G + 1, s.z0, 0], [s.x0 + 1, s.G + 1, s.z0, 0]]);
+    lbw.spawnCart(s.x0, s.G + 1, s.z0, 0);
+    const e = lbw.game.players[0].entity;
+    e.pos.set(s.x0 + 0.5, s.G + 1, s.z0 + 1.5); // the cleared cell beside the cart
+    e.vel.set(0, 0, 0);
+    e.pitch = 1.1; // straight at the sky: the cart is nowhere near the crosshair
+  }, site);
+  await frames(page, 6);
+
+  // the promise the 🚃 toast makes — "stand beside it and press the pet button to
+  // ride" — for a kid who cannot work out why nothing was happening
+  await tap(page, 'interact');
+  const seated = await page.waitForFunction(() => {
+    const game = (window as any).__lbw.game;
+    const c = game.minecarts.carts[0];
+    const e = game.players[0].entity;
+    return e.ridingCart && c.rider ? { on: c.onRails, still: c.speed === 0 } : false;
+  }, null, { timeout: 8000 }).then((h) => h.jsonValue() as Promise<{ on: boolean; still: boolean }>);
+  expect(seated.on, 'they are sitting in the cart on the track').toBe(true);
+  expect(seated.still, 'and it stays parked until they lean into it').toBe(true);
+
+  await restoreRails(page, site);
+});
 test('the carts a family set down come back in the morning, and the ones they took away stay away', async ({ page }) => {
   await boot(page);
   await joinWithPad(page);

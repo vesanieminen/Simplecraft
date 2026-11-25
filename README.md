@@ -277,7 +277,9 @@ power to wire up.
   there. Carts are saved, so the one you left at the top of the hill is still
   there when you come back.
 - **Riding** — walk up to a cart and press **LT / L2 / E**: the kid sits down in
-  the tub. The **left stick leans the cart** — forward is the throttle, back is
+  the tub. Aim at it and the button works from a few cells away; stand beside it
+  and it works without even looking (that is what the 🚃 toast promises). The
+  **left stick leans the cart** — forward is the throttle, back is
   the brake, and leaning back on a parked cart turns it round and sends it the
   other way. At a junction the cart goes **the way the rider is looking**: look
   down the branch you want and lean in. That is the whole steering. Get out with

@@ -25,10 +25,17 @@ event. Renaming a storage key orphans the family's existing saves.
   3. **Push the branch and open the PR early** (as soon as the first real
      commit exists) so CI starts working right away; add commits as work
      continues — CI reruns on every push. Watch with `gh pr checks --watch`.
-  CI is the full-suite runner; local runs are for quick feedback loops.
+  CI is the full-suite runner; local runs are for quick feedback loops. Re-stated
+  2026-11-25: **CI takes the brunt of the testing** — locally run at most the one
+  or two tests you are changing (a repeated multi-course local loop, e.g. all
+  four cart courses, is exactly what CI's four shards exist to avoid), then push
+  and read `gh pr checks`.
 - Push the branch and open/update the PR with `gh pr create` / `gh pr push`
   style flows (`gh pr create --head <branch>`), then report the PR URL.
-- Merging is the human's call — do not merge or squash-merge unless asked.
+- **Merge the PR yourself as soon as CI is green** (merge commit, delete the
+  branch, sync local `main`) — standing instruction 2026-11-25: the human tests
+  the change live on Pages, which only deploys `main`, so a green PR left open
+  is a change they cannot try. Report the PR URL and how to pull.
 - GitHub Pages deploys from `main` only (`.github/workflows/deploy.yml`), so a
   PR branch is testable without touching the live site. To let the human try a
   branch on Pages, ask first (an ad-hoc Pages preview can be added).
@@ -541,7 +548,18 @@ event. Renaming a storage key orphans the family's existing saves.
   rider looks, and with nobody aboard it is a coin toss. Sitting is a **pose**
   (`animateAvatar(..., sitting)`, `SIT_LEGS/SIT_ARMS/SIT_SPLAY`), never a scale.
   Board/dismount: `cartInteract` (pet button, and the sneak buttons / A while
-  riding route to it via `LocalPlayer`).
+  riding route to it via `LocalPlayer`). **Boarding lives in the interact hook**
+  (Nov 2025 bug: it only had the "get out" branch, so the pet key did nothing and
+  the toast lied). It asks `cartAtAim` twice — the strict aim (before doors,
+  chests, steps, ladders and the fishing cast, because a cart on the crosshair is
+  what the kid is pointing at) and the generous `atFeet` version (radius 1.5)
+  just **before** the pet: both are proximity checks, but a pet is reachable from
+  a step away while a cart only boards from beside it. `cartInteract` then takes
+  the cart it was called for (`board`) — re-running the strict aim inside it is
+  what silently dropped the cart at the kid's feet that the generous check had
+  just found. And the riding course boards with `tap('interact')`, never
+  `__lbw.rideCart`: the lens calls the cart manager directly, which is exactly how
+  the dead button passed for a day.
   **Persistence:** `world.carts` (flat index → `dir + 1`, and **`0` is a
   tombstone** so the server's last-write-wins merge cannot resurrect a cart
   somebody picked up) — save **version 6**, mirrored in `server/index.ts`

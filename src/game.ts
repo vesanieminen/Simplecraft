@@ -1305,7 +1305,13 @@ export class Game {
             if (this.bucketAction(lp, hit)) return true;
           }
         }
-        // doors and chests come first: the pet button is the family's "do
+        // A cart on the aim is the thing you are pointing at, so it comes before
+        // the blocks behind it: the pet button drops you into the tub. (The
+        // generous "one at my feet" version comes later, so a door, chest, step
+        // or the water the kid was clearly aiming at still wins.)
+        const aimed = this.cartAtAim(lp, lp.target);
+        if (aimed) return this.cartInteract(lp, aimed);
+        // doors and chests come next: the pet button is the family's "do
         // something nice" button, and a door or a treasure chest straight ahead
         // is more pressing than an animal. Aimed at a step, it spins it around.
         const aim = lp.removeTarget;
@@ -1332,6 +1338,13 @@ export class Game {
           this.fishing.cast(lp.entity.id, this.angler(lp), water.x, water.y, water.z);
           return true;
         }
+        // A cart parked where the kid is standing is then "this one, here" —
+        // which is exactly what the 🚃 toast promises ("stand beside it and press
+        // the pet button to ride"). It is checked before the pet on purpose: both
+        // are proximity checks, but a pet is reachable from a step away while a
+        // cart is only boardable beside it, and the aim checks above still win.
+        const atFoot = this.cartAtAim(lp, lp.target, true);
+        if (atFoot) return this.cartInteract(lp, atFoot);
         // Only a real pet counts: if nothing nearby wanted a scratch, LT is
         // just the build trigger and the block goes down (see LocalPlayer).
         return this.animals.petNearest(lp.entity.pos.x, lp.entity.pos.y + 0.8, lp.entity.pos.z, 2.4) !== null;
@@ -1438,13 +1451,16 @@ export class Game {
    * kid already riding gets out instead (the crouch buttons do the same, as in
    * the big game).
    */
-  private cartInteract(lp: LocalPlayer): boolean {
+  private cartInteract(lp: LocalPlayer, board?: Minecart | null): boolean {
     const e = lp.entity;
     if (e.ridingCart) {
       this.dismountCart(lp);
       return true;
     }
-    const cart = this.cartAtAim(lp, lp.target);
+    // the cart the caller already found (`board`), or a fresh look down the
+    // crosshair — re-looking with the strict aim here is what used to throw away
+    // the cart at the kid's feet that the generous check had just found
+    const cart = board !== undefined ? board : this.cartAtAim(lp, lp.target);
     if (!cart) return false;
     if (cart.rider) {
       const who = this.players.find((p) => p.entity.id === cart.rider?.id);
