@@ -549,7 +549,7 @@ event. Renaming a storage key orphans the family's existing saves.
   (`animateAvatar(..., sitting)`, `SIT_LEGS/SIT_ARMS/SIT_SPLAY`), never a scale.
   Board/dismount: `cartInteract` (pet button, and the sneak buttons / A while
   riding route to it via `LocalPlayer`). **Boarding lives in the interact hook**
-  (Nov 2025 bug: it only had the "get out" branch, so the pet key did nothing and
+  (Nov 2026 bug: it only had the "get out" branch, so the pet key did nothing and
   the toast lied). It asks `cartAtAim` twice — the strict aim (before doors,
   chests, steps, ladders and the fishing cast, because a cart on the crosshair is
   what the kid is pointing at) and the generous `atFeet` version (radius 1.5)
